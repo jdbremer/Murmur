@@ -29,8 +29,14 @@ export interface HotkeyIntents {
   begin(): void
   /** Finish the current utterance (push-to-talk up, or toggle-off). */
   end(): void
-  /** Latch hands-free mode. */
+  /** Latch hands-free mode (or unlatch it — the intent is a toggle). */
   toggleHandsFree(): void
+  /**
+   * Is hands-free currently latched? PLAN §2.1's exit gesture is "tap again":
+   * a quick tap while latched must stop hands-free rather than fire an empty
+   * begin/end pair.
+   */
+  isHandsFree?(): boolean
 }
 
 export interface HotkeyBridgeOptions {
@@ -50,10 +56,20 @@ export class HotkeyBridge {
   #running = false
   #downAt: number | null = null
   #lastDownAt: number | null = null
+  /** Whether the previous press ended as a quick tap (for tap-then-tap). */
+  #lastPressWasTap = false
   /** Toggle mode only: whether a toggle-on is currently active. */
   #toggled = false
   /** Set when a double-tap latched, so the following `up` does not stop it. */
   #latched = false
+  /**
+   * While a *physical* hold is live, polls the HID system for the key's true
+   * state. Event delivery can lose the up edge — the OS disables a slow tap,
+   * another app's active tap swallows the event — and a lost up used to mean
+   * the dictation never stopped. Never armed for synthetic edges: the HID
+   * system rightly says "not held" for a key nobody pressed.
+   */
+  #watchdog: NodeJS.Timeout | null = null
 
   constructor(options: HotkeyBridgeOptions) {
     this.#native = options.native
@@ -115,8 +131,10 @@ export class HotkeyBridge {
       }
     }
     this.#running = false
+    this.#stopWatchdog()
     this.#downAt = null
     this.#lastDownAt = null
+    this.#lastPressWasTap = false
     this.#toggled = false
     this.#latched = false
   }
@@ -139,6 +157,7 @@ export class HotkeyBridge {
 
     switch (event.type) {
       case 'doubleTap': {
+        this.#stopWatchdog()
         if (config?.doubleTapHandsFree === false) return
         this.#latched = true
         this.#downAt = null
@@ -147,13 +166,22 @@ export class HotkeyBridge {
       }
 
       case 'down': {
+        // A repeated down while already held is auto-repeat or delivery noise,
+        // never a new press — counting it as one is how a single long hold
+        // used to read as a double-tap.
+        if (activation === 'hold' && this.#downAt !== null) return
+
         // Fallback double-tap detection for taps the native layer did not
-        // classify itself.
+        // classify itself. Tap-then-tap only: the previous press must have
+        // *ended*, quickly — a long dictation hold followed by a fast new
+        // press is two intents, not one gesture.
         const previous = this.#lastDownAt
+        const previousWasTap = this.#lastPressWasTap
         this.#lastDownAt = now
         if (
           config?.doubleTapHandsFree !== false &&
           previous !== null &&
+          previousWasTap &&
           now - previous <= HOTKEY.doubleTapMs
         ) {
           this.#latched = true
@@ -172,14 +200,18 @@ export class HotkeyBridge {
         this.#latched = false
         this.#downAt = now
         this.#intents.begin()
+        if (event.synthetic !== true) this.#armWatchdog()
         return
       }
 
       case 'up': {
+        this.#stopWatchdog()
         if (activation === 'toggle') return
 
         const downAt = this.#downAt
         this.#downAt = null
+        const heldMs = downAt !== null ? now - downAt : null
+        this.#lastPressWasTap = heldMs !== null && heldMs <= HOTKEY.tapMaxMs
 
         // A double-tap latched hands-free; the trailing `up` must not end it.
         if (this.#latched) {
@@ -187,7 +219,13 @@ export class HotkeyBridge {
           return
         }
 
-        if (downAt !== null && now - downAt < HOTKEY.minHoldMs) {
+        // PLAN §2.1: while hands-free is latched, "tap again" exits it.
+        if (this.#lastPressWasTap && this.#intents.isHandsFree?.() === true) {
+          this.#intents.toggleHandsFree()
+          return
+        }
+
+        if (heldMs !== null && heldMs < HOTKEY.minHoldMs) {
           // Too short to be a deliberate hold. End the utterance anyway — the
           // orchestrator's min-duration guard turns it into "no speech", which
           // is a clearer outcome than silently swallowing the key.
@@ -197,6 +235,51 @@ export class HotkeyBridge {
         return
       }
     }
+  }
+
+  #armWatchdog(): void {
+    this.#stopWatchdog()
+    const native = this.#native()
+    if (!native.available) return
+
+    // Trust probe. The tap just delivered a physical down, so the HID system
+    // must agree the key is held *right now*. If it says "not held" at this
+    // instant, the answer is not coming from the window server — it is the
+    // stub behind a stale native binary that predates hotkeyPhysicallyDown —
+    // and a watchdog fed by that stub would end every real hold 250 ms in.
+    // Disable reconciliation rather than become the bug it exists to fix.
+    if (!native.hotkeyPhysicallyDown()) {
+      this.#log.warn(
+        'HID state disagrees immediately after a physical down — stale native build? ' +
+          'Release reconciliation is disabled; run `npm run native:build`.',
+      )
+      return
+    }
+
+    let misses = 0
+    this.#watchdog = setInterval(() => {
+      if (this.#downAt === null) {
+        this.#stopWatchdog()
+        return
+      }
+      if (native.hotkeyPhysicallyDown()) {
+        misses = 0
+        return
+      }
+      // Two consecutive misses before reconciling: one read can race the
+      // window server's own flag update on the release edge.
+      misses += 1
+      if (misses < 2) return
+      this.#log.warn('hotkey release was lost in delivery; reconciling from HID state')
+      this.#stopWatchdog()
+      this.handle({ type: 'up', timestamp: this.#now(), synthetic: true })
+    }, HOTKEY.physicalPollMs)
+    this.#watchdog.unref?.()
+  }
+
+  #stopWatchdog(): void {
+    if (this.#watchdog !== null) clearInterval(this.#watchdog)
+    this.#watchdog = null
   }
 }
 

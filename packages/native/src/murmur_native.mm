@@ -44,6 +44,7 @@
 #include <atomic>
 #include <chrono>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -95,12 +96,28 @@ struct HotkeyEventPayload {
 CFMachPortRef gEventTap = nullptr;
 CFRunLoopSourceRef gRunLoopSource = nullptr;
 CFRunLoopRef gRunLoop = nullptr;
+// The tap's own thread. Electron's main CFRunLoop is exactly the loop that
+// goes busy during a dictation, and a starved tap gets disabled by the OS for
+// slowness — which is how a release edge silently vanished mid-utterance. A
+// dedicated loop has nothing else to do and never starves.
+std::thread gTapThread;
+std::atomic<bool> gTapThreadReady{false};
 Napi::ThreadSafeFunction gCallback;
 std::atomic<bool> gListening{false};
 // True between hotkey-down and hotkey-up.
 std::atomic<bool> gHotkeyDown{false};
 HotkeyConfig gConfig;
 double gLastDownAt = 0.0;
+// When the current press began, so the up edge can classify it as tap or hold.
+double gDownAt = 0.0;
+// True when the previous press was a quick tap (down→up under kTapMaxSeconds).
+// A double-tap is tap-then-tap; a long dictation hold followed by a quick
+// press must never latch hands-free.
+bool gLastPressWasTap = false;
+
+// A press this short is a tap; longer is a hold. Generous enough for a
+// deliberate double-tap, short enough that no dictation hold qualifies.
+constexpr double kTapMaxSeconds = 0.30;
 
 double NowSeconds() {
   using namespace std::chrono;
@@ -171,14 +188,20 @@ void HandleEdge(bool down) {
   if (down) {
     if (gHotkeyDown.exchange(true)) return;  // auto-repeat; already down
 
-    const bool isDoubleTap =
-        gConfig.doubleTapHandsFree && gLastDownAt > 0.0 && (now - gLastDownAt) <= kDoubleTapSeconds;
+    // Tap-then-tap only. Requiring the *previous* press to have been a quick
+    // tap is what stops a long dictation hold, released and quickly followed
+    // by a new press, from reading as a double-tap.
+    const bool isDoubleTap = gConfig.doubleTapHandsFree && gLastPressWasTap &&
+                             gLastDownAt > 0.0 && (now - gLastDownAt) <= kDoubleTapSeconds;
     gLastDownAt = now;
+    gDownAt = now;
+    gLastPressWasTap = false;  // decided on the up edge
     EmitHotkeyEvent(isDoubleTap ? 2 : 0, now);
     return;
   }
 
   if (!gHotkeyDown.exchange(false)) return;  // spurious up
+  gLastPressWasTap = gDownAt > 0.0 && (now - gDownAt) <= kTapMaxSeconds;
   EmitHotkeyEvent(1, now);
 }
 
@@ -198,6 +221,14 @@ CGEventRef TapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event
   if (gConfig.kind == HotkeyKind::Fn) {
     // `fn` never produces keyDown/keyUp — only a flags change.
     if (type != kCGEventFlagsChanged) return event;
+    // Only the fn/globe key itself. Arrow and function-row keys live on the fn
+    // plane and emit flagsChanged events carrying the SecondaryFn mask as a
+    // side effect — without the key-code check, two arrow presses inside
+    // 350 ms read as an fn double-tap and latch hands-free out of nowhere,
+    // after which a real hold "never stops" because hands-free ignores the
+    // release by design.
+    const int64_t keyCode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+    if (keyCode != kVK_Function) return event;
     HandleEdge(FnIsDown(CGEventGetFlags(event)));
     // Never suppressed: `fn` also drives F-key behaviour and the emoji picker.
     return event;
@@ -224,10 +255,23 @@ void TearDownTap() {
   gListening.store(false);
   gHotkeyDown.store(false);
 
-  if (gRunLoopSource != nullptr) {
-    if (gRunLoop != nullptr) {
-      CFRunLoopRemoveSource(gRunLoop, gRunLoopSource, kCFRunLoopCommonModes);
+  // Stop the tap thread's loop first: the source must not be torn out from
+  // under a loop that is still running it. Wait for the entry observer's
+  // readiness signal so the stop cannot land before the loop starts (a lost
+  // stop is a join that never returns).
+  if (gTapThread.joinable()) {
+    for (int i = 0; i < 2000 && !gTapThreadReady.load(); i += 1) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    if (gRunLoop != nullptr) CFRunLoopStop(gRunLoop);
+    gTapThread.join();
+  }
+
+  if (gRunLoopSource != nullptr) {
+    // Deliberately NOT CFRunLoopRemoveSource: the dead thread's loop purged
+    // its own sources in its finalizer, and removing from it here was a
+    // proven use-after-free (crash reproduced under both the system allocator
+    // and libgmalloc). Releasing our reference is all that remains to do.
     CFRelease(gRunLoopSource);
     gRunLoopSource = nullptr;
   }
@@ -238,8 +282,14 @@ void TearDownTap() {
     gEventTap = nullptr;
   }
 
-  gRunLoop = nullptr;
+  if (gRunLoop != nullptr) {
+    CFRelease(gRunLoop);  // pairs with the CFRetain on the tap thread
+    gRunLoop = nullptr;
+  }
+  gTapThreadReady.store(false);
   gLastDownAt = 0.0;
+  gDownAt = 0.0;
+  gLastPressWasTap = false;
 }
 
 void ReleaseCallback() {
@@ -247,6 +297,30 @@ void ReleaseCallback() {
     gCallback.Release();
     gCallback = Napi::ThreadSafeFunction();
   }
+}
+
+// The HID system's own answer to "is the configured key held right now",
+// independent of event delivery. This is the reconciliation source of truth:
+// a tap can be disabled for slowness and another app's active tap can swallow
+// an edge, but CGEventSource state is maintained by the window server itself.
+Napi::Value HotkeyPhysicallyDown(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  const CGEventSourceStateID state = kCGEventSourceStateCombinedSessionState;
+  switch (gConfig.kind) {
+    case HotkeyKind::Fn: {
+      const CGEventFlags flags = CGEventSourceFlagsState(state);
+      return Napi::Boolean::New(env, (flags & kCGEventFlagMaskSecondaryFn) != 0);
+    }
+    case HotkeyKind::RightCmd:
+      return Napi::Boolean::New(env, CGEventSourceKeyState(state, kVK_RightCommand));
+    case HotkeyKind::RightOpt:
+      return Napi::Boolean::New(env, CGEventSourceKeyState(state, kVK_RightOption));
+    case HotkeyKind::Custom:
+      if (gConfig.customKeyCode < 0) return Napi::Boolean::New(env, false);
+      return Napi::Boolean::New(
+          env, CGEventSourceKeyState(state, static_cast<CGKeyCode>(gConfig.customKeyCode)));
+  }
+  return Napi::Boolean::New(env, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,12 +391,36 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
     return Napi::Boolean::New(env, false);
   }
 
-  gRunLoop = CFRunLoopGetMain();
-  CFRunLoopAddSource(gRunLoop, gRunLoopSource, kCFRunLoopCommonModes);
-  CGEventTapEnable(gEventTap, true);
-
+  // The TSFN must exist before the thread starts: the tap can fire the moment
+  // its loop runs.
   gCallback = Napi::ThreadSafeFunction::New(env, info[1].As<Napi::Function>(), "murmurHotkey",
                                             /* maxQueueSize */ 64, /* initialThreadCount */ 1);
+
+  gTapThreadReady.store(false);
+  gTapThread = std::thread([] {
+    // Retained: a secondary thread's CFRunLoop is deallocated during thread
+    // exit, and teardown needs a pointer that outlives the thread to stop the
+    // loop safely. Released in TearDownTap after the join.
+    gRunLoop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
+    CFRunLoopAddSource(gRunLoop, gRunLoopSource, kCFRunLoopCommonModes);
+    CGEventTapEnable(gEventTap, true);
+    // Readiness is signalled from *inside* the running loop. A flag set here,
+    // before CFRunLoopRun, would let a fast teardown issue CFRunLoopStop
+    // against a loop that has not started — a stop that lands on nothing and
+    // a join() that never returns.
+    CFRunLoopObserverRef entry = CFRunLoopObserverCreateWithHandler(
+        kCFAllocatorDefault, kCFRunLoopEntry, /* repeats */ false, 0,
+        ^(CFRunLoopObserverRef, CFRunLoopActivity) { gTapThreadReady.store(true); });
+    CFRunLoopAddObserver(gRunLoop, entry, kCFRunLoopCommonModes);
+    CFRelease(entry);
+    CFRunLoopRun();
+  });
+  // Bounded wait for the loop to be live, so a stop immediately after start
+  // cannot race the source insertion.
+  for (int i = 0; i < 1000 && !gTapThreadReady.load(); i += 1) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
   gListening.store(true);
   return Napi::Boolean::New(env, true);
 }
@@ -442,6 +540,77 @@ Napi::Value InsertTextViaAccessibility(const Napi::CallbackInfo& info) {
   }
 
   return MakeResult(env, true, nullptr);
+}
+
+// Command mode reads the current selection (PLAN §18.1) with the same element
+// lookup as the insertion fallback, read-only. "No selection" is a normal
+// answer — { ok: true, text: "" } — not an error; errors are reserved for a
+// missing permission or an app that refuses accessibility entirely.
+Napi::Value GetSelectedText(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object out = Napi::Object::New(env);
+
+  if (!AXIsProcessTrusted()) {
+    out.Set("ok", Napi::Boolean::New(env, false));
+    out.Set("error", Napi::String::New(env, "Accessibility permission is not granted"));
+    return out;
+  }
+
+  @autoreleasepool {
+    AXUIElementRef system = AXUIElementCreateSystemWide();
+    if (system == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "no system-wide accessibility element"));
+      return out;
+    }
+    // This runs synchronously at hotkey-down on the JS thread. An unresponsive
+    // target app must cost ~100 ms of latency, not the several seconds of the
+    // default AX messaging timeout.
+    AXUIElementSetMessagingTimeout(system, 0.1f);
+
+    CFTypeRef focusedApp = nullptr;
+    AXError error =
+        AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute, &focusedApp);
+    if (error != kAXErrorSuccess || focusedApp == nullptr) {
+      CFRelease(system);
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "could not find the focused application"));
+      return out;
+    }
+
+    CFTypeRef focusedElement = nullptr;
+    error = AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(focusedApp),
+                                          kAXFocusedUIElementAttribute, &focusedElement);
+    CFRelease(focusedApp);
+    CFRelease(system);
+
+    if (error != kAXErrorSuccess || focusedElement == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, true));
+      out.Set("text", Napi::String::New(env, ""));
+      return out;
+    }
+
+    CFTypeRef selected = nullptr;
+    error = AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(focusedElement),
+                                          kAXSelectedTextAttribute, &selected);
+    CFRelease(focusedElement);
+
+    if (error != kAXErrorSuccess || selected == nullptr ||
+        CFGetTypeID(selected) != CFStringGetTypeID()) {
+      if (selected != nullptr) CFRelease(selected);
+      out.Set("ok", Napi::Boolean::New(env, true));
+      out.Set("text", Napi::String::New(env, ""));
+      return out;
+    }
+
+    NSString* text = (__bridge NSString*)selected;
+    const char* utf8 = text.UTF8String;
+    out.Set("ok", Napi::Boolean::New(env, true));
+    out.Set("text", Napi::String::New(env, utf8 != nullptr ? utf8 : ""));
+    CFRelease(selected);
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -594,9 +763,11 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
   exports.Set("startHotkeyListener", Napi::Function::New(env, StartHotkeyListener));
   exports.Set("stopHotkeyListener", Napi::Function::New(env, StopHotkeyListener));
+  exports.Set("hotkeyPhysicallyDown", Napi::Function::New(env, HotkeyPhysicallyDown));
 
   exports.Set("sendPasteShortcut", Napi::Function::New(env, SendPasteShortcut));
   exports.Set("insertTextViaAccessibility", Napi::Function::New(env, InsertTextViaAccessibility));
+  exports.Set("getSelectedText", Napi::Function::New(env, GetSelectedText));
 
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));
   exports.Set("getFrontmostApp", Napi::Function::New(env, GetFrontmostApp));

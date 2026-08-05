@@ -1,5 +1,5 @@
 import { POLISH, TIMEOUTS } from '../../config'
-import { isLoopbackHost, isPrivateHost } from '../../net/fetch'
+import { isLoopbackHost, isPrivateHost, type FetchLike } from '../../net/fetch'
 import type { PolishRequest } from '../types'
 
 /**
@@ -31,11 +31,29 @@ export interface ChatClientOptions {
   /** Bearer token. The sidecar's per-launch token, or a user-supplied key. */
   apiKey: string | null
   model: string
+  /**
+   * The transport, chosen consciously by whoever constructs the client:
+   * `loopbackFetch` when fronting the bundled llama-server (a prompt must
+   * never leave the machine), the plain global for a user-configured external
+   * endpoint (allowed by PLAN §7.1 and warned about when not loopback).
+   * Required so that no call site gets a network path by accident.
+   */
+  fetchImpl: FetchLike
 }
 
 interface ChatCompletionResponse {
   choices?: { message?: { content?: string }; finish_reason?: string }[]
   error?: { message?: string }
+}
+
+export interface ChatCompletion {
+  text: string
+  /**
+   * True when the model hit the token cap (`finish_reason: "length"`). Command
+   * mode must refuse such an edit: pasting half a rewrite over the whole
+   * selection destroys its tail.
+   */
+  truncated: boolean
 }
 
 export type EndpointClass = 'loopback' | 'private' | 'public'
@@ -112,12 +130,12 @@ export class ChatClient {
    * a shimmer, not partial text, in v1 (PLAN §2.1). Streaming arrives with the
    * M5 latency work.
    */
-  async complete(request: PolishRequest): Promise<string> {
+  async complete(request: PolishRequest): Promise<ChatCompletion> {
     const url = `${this.#options.baseUrl.replace(/\/$/, '')}/v1/chat/completions`
     const headers: Record<string, string> = { 'content-type': 'application/json' }
     if (this.#options.apiKey) headers['authorization'] = `Bearer ${this.#options.apiKey}`
 
-    const response = await fetch(url, {
+    const response = await this.#options.fetchImpl(url, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -143,11 +161,12 @@ export class ChatClient {
     const payload = (await response.json()) as ChatCompletionResponse
     if (payload.error?.message) throw new Error(`Polish endpoint error: ${payload.error.message}`)
 
-    const content = payload.choices?.[0]?.message?.content
+    const choice = payload.choices?.[0]
+    const content = choice?.message?.content
     if (typeof content !== 'string') {
       throw new Error('Polish endpoint returned no message content')
     }
-    return content
+    return { text: content, truncated: choice?.finish_reason === 'length' }
   }
 }
 

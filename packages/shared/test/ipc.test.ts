@@ -200,7 +200,7 @@ describe('typed IPC — events (main → renderer)', () => {
     })
 
     expect(seen).toEqual([
-      { state: 'listening', handsFree: false, level: 0 },
+      { state: 'listening', handsFree: false, level: 0, command: false },
       { state: 'inserted', charCount: 12, method: 'paste' },
     ])
 

@@ -41,6 +41,15 @@ export function AudioCapture(): React.JSX.Element {
       onStatus: (next) => {
         setStatus(next)
         window.murmur.audio.reportStatus(next)
+        // A grant (or a device change under the hood) is exactly when labels
+        // appear, so the list is refreshed on every lifecycle edge.
+        void capture.refreshDevices()
+      },
+      onMeter: (level, peak) => {
+        window.murmur.audio.reportLevel({ level, peak })
+      },
+      onDevices: (devices) => {
+        window.murmur.audio.reportDevices({ devices })
       },
     })
 
@@ -48,12 +57,19 @@ export function AudioCapture(): React.JSX.Element {
       void capture.apply(command)
     })
 
+    // The list is enumerated up front (labels may be empty until the first
+    // grant) and re-pushed to main whenever the hardware changes.
+    const onDeviceChange = (): void => void capture.refreshDevices()
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange)
+    void capture.refreshDevices()
+
     // Tell main the page is alive but idle, so the status channel is exercised
     // end to end from the very first build.
     window.murmur.audio.reportStatus({ status: 'idle' })
 
     return () => {
       unsubscribe()
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange)
       capture.dispose()
     }
   }, [])

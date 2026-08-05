@@ -547,3 +547,85 @@ describe('buffering', () => {
     expectSettledIdle()
   })
 })
+
+describe('command mode (PLAN §18.1)', () => {
+  it('treats the utterance as an instruction and replaces the selection', async () => {
+    harness.deps.selection = () => 'the quick brown fox'
+    harness.polish.result = { text: 'THE QUICK BROWN FOX', durationMs: 5 }
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    // The edited selection is what got inserted — never the instruction.
+    expect(harness.insertedText).toEqual(['THE QUICK BROWN FOX'])
+    const record = harness.persisted[0]!
+    expect(record.rawText).toBe('hello world this is a test') // the instruction
+    expect(record.polishedText).toBe('THE QUICK BROWN FOX')
+    expectSettledIdle()
+  })
+
+  it('falls back to plain dictation when no polish model is ready', async () => {
+    // With polishing off or no model, dictating over a selection must stay
+    // plain dictation — the paste replaces the selection exactly the way
+    // typing would. Erroring here would turn an everyday habit (select, then
+    // talk over it) into lost speech.
+    harness.deps.selection = () => 'precious selected words'
+    Object.assign(harness.polish.status_, { state: 'idle', modelId: null })
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    // Plain dictation with polish unavailable inserts the raw transcript.
+    expect(harness.insertedText).toEqual(['hello world this is a test'])
+    expect(harness.persisted[0]?.polishedText).toBeNull()
+    expectSettledIdle()
+  })
+
+  it('refuses mid-flight — selection untouched — if the model vanishes after start', async () => {
+    // The race backstop in #finishCommand: the engine was ready at
+    // hotkey-down (command mode engaged) but is gone by the time the
+    // transcript arrives. No raw fallback: pasting the spoken instruction
+    // over the user's selection would be destructive.
+    harness.deps.selection = () => 'precious selected words'
+
+    orchestrator.begin()
+    Object.assign(harness.polish.status_, { state: 'idle', modelId: null })
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual([])
+    expect(harness.events.at(-1)).toMatchObject({ state: 'error', code: 'polish-failed' })
+    expectSettledIdle()
+  })
+
+  it('refuses when the model returns nothing', async () => {
+    harness.deps.selection = () => 'do not lose me'
+    harness.polish.result = { text: '   ', durationMs: 3 }
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual([])
+    expect(harness.events.at(-1)).toMatchObject({ state: 'error', code: 'polish-failed' })
+    expectSettledIdle()
+  })
+
+  it('stays in plain dictation when there is no selection', async () => {
+    harness.deps.selection = () => null
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual(['Hello world, this is a test.'])
+    expectSettledIdle()
+  })
+})

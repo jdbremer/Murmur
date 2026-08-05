@@ -10,17 +10,23 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 ## Status
 
-Early implementation. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)** — UX spec, architecture, model catalogs, roadmap, risks, and open questions. Remaining work is split by scope:
+**Working on macOS (field-proven).** Hold `fn`, speak, release — polished text lands in the frontmost app. Windows port is in progress with native hook, paste, whisper/llama sidecars, and Models install UX. The full plan lives in **[PLAN.md](./PLAN.md)**. Remaining work:
 
 - **[HANDOFF.md](./HANDOFF.md)** — product-wide backlog  
 - **[MAC-HANDOFF.md](./MAC-HANDOFF.md)** — macOS residual work  
-- **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** — Windows port residual work  
+- **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** — Windows residual work  
 
-The **main process is complete**: the dictation orchestrator with per-stage timeouts and typed error states, the no-ML VAD, both STT engines (whisper.cpp sidecar, ONNX Runtime utility process), the polish engine with its prompt builder and hallucination guard, the model manager with a resumable checksum-verified downloader, the SQLite store with FTS5 search, clipboard-swap text insertion, and the macOS native module (event tap, paste synthesis, permissions).
 
-The **capture renderer and the Hub are now wired**: `getUserMedia` plus an AudioWorklet streaming 16 kHz mono frames, and Hub sections that really do download, verify, select and delete models, search history, edit the dictionary, and set per-app tone.
+What works today:
 
-macOS has field-proven dictation; Windows has a working native hook, paste, whisper/llama sidecars, and Models UI install. Shared product follow-ups (language picker, Parakeet catalog, History tab, insert-copy fallback) are listed in [HANDOFF.md](./HANDOFF.md).
+- **The whole dictation loop**: event tap (own thread, HID-reconciled release so a lost up-edge can never strand a dictation) → capture renderer → pre-roll + VAD → whisper.cpp or ONNX Runtime → local LLM polish with the hallucination guard → clipboard-swap insertion with AX fallback → history.
+- **Command mode** (PLAN §18.1): hold the key with text selected and speak an instruction — the selection is rewritten in place by the local model, with a no-fallback failure discipline that never pastes over a selection on error.
+- **The Bar**: 28-bar 60 fps canvas waveform on a ~30 Hz mic meter, shimmer, ✓ pulse, error hold, click-through window with hover controls (cancel · mic picker · Hub), Esc-to-cancel, Reduce Motion support, and a distinct indicator when an utterance is editing a selection.
+- **The Hub**: first-run onboarding (permissions → starter models → tutorial), Models with the enforced US-only catalog, History with FTS5 search and stats, Dictionary, per-app-category Style, Settings (hotkey, mic picker, language, retention), Help with live permission/engine/capture status.
+- **CI**: the full gate on macOS arm64 per push/PR; sidecar builds on demand and weekly.
+
+Still to come: app-wide items in [HANDOFF.md](./HANDOFF.md) (spoken language UX, Parakeet catalog, History tab, insert-copy fallback); llama Metal pin on macOS 27; Windows packaging. See also [MAC-HANDOFF.md](./MAC-HANDOFF.md) and [WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md).
+
 
 ## Development
 
@@ -75,6 +81,9 @@ transcript redaction (local debugging only — see `src/main/logging.ts`).
 In an unpackaged build two dev-only IPC channels exist:
 `debug.simulateDictation` cycles the state machine with no mic or models, and
 `debug.simulateHotkey` feeds the **real** orchestrator a synthetic hotkey edge.
+From a shell, `kill -USR2 <electron pid>` does the same as `simulateHotkey` —
+each signal alternates down/up — so a whole dictation can be driven without
+touching the app: signal, `say` a sentence, signal again.
 
 ### macOS vs. other platforms
 

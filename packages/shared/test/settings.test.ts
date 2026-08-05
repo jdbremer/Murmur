@@ -28,6 +28,8 @@ describe('SettingsSchema', () => {
       polishModelId: null,
       externalEndpoint: null,
       appearance: 'system',
+      onboardingCompleted: false,
+      commandModeEnabled: true,
     } satisfies Settings)
   })
 

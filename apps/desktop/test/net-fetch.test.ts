@@ -8,6 +8,8 @@ import {
   isAllowedHost,
   isLoopbackHost,
   isPrivateHost,
+  loopbackFetch,
+  NonLoopbackHostError,
 } from '../src/main/net/fetch'
 
 /**
@@ -184,5 +186,84 @@ describe('loopback and private-network classification (PLAN §7.1, §10.3)', () 
     expect(isPrivateHost('10.0.0')).toBe(false)
     expect(isPrivateHost('10.0.0.999')).toBe(false)
     expect(isPrivateHost('10.a.b.c')).toBe(false)
+  })
+})
+
+describe('loopbackFetch', () => {
+  const ok = (): Promise<Response> => Promise.resolve(new Response('ok'))
+
+  it('allows the three loopback spellings', async () => {
+    for (const host of ['127.0.0.1', 'localhost', '[::1]']) {
+      const fetchImpl = vi.fn(ok)
+      await loopbackFetch(`http://${host}:9999/inference`, { fetchImpl })
+      expect(fetchImpl).toHaveBeenCalledOnce()
+    }
+  })
+
+  it('refuses anything that is not loopback — that is its whole job', async () => {
+    const fetchImpl = vi.fn(ok)
+    for (const url of [
+      'http://192.168.1.20:8080/v1/chat/completions',
+      'https://api.example.com/inference',
+      'http://10.0.0.5/health',
+    ]) {
+      await expect(loopbackFetch(url, { fetchImpl })).rejects.toBeInstanceOf(NonLoopbackHostError)
+    }
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unparseable URL rather than guessing', async () => {
+    await expect(loopbackFetch('not a url', { fetchImpl: vi.fn(ok) })).rejects.toBeInstanceOf(
+      NonLoopbackHostError,
+    )
+  })
+
+  it('adds the bearer token without clobbering other headers', async () => {
+    const fetchImpl = vi.fn((_url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers)
+      expect(headers.get('authorization')).toBe('Bearer sesame')
+      expect(headers.get('content-type')).toBe('application/json')
+      return ok()
+    })
+    await loopbackFetch('http://127.0.0.1:1234/x', {
+      fetchImpl,
+      token: 'sesame',
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+  })
+
+  it('passes method, body and signal through untouched', async () => {
+    const controller = new AbortController()
+    const fetchImpl = vi.fn((_url: string, init?: RequestInit) => {
+      expect(init?.method).toBe('POST')
+      expect(init?.body).toBe('{"a":1}')
+      expect(init?.signal).toBe(controller.signal)
+      return ok()
+    })
+    await loopbackFetch('http://localhost:7777/y', {
+      fetchImpl,
+      method: 'POST',
+      body: '{"a":1}',
+      signal: controller.signal,
+    })
+    expect(fetchImpl).toHaveBeenCalledOnce()
+  })
+})
+
+describe('loopbackFetch redirect policy', () => {
+  it('forces redirect: "error" so a hop can never leave loopback', async () => {
+    const fetchImpl = vi.fn((_url: string, init?: RequestInit) => {
+      expect(init?.redirect).toBe('error')
+      return Promise.resolve(new Response('ok'))
+    })
+    await loopbackFetch('http://127.0.0.1:9000/inference', { fetchImpl })
+    // Even a caller who asks for 'follow' is overruled — the guarantee is not
+    // configurable.
+    await loopbackFetch('http://127.0.0.1:9000/inference', {
+      fetchImpl,
+      redirect: 'follow',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
 })

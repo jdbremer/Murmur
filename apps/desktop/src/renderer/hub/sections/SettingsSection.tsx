@@ -1,39 +1,50 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
-import type { AppInfo, HotkeyKey } from '@murmur/shared'
+import type { HotkeyKey } from '@murmur/shared'
 
-import { Card, Row, Section, Select, Toggle } from '../../components/Section'
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  InlineError,
+  Row,
+  Section,
+  Select,
+  Toggle,
+} from '../../components/Section'
+import { useAudioDevices, micOptions } from '../../hooks/useAudioDevices'
+import { useCaptureStatus } from '../../hooks/useCaptureStatus'
+import { useDevMode } from '../../hooks/useDevMode'
+import { useDictationState } from '../../hooks/useDictationState'
 import { useSettings } from '../../hooks/useSettings'
+import { isMacPlatform } from '../../lib/platform'
 
 /**
  * Settings (PLAN §2.2.5).
  *
  * Everything here round-trips for real: each change is a `settings.set` patch
- * to the main-process store, which persists to `settings.json` and broadcasts
- * the new state back to every window.
- *
- * Hotkey presets branch on platform (WINDOWS-HANDOFF Phase B / gate G3): Windows
- * never shows fn / ⌘ / ⌥ labels.
+ * to the main-process store, which persists it, broadcasts the new state to
+ * every window, and hot-applies it — no restart, no Apply button.
  */
 
-const MAC_HOTKEYS: { value: HotkeyKey; label: string }[] = [
-  { value: 'fn', label: 'Hold fn' },
-  { value: 'rightCmd', label: 'Hold right ⌘' },
-  { value: 'rightOpt', label: 'Hold right ⌥' },
+const MAC_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
+  { value: 'fn', label: 'fn' },
+  { value: 'rightCmd', label: 'Right ⌘' },
+  { value: 'rightOpt', label: 'Right ⌥' },
   { value: 'custom', label: 'Custom key' },
 ]
 
-const WINDOWS_HOTKEYS: { value: HotkeyKey; label: string }[] = [
-  { value: 'rightCtrl', label: 'Hold Right Ctrl (recommended)' },
-  // Ctrl+Space / Alt+Space temporarily removed: LL-hook Space swallow can stick
-  // the key across the whole OS. Re-add when latch release is proven solid.
-  { value: 'capsLock', label: 'Hold Caps Lock' },
+/** Windows: no Space-swallowing chords until latch release is rock-solid. */
+const WINDOWS_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
+  { value: 'rightCtrl', label: 'Right Ctrl (recommended)' },
+  { value: 'capsLock', label: 'Caps Lock' },
   { value: 'custom', label: 'Custom key' },
 ]
 
 const ACTIVATIONS = [
   { value: 'hold' as const, label: 'Hold to talk' },
-  { value: 'toggle' as const, label: 'Press to start / stop' },
+  { value: 'toggle' as const, label: 'Press to start and stop' },
 ]
 
 const BAR_VISIBILITY = [
@@ -48,75 +59,92 @@ const APPEARANCE = [
   { value: 'dark' as const, label: 'Dark' },
 ]
 
+const LANGUAGES = [
+  { value: 'auto', label: 'Detect automatically' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'nl', label: 'Dutch' },
+]
+
 const AUDIO_RETENTION = [
   { value: 'off' as const, label: 'Delete after transcription' },
   { value: 'days' as const, label: 'Keep for 30 days' },
 ]
 
+const HISTORY_RETENTION = [
+  { value: 'off' as const, label: 'Do not keep history' },
+  { value: '30' as const, label: '30 days' },
+  { value: '90' as const, label: '90 days' },
+  { value: '365' as const, label: 'A year' },
+  { value: '3650' as const, label: 'Forever' },
+]
+
 export function SettingsSection(): React.JSX.Element {
   const { settings, update, error } = useSettings()
-  const [info, setInfo] = useState<AppInfo | null>(null)
+  const devices = useAudioDevices()
+  const capture = useCaptureStatus()
 
-  useEffect(() => {
-    void window.murmur.app
-      .info()
-      .then(setInfo)
-      .catch(() => {
-        // Older preload without app.info — assume non-mac so we never show ⌘/⌥
-        // on a Windows box that cannot resolve platform.
-        setInfo({
-          version: 'unknown',
-          platform: 'win32',
-          arch: 'unknown',
-          isDev: false,
-          showDevTools: false,
-          native: 'unknown',
-        })
-      })
-  }, [])
-
-  // Wait for app.info so we never flash macOS fn/⌘/⌥ chrome on Windows (G3).
-  if (!settings || !info) {
+  if (!settings) {
     return <Section title="Settings" description="Loading…" />
   }
 
-  const isWindows = info.platform === 'win32'
-  const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : MAC_HOTKEYS
-  const hotkeyHint = isWindows
-    ? 'Global hold-to-talk. Prefer Right Ctrl — it never swallows Space. Chords work but release fully if a key sticks.'
-    : 'Electron cannot see fn; the native event tap can.'
-  // If a Mac-only key is still stored on Windows (pre-migration), keep the
-  // select valid by coercing the displayed value to a Windows preset.
+  const historyValue =
+    settings.historyRetention.mode === 'off' ? 'off' : String(settings.historyRetention.days)
+  const isMac = isMacPlatform()
+  const hotkeyOptions = isMac ? MAC_HOTKEYS : WINDOWS_HOTKEYS
   const hotkeyValue = hotkeyOptions.some((o) => o.value === settings.hotkey.key)
     ? settings.hotkey.key
-    : isWindows
-      ? 'rightCtrl'
-      : settings.hotkey.key
+    : isMac
+      ? 'fn'
+      : 'rightCtrl'
 
   return (
-    <Section title="Settings" description="Hotkey, microphone, retention and appearance.">
-      {error ? (
-        <Card className="mb-5 border-warning/40">
-          <p className="text-[13px] text-warning">{error}</p>
-        </Card>
-      ) : null}
+    <Section
+      title="Settings"
+      description="How dictation starts, which microphone it uses, and how long anything is kept."
+    >
+      <InlineError>{error}</InlineError>
 
-      <Card className="mb-5">
-        <Row label="Dictation key" hint={hotkeyHint}>
+      <h2 className="mb-2 text-[13px] font-semibold text-ink">Dictation key</h2>
+      <Card className="mb-6">
+        <Row
+          label="Key"
+          hint={
+            isMac
+              ? 'fn is the default. The right-hand modifiers exist for external keyboards that have no fn key.'
+              : 'Right Ctrl is the Windows default. Space chords are disabled until key-latch is rock-solid.'
+          }
+          htmlFor="settings-hotkey"
+        >
           <Select
+            id="settings-hotkey"
+            label="Dictation key"
             value={hotkeyValue}
-            options={hotkeyOptions}
+            options={[...hotkeyOptions]}
             onChange={(key) => void update({ hotkey: { ...settings.hotkey, key } })}
           />
         </Row>
-        <Row label="Activation">
+        <Row
+          label="Activation"
+          hint="Hold is push-to-talk. Toggle suits long dictations and accessibility needs."
+          htmlFor="settings-activation"
+        >
           <Select
+            id="settings-activation"
+            label="Activation"
             value={settings.hotkey.activation}
             options={ACTIVATIONS}
             onChange={(activation) => void update({ hotkey: { ...settings.hotkey, activation } })}
           />
         </Row>
-        <Row label="Double-tap for hands-free">
+        <Row
+          label="Double-tap for hands-free"
+          hint="Tap twice to latch dictation on; tap again or press Esc to stop."
+        >
           <Toggle
             label="Double-tap for hands-free"
             checked={settings.hotkey.doubleTapHandsFree}
@@ -125,24 +153,86 @@ export function SettingsSection(): React.JSX.Element {
             }
           />
         </Row>
+        <Row
+          label="Edit selected text by voice"
+          hint="Hold your key with text selected and speak an instruction — the selection is rewritten in place. Needs a polishing model."
+        >
+          <Toggle
+            label="Edit selected text by voice"
+            checked={settings.commandModeEnabled}
+            onChange={(commandModeEnabled) => void update({ commandModeEnabled })}
+          />
+        </Row>
+        <div className="pt-3">
+          <TryIt hotkey={settings.hotkey.key} />
+        </div>
       </Card>
 
-      <Card className="mb-5">
-        <Row label="Show the bar" hint="The floating pill at the bottom of the screen.">
+      <h2 className="mb-2 text-[13px] font-semibold text-ink">Audio</h2>
+      {capture?.status === 'error' ? (
+        <div className="mb-3">
+          <Banner tone="danger" title="The microphone is not working">
+            {capture.message}
+          </Banner>
+        </div>
+      ) : null}
+      <Card className="mb-6">
+        <Row
+          label="Microphone"
+          hint="Empty labels mean microphone access has not been granted yet."
+          htmlFor="settings-mic"
+        >
           <Select
+            id="settings-mic"
+            label="Microphone"
+            value={settings.micDeviceId ?? ''}
+            options={micOptions(devices)}
+            onChange={(deviceId) => void update({ micDeviceId: deviceId === '' ? null : deviceId })}
+          />
+        </Row>
+        <Row
+          label="Language"
+          hint="Detect automatically only works with models that do it natively, such as Whisper."
+          htmlFor="settings-language"
+        >
+          <Select
+            id="settings-language"
+            label="Language"
+            value={settings.language}
+            options={LANGUAGES}
+            onChange={(language) => void update({ language })}
+          />
+        </Row>
+      </Card>
+
+      <h2 className="mb-2 text-[13px] font-semibold text-ink">Appearance</h2>
+      <Card className="mb-6">
+        <Row
+          label="Show the bar"
+          hint="The floating pill at the bottom of the screen. Hidden does not disable dictation."
+          htmlFor="settings-bar"
+        >
+          <Select
+            id="settings-bar"
+            label="Bar visibility"
             value={settings.barVisibility}
             options={BAR_VISIBILITY}
             onChange={(barVisibility) => void update({ barVisibility })}
           />
         </Row>
-        <Row label="Appearance">
+        <Row label="Theme" htmlFor="settings-appearance">
           <Select
+            id="settings-appearance"
+            label="Theme"
             value={settings.appearance}
             options={APPEARANCE}
             onChange={(appearance) => void update({ appearance })}
           />
         </Row>
-        <Row label="Launch at login">
+        <Row
+          label="Launch at login"
+          hint={isMacPlatform() ? undefined : 'Only applied on macOS and Windows.'}
+        >
           <Toggle
             label="Launch at login"
             checked={settings.launchAtLogin}
@@ -151,9 +241,16 @@ export function SettingsSection(): React.JSX.Element {
         </Row>
       </Card>
 
+      <h2 className="mb-2 text-[13px] font-semibold text-ink">What is kept</h2>
       <Card>
-        <Row label="Recorded audio" hint="Audio is held in memory only unless you opt in.">
+        <Row
+          label="Recorded audio"
+          hint="Off by default: audio is held in memory and discarded the moment it has been transcribed."
+          htmlFor="settings-audio-retention"
+        >
           <Select
+            id="settings-audio-retention"
+            label="Audio retention"
             value={settings.audioRetention.mode}
             options={AUDIO_RETENTION}
             onChange={(mode) =>
@@ -163,14 +260,86 @@ export function SettingsSection(): React.JSX.Element {
             }
           />
         </Row>
-        <Row label="History" hint="How long transcripts stay on this machine.">
-          <span className="text-[13px] text-ink">
-            {settings.historyRetention.mode === 'off'
-              ? 'Not kept'
-              : `${settings.historyRetention.days} days`}
-          </span>
+        <Row
+          label="History"
+          hint="Transcripts older than this are pruned at launch and when you change this setting."
+          htmlFor="settings-history-retention"
+        >
+          <Select
+            id="settings-history-retention"
+            label="History retention"
+            value={historyValue}
+            options={HISTORY_RETENTION}
+            onChange={(value) =>
+              void update({
+                historyRetention:
+                  value === 'off' ? { mode: 'off' } : { mode: 'days', days: Number(value) },
+              })
+            }
+          />
         </Row>
       </Card>
     </Section>
+  )
+}
+
+/**
+ * A live confirmation that the key actually works.
+ *
+ * Reading "hold fn to dictate" tells you nothing about whether the event tap is
+ * running and the permission is granted. Watching the state change when you
+ * press the key tells you everything, which is why this is here and not a
+ * paragraph.
+ */
+function TryIt({ hotkey }: { hotkey: HotkeyKey }): React.JSX.Element {
+  const event = useDictationState()
+  const dev = useDevMode()
+  const [simulating, setSimulating] = useState(false)
+
+  const label = HOTKEYS.find((option) => option.value === hotkey)?.label ?? 'your key'
+  const message =
+    event.state === 'listening'
+      ? 'Listening — Murmur can hear you.'
+      : event.state === 'processing'
+        ? 'Transcribing…'
+        : event.state === 'inserting'
+          ? 'Inserting the text…'
+          : event.state === 'inserted'
+            ? 'Done — that went into the app you were last using.'
+            : event.state === 'error'
+              ? event.message
+              : `Hold ${label} anywhere and say something. This line reacts.`
+
+  const tone = event.state === 'error' ? 'warning' : event.state === 'idle' ? 'neutral' : 'accent'
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-line bg-canvas px-3 py-2">
+      <Badge tone={tone}>Try it</Badge>
+      <p aria-live="polite" className="flex-1 text-[12px] text-ink-muted">
+        {message}
+      </p>
+      {dev ? (
+        <Button
+          disabled={simulating}
+          onClick={() => {
+            setSimulating(true)
+            void window.murmur.debug
+              .simulateHotkey({ action: 'down' })
+              .then(
+                () =>
+                  new Promise<void>((resolve) => {
+                    setTimeout(resolve, 1200)
+                  }),
+              )
+              .then(() => window.murmur.debug.simulateHotkey({ action: 'up' }))
+              .catch(() => undefined)
+              .finally(() => setSimulating(false))
+          }}
+          title="Development builds only — runs the real pipeline without the event tap"
+        >
+          Simulate
+        </Button>
+      ) : null}
+    </div>
   )
 }

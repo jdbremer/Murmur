@@ -115,12 +115,12 @@ export class DictationStateMachine extends EventEmitter<DictationStateMachineEve
 
   // -- Convenience wrappers, so call sites read like the loop in PLAN §3.2 ---
 
-  startListening(handsFree = false): boolean {
-    return this.dispatch({ state: 'listening', handsFree, level: 0 })
+  startListening(handsFree = false, command = false): boolean {
+    return this.dispatch({ state: 'listening', handsFree, level: 0, command })
   }
 
-  startProcessing(stage: 'transcribing' | 'polishing' = 'transcribing'): boolean {
-    return this.dispatch({ state: 'processing', stage })
+  startProcessing(stage: 'transcribing' | 'polishing' = 'transcribing', command = false): boolean {
+    return this.dispatch({ state: 'processing', stage, command })
   }
 
   startInserting(): boolean {

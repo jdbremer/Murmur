@@ -308,11 +308,15 @@ describe('HotkeyBridge (PLAN §2.1, §4)', () => {
     const { intents, bridge, now } = setup({ ...holdConfig, doubleTapHandsFree: false })
 
     bridge.handle({ type: 'doubleTap', timestamp: now.current })
+    // A real tap-then-tap sequence — the gesture that would latch when the
+    // setting is on — must read as two ordinary presses when it is off.
     bridge.handle({ type: 'down', timestamp: now.current })
+    now.current += 50
+    bridge.handle({ type: 'up', timestamp: now.current })
     now.current += 50
     bridge.handle({ type: 'down', timestamp: now.current })
 
-    expect(intents).toEqual(['begin', 'begin'])
+    expect(intents).toEqual(['begin', 'end', 'begin'])
     expect(intents).not.toContain('handsFree')
   })
 

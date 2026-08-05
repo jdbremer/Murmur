@@ -23,10 +23,16 @@ function createStub(reason) {
     startHotkeyListener() {},
     stopHotkeyListener() {},
     releaseHotkeyLatch() {},
+    hotkeyPhysicallyDown() {
+      return false
+    },
     sendPasteShortcut() {
       return { ok: false, error: reason }
     },
     insertTextViaAccessibility() {
+      return { ok: false, error: reason }
+    },
+    getSelectedText() {
       return { ok: false, error: reason }
     },
     getFrontmostApp() {
@@ -70,8 +76,10 @@ function fromBinding(binding) {
     startHotkeyListener: adopt(binding, stub, 'startHotkeyListener'),
     stopHotkeyListener: adopt(binding, stub, 'stopHotkeyListener'),
     releaseHotkeyLatch: adopt(binding, stub, 'releaseHotkeyLatch'),
+    hotkeyPhysicallyDown: adopt(binding, stub, 'hotkeyPhysicallyDown'),
     sendPasteShortcut: adopt(binding, stub, 'sendPasteShortcut'),
     insertTextViaAccessibility: adopt(binding, stub, 'insertTextViaAccessibility'),
+    getSelectedText: adopt(binding, stub, 'getSelectedText'),
     getFrontmostApp: adopt(binding, stub, 'getFrontmostApp'),
     isSecureInputActive: adopt(binding, stub, 'isSecureInputActive'),
     isForegroundElevated: adopt(binding, stub, 'isForegroundElevated'),

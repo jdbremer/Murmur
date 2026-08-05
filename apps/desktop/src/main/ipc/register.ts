@@ -15,12 +15,13 @@ import type {
 } from '../store/repositories'
 import type { WindowManager } from '../windows/manager'
 import type { CaptureController } from '../audio/controller'
-import type { AudioCaptureStatus } from '@murmur/shared'
+import type { AudioCaptureStatus, AudioDeviceList } from '@murmur/shared'
 import { AUDIO } from '../config'
 import { framePcm } from '../audio/buffer'
 import { describeNative, native } from '../native'
 import { simulateDictation } from '../dictation/simulator'
 import { installSidecarBinary } from '../engines/install-sidecar'
+import { setBarInteractive } from '../windows/bar'
 
 /**
  * Every `ipcMain` handler the app registers.
@@ -72,6 +73,7 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     showDevTools: context.isDev && process.env['MURMUR_DEV_TOOLS'] === '1',
     native: describeNative(),
   }))
+  ipc.handle('app.devMode', () => context.isDev)
   ipc.handle('app.quit', () => {
     context.quit()
   })
@@ -179,12 +181,45 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   ipc.receive('audio.frame', (frame) => {
     orchestrator.pushFrame(framePcm(frame.pcm, frame.sampleCount))
   })
+  // The orchestrator only cares about errors mid-dictation (an idle error has
+  // no dictation to fail). The Hub cares about *every* report — a permission
+  // denied at the startup warm used to vanish here (HANDOFF item #4) — so the
+  // last one is cached for `audio.captureStatus` and broadcast as
+  // `audio.captureChanged`.
+  let captureStatus: AudioCaptureStatus = { status: 'idle' }
   ipc.receive('audio.status', (status) => {
-    // Hub/Dev always get the truth, including idle-time mic failures that the
-    // orchestrator does not turn into a dictation error (WINDOWS-HANDOFF).
-    lastCapture = status
-    ipc.broadcast(windows.uiWebContents(), 'audio.captureStatus', status)
+    // An error is sticky until the mic *proves itself* with a 'ready': the
+    // warm-idle timer releases the stream a few minutes after startup, and the
+    // resulting 'idle' must not wash away a "permission denied" the user has
+    // never seen. Only working hardware clears the banner.
+    const keepError = captureStatus.status === 'error' && status.status === 'idle'
+    if (!keepError) {
+      captureStatus = status
+      lastCapture = status
+      ipc.broadcast(windows.uiWebContents(), 'audio.captureChanged', status)
+      // Alias event name used by Windows Dev tools / older Hub code.
+      ipc.broadcast(windows.uiWebContents(), 'audio.captureStatus', status)
+    }
     if (status.status === 'error') orchestrator.reportAudioError(status.message)
+  })
+  ipc.handle('audio.captureStatus', () => captureStatus)
+  // The capture renderer meters at ~30 Hz; main is only the relay to the Bar,
+  // which interpolates it up to 60 fps (PLAN §2.1).
+  ipc.receive('audio.meter', (level) => {
+    ipc.broadcast(windows.uiWebContents(), 'audio.level', level)
+  })
+
+  // -- audio devices: enumerated by the capture renderer, cached here --------
+  let devices: AudioDeviceList = { devices: [] }
+  ipc.receive('audio.devices', (next) => {
+    devices = next
+    ipc.broadcast(windows.uiWebContents(), 'audio.devicesChanged', next)
+  })
+  ipc.handle('audio.listDevices', () => devices)
+
+  // -- bar: click-through everywhere except the pill (PLAN §2.1) -------------
+  ipc.receive('bar.pointerRegion', ({ interactive }) => {
+    setBarInteractive(windows.bar(), interactive)
   })
 
   // -- debug: unpackaged builds only ---------------------------------------
@@ -195,7 +230,25 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     ipc.handle('debug.simulateHotkey', ({ action }) => {
       // Drives the *real* pipeline, so a dev machine with no event tap can
       // still exercise capture → VAD → STT → polish → insert end to end.
-      context.hotkeys.handle({ type: action, timestamp: Date.now() })
+      // `synthetic` keeps the bridge's physical-state watchdog disarmed — the
+      // HID system rightly reports "not held" for a key nobody pressed.
+      context.hotkeys.handle({ type: action, timestamp: Date.now(), synthetic: true })
+    })
+
+    // `kill -USR2 <pid>` is the terminal-driven twin of debug.simulateHotkey:
+    // each signal alternates a synthetic hotkey down/up through the real
+    // pipeline. It exists so a shell can run a whole dictation hands-off —
+    // signal, `say` a sentence at the microphone, signal again — which is how
+    // the loop is exercised on a machine nobody is sitting at. Unpackaged
+    // builds only, like everything else in this block.
+    let signalHeld = false
+    process.on('SIGUSR2', () => {
+      signalHeld = !signalHeld
+      context.hotkeys.handle({
+        type: signalHeld ? 'down' : 'up',
+        timestamp: Date.now(),
+        synthetic: true,
+      })
     })
     ipc.handle('debug.warmMic', () => {
       context.audio.warm(settings.get().micDeviceId)

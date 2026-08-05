@@ -4,6 +4,7 @@ import { app, ipcMain } from 'electron'
 
 import {
   createMainIpc,
+  MOMENTARY_HOLD_MS,
   sanitizeHotkeyForPlatform,
   type DictationEvent,
   type EnginesStatus,
@@ -12,6 +13,7 @@ import {
 
 import { CaptureController } from './audio/controller'
 import { AUDIO } from './config'
+import { EscapeCancel } from './dictation/escape'
 import { HotkeyBridge } from './dictation/hotkey'
 import { TextInjector } from './dictation/injector'
 import { DictationOrchestrator } from './dictation/orchestrator'
@@ -183,12 +185,26 @@ async function bootstrap(): Promise<void> {
     applyDictionary: (text) => applyReplacements(text, dictionary.enabled()),
     styleFor: (category) => style.forCategory(category),
     frontmostApp: () => native().getFrontmostApp(),
+    // Command mode (PLAN §18.1): a non-empty selection at hotkey-down flips
+    // the utterance into an edit instruction. Gated on the setting and read
+    // through AX, which is already granted for insertion.
+    selection: () => {
+      if (!settings.get().commandModeEnabled) return null
+      const result = native().getSelectedText()
+      if (!result.ok) return null
+      const text = (result.text ?? '').trim()
+      if (text.length === 0) return null
+      // A selection this large cannot be edited within the polish model's
+      // context window — the result would be refused as truncated every time.
+      // Treat it as plain dictation instead of a guaranteed failure.
+      if (text.length > 6_000) return null
+      return text
+    },
     persist: (record) => {
       dictations.insert(record)
     },
-    onLevel: (level) => {
-      ipc.broadcast(windows.uiWebContents(), 'audio.level', { level, peak: null })
-    },
+    // No `onLevel` from PCM frames: the Bar is fed by the capture renderer's
+    // ~30 Hz `audio.meter` → `audio.level` relay (PLAN §2.1).
     releaseHotkeyLatch: () => {
       try {
         native().releaseHotkeyLatch()
@@ -207,6 +223,7 @@ async function bootstrap(): Promise<void> {
         if (orchestrator.handsFree) orchestrator.stopHandsFree()
         else orchestrator.startHandsFree()
       },
+      isHandsFree: () => orchestrator.handsFree,
     },
   })
 
@@ -263,6 +280,13 @@ async function bootstrap(): Promise<void> {
     applyBarVisibility(settings.get(), event)
   })
 
+  // Esc cancels while listening, and only while listening (PLAN §2.1).
+  const escape = new EscapeCancel({ cancel: () => orchestrator.cancel() })
+  machine.on('state', (next) => {
+    if (next === 'listening') escape.arm()
+    else escape.disarm()
+  })
+
   engines.on('status', (status: EnginesStatus) => {
     ipc.broadcast(windows.uiWebContents(), 'engines.changed', status)
   })
@@ -274,11 +298,11 @@ async function bootstrap(): Promise<void> {
   })
 
   /** PLAN §2.1: show while dictating (default) · always · hidden. */
-  let errorBarHideTimer: NodeJS.Timeout | null = null
+  let barHideTimer: NodeJS.Timeout | null = null
   function applyBarVisibility(current: Settings, event: DictationEvent): void {
-    if (errorBarHideTimer) {
-      clearTimeout(errorBarHideTimer)
-      errorBarHideTimer = null
+    if (barHideTimer) {
+      clearTimeout(barHideTimer)
+      barHideTimer = null
     }
     switch (current.barVisibility) {
       case 'always':
@@ -287,22 +311,32 @@ async function bootstrap(): Promise<void> {
       case 'hidden':
         windows.hideBar()
         return
-      case 'showWhileDictating':
+      case 'showWhileDictating': {
         if (event.state === 'idle') {
           windows.hideBar()
           return
         }
         windows.showBar()
-        // Errors should not leave the Bar stuck open forever; Hub toast carries
-        // the message. Hide after a short beat so the user can still read it.
-        if (event.state === 'error') {
-          errorBarHideTimer = setTimeout(() => {
-            errorBarHideTimer = null
-            if (machine.state === 'idle') windows.hideBar()
-          }, 2800)
-          errorBarHideTimer.unref?.()
+        // `inserted` and `error` are the last events of their dictation: the
+        // machine settles to idle *silently* (RESTING_STATE moves; nothing is
+        // emitted), so no idle event will ever hide the window. Retire it
+        // ourselves once the renderer's hold — plus the shrink morph — has
+        // played out. Any newer event cancels this via the clear above.
+        const hold =
+          event.state === 'inserted'
+            ? MOMENTARY_HOLD_MS.inserted
+            : event.state === 'error'
+              ? MOMENTARY_HOLD_MS.error
+              : 0
+        if (hold > 0) {
+          barHideTimer = setTimeout(() => {
+            barHideTimer = null
+            if (settings.get().barVisibility === 'showWhileDictating') windows.hideBar()
+          }, hold + 250)
+          barHideTimer.unref?.()
         }
         return
+      }
     }
   }
 
@@ -400,6 +434,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(): Promise<void> {
     log.info('shutting down')
     tray.destroy()
+    escape.dispose()
     hotkeys.stop()
     orchestrator.dispose()
     injector.dispose()

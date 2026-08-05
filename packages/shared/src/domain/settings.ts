@@ -169,6 +169,18 @@ const settingsFields = {
   polishModelId: z.string().min(1).nullable(),
   externalEndpoint: ExternalEndpointSchema.nullable(),
   appearance: AppearanceSchema,
+  /**
+   * False until the first-run sequence finishes (PLAN §2.4). The Hub renders
+   * onboarding instead of its sections while this is false, so the flag lives
+   * with the rest of the persisted state rather than in a marker file.
+   */
+  onboardingCompleted: z.boolean(),
+  /**
+   * Command mode (PLAN §18.1): holding the dictation key with text selected
+   * treats the utterance as an edit instruction and rewrites the selection in
+   * place. On by default — it is the reference product's flagship gesture.
+   */
+  commandModeEnabled: z.boolean(),
 } as const
 
 /** Full settings: unknown/missing keys fall back to the shipped defaults. */
@@ -188,6 +200,8 @@ export const SettingsSchema = z.object({
   polishModelId: settingsFields.polishModelId.default(null),
   externalEndpoint: settingsFields.externalEndpoint.default(null),
   appearance: settingsFields.appearance.default('system'),
+  onboardingCompleted: settingsFields.onboardingCompleted.default(false),
+  commandModeEnabled: settingsFields.commandModeEnabled.default(true),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 

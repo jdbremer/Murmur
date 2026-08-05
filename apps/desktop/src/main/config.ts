@@ -132,4 +132,17 @@ export const HOTKEY = {
   doubleTapMs: 350,
   /** Ignore a down/up pair shorter than this — a stray tap, not a hold. */
   minHoldMs: 120,
+  /**
+   * A press released within this window is a *tap*; longer is a hold. A
+   * double-tap is tap-then-tap — a long dictation hold followed quickly by a
+   * new press must never latch hands-free.
+   */
+  tapMaxMs: 300,
+  /**
+   * While a physical hold is live, the bridge asks the HID system this often
+   * whether the key is actually still down. Event delivery can lose an up —
+   * a tap disabled for slowness, another app's active tap — and a lost up
+   * used to mean "dictation never stops".
+   */
+  physicalPollMs: 250,
 } as const

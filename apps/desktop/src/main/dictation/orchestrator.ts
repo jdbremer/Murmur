@@ -15,8 +15,11 @@ import { createLogger, redact, type Logger } from '../logging'
 import { SilenceTracker, trimSilence } from '../audio/vad'
 import { PreRollBuffer, UtteranceBuffer } from '../audio/buffer'
 import {
+  buildCommandPrompt,
   buildPolishPrompt,
+  checkCommandOutput,
   checkPolishOutput,
+  maxCommandOutputTokens,
   maxOutputTokens,
   shouldSkipPolish,
 } from '../engines/polish/prompt'
@@ -80,12 +83,19 @@ export interface OrchestratorDeps {
   styleFor(category: AppCategory): StyleProfile
   /** Frontmost app at hotkey-down. `null` on non-macOS or when unknown. */
   frontmostApp(): { bundleId: string; name: string } | null
+  /**
+   * The focused element's selected text at hotkey-down, or `null` when there
+   * is none (or command mode is disabled). A non-empty selection flips the
+   * utterance into command mode (PLAN §18.1): the speech becomes an edit
+   * instruction and the result replaces the selection.
+   */
+  selection?(): string | null
   /** Persists a finished dictation. Failures here must not break the loop. */
   persist(record: Omit<DictationRecord, 'id'>): void
   /** High-rate mic level for the Bar's waveform. */
   onLevel?(level: number): void
   /**
-   * Clear a stuck OS hotkey latch (Ctrl+Space Space key) after a failed begin.
+   * Clear a stuck OS hotkey latch (e.g. Space after a failed begin on Windows).
    * Optional — tests omit it.
    */
   releaseHotkeyLatch?(): void
@@ -205,7 +215,23 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       return
     }
 
-    this.#handsFree = options.handsFree ?? false
+    // Read the selection *now*, not at insert time: it is the thing the user
+    // was pointing at when they pressed the key, and reading it later would
+    // race their own click-away. Two gates before the AX read even happens:
+    // hands-free never enters command mode (a latched session over a selection
+    // would edit it on every silence-finalise), and command mode requires a
+    // *ready* polish engine — with polishing off or no model, dictating over a
+    // selection must stay plain dictation, which pastes over it exactly the
+    // way typing would. Erroring there would turn a everyday habit into lost
+    // speech.
+    const handsFree = options.handsFree ?? false
+    const polishReady = (() => {
+      const engine = this.#deps.polish()
+      return engine !== null && engine.status().state === 'ready'
+    })()
+    const selection = handsFree || !polishReady ? null : (this.#deps.selection?.() ?? null)
+
+    this.#handsFree = handsFree
     this.#finishing = false
     this.#context = {
       startedAt: this.#now(),
@@ -213,6 +239,8 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       category,
       settings,
       sttModelId: settings.sttModelId ?? status.modelId ?? 'unknown',
+      mode: selection ? 'command' : 'dictate',
+      selection,
     }
 
     this.#buffer.clear()
@@ -224,7 +252,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     this.#phase = 'listening'
     this.#deps.audio.start(settings.micDeviceId)
-    this.#deps.machine.startListening(this.#handsFree)
+    this.#deps.machine.startListening(this.#handsFree, selection !== null)
     this.#armStage(TIMEOUTS.captureStartMs + AUDIO.maxUtteranceMs, 'listening')
   }
 
@@ -239,7 +267,13 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
   startHandsFree(): void {
     if (this.#phase === 'listening') {
       this.#handsFree = true
-      this.#deps.machine.startListening(true)
+      // Hands-free never edits a selection: a latched session would fire the
+      // edit on its first silence and then keep dictating over the result. If
+      // this hold began in command mode, demote it to plain dictation.
+      if (this.#context && this.#context.mode === 'command') {
+        this.#context = { ...this.#context, mode: 'dictate', selection: null }
+      }
+      this.#deps.machine.startListening(true, false)
       return
     }
     if (this.#phase === 'idle') this.begin({ handsFree: true })
@@ -289,11 +323,14 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
   }
 
-  /** One PCM frame from the capture renderer. */
+  /**
+   * One PCM frame from the capture renderer.
+   *
+   * Frames carry no metering duty: the Bar's waveform is fed by the capture
+   * renderer's ~30 Hz `audio.meter` channel, because one RMS value per 100 ms
+   * frame is a 10 Hz stutter, not a waveform (PLAN §2.1).
+   */
   pushFrame(frame: Float32Array): void {
-    const level = this.#deps.onLevel ? levelOf(frame) : 0
-    this.#deps.onLevel?.(level)
-
     if (this.#phase !== 'listening') {
       // Between utterances the mic stays warm; keep the rolling pre-roll fresh.
       this.#preRoll.push(frame)
@@ -373,7 +410,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // -- STT ---------------------------------------------------------------
     this.#phase = 'transcribing'
-    this.#deps.machine.startProcessing('transcribing')
+    this.#deps.machine.startProcessing('transcribing', context.mode === 'command')
 
     let transcript: Transcript
     try {
@@ -409,6 +446,12 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       return
     }
     this.#log.debug(`transcript ${redact(rawText)} in ${transcript.durationMs} ms`)
+
+    // -- command mode: the speech is an instruction, not content -------------
+    if (context.mode === 'command' && context.selection) {
+      await this.#finishCommand(context, runId, rawText, transcript.durationMs, durationMs)
+      return
+    }
 
     // -- polish (skippable) ------------------------------------------------
     let polishedText: string | null = null
@@ -518,9 +561,152 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.#abort = null
     this.#context = null
     this.#phase = 'idle'
+    this.#handsFree = false
     this.#finishing = false
     this.#deps.machine.finishInserted(
       finalText.length,
+      injection.method === 'accessibility' ? 'accessibility' : 'paste',
+    )
+    this.emit('completed', { ...record, id: '' })
+  }
+
+  /**
+   * Command mode's back half (PLAN §18.1). The transcript is an instruction;
+   * the polishing model rewrites the *selection* per that instruction, and the
+   * result replaces it through the normal injection path — a paste with a live
+   * selection replaces it in every ordinary app, and the AX fallback writes
+   * `kAXSelectedText` which does the same by definition.
+   *
+   * Failure discipline differs from dictation on purpose: there is no raw
+   * fallback here. Inserting the spoken *instruction* over the user's selected
+   * text would be destructive, so every failure path refuses and leaves the
+   * selection alone.
+   */
+  async #finishCommand(
+    context: UtteranceContext,
+    runId: number,
+    instruction: string,
+    sttMs: number,
+    durationMs: number,
+  ): Promise<void> {
+    const selection = context.selection
+    if (!selection) {
+      this.#fail('unknown', 'The selection went away.')
+      return
+    }
+
+    const polishEngine = this.#deps.polish()
+    const status = polishEngine?.status()
+    if (!polishEngine || status?.state !== 'ready') {
+      this.#fail(
+        'polish-failed',
+        'Editing a selection needs a polishing model — pick one in the Hub.',
+      )
+      return
+    }
+
+    this.#phase = 'polishing'
+    this.#deps.machine.startProcessing('polishing', true)
+    const polishModelId = context.settings.polishModelId ?? status.modelId
+
+    let edited: string
+    let polishMs = 0
+    try {
+      const prompt = buildCommandPrompt({
+        instruction,
+        selection,
+        language: context.settings.language,
+      })
+      const abort = this.#abort ?? new AbortController()
+      this.#abort = abort
+      const result = await this.#withTimeout(
+        TIMEOUTS.polishMs,
+        'polishing',
+        polishEngine.polish({
+          systemPrompt: prompt.systemPrompt,
+          examples: prompt.examples,
+          userText: prompt.userText,
+          maxTokens: maxCommandOutputTokens(selection),
+          signal: abort.signal,
+        }),
+      )
+      polishMs = result.durationMs
+      if (this.#runId !== runId) return
+
+      if (result.truncated) {
+        this.#fail(
+          'polish-failed',
+          'The edit came back incomplete — your selection is untouched. Try a shorter selection.',
+        )
+        return
+      }
+      const verdict = checkCommandOutput(result.text)
+      if (!verdict.ok) {
+        this.#fail('polish-failed', 'The model returned nothing — your selection is untouched.')
+        return
+      }
+      edited = result.text.trim()
+    } catch (error) {
+      if (this.#runId !== runId) return
+      this.#fail(
+        error instanceof StageTimeoutError ? 'timeout' : 'polish-failed',
+        describe(error, 'Could not edit the selection'),
+      )
+      return
+    }
+    if (this.#runId !== runId) return
+
+    this.#phase = 'inserting'
+    this.#deps.machine.startInserting()
+
+    let injection: InjectionResult
+    try {
+      injection = await this.#withTimeout(
+        TIMEOUTS.insertMs,
+        'inserting',
+        Promise.resolve(this.#deps.injector.insert(edited)),
+      )
+    } catch (error) {
+      if (this.#runId !== runId) return
+      this.#fail(
+        error instanceof StageTimeoutError ? 'timeout' : 'insert-failed',
+        describe(error, 'Could not replace the selection'),
+      )
+      return
+    }
+    if (this.#runId !== runId) return
+    if (!injection.ok) {
+      this.#fail(
+        injection.reason === 'secure-input' ? 'secure-input' : 'insert-failed',
+        injection.error ?? 'Could not replace the selection',
+      )
+      return
+    }
+
+    const record: Omit<DictationRecord, 'id'> = {
+      ts: context.startedAt,
+      rawText: instruction,
+      polishedText: edited,
+      appBundleId: context.frontmostBundleId,
+      appCategory: context.category,
+      durationMs,
+      sttModelId: context.sttModelId,
+      polishModelId,
+      timings: { sttMs, polishMs, totalMs: this.#now() - context.startedAt },
+    }
+    try {
+      this.#deps.persist(record)
+    } catch (error) {
+      this.#log.error('could not persist the history row:', error)
+    }
+
+    this.#abort = null
+    this.#context = null
+    this.#phase = 'idle'
+    this.#handsFree = false
+    this.#finishing = false
+    this.#deps.machine.finishInserted(
+      edited.length,
       injection.method === 'accessibility' ? 'accessibility' : 'paste',
     )
     this.emit('completed', { ...record, id: '' })
@@ -602,6 +788,9 @@ interface UtteranceContext {
   category: AppCategory
   settings: OrchestratorSettings
   sttModelId: string
+  /** `command` when text was selected at hotkey-down (PLAN §18.1). */
+  mode: 'dictate' | 'command'
+  selection: string | null
 }
 
 export class StageTimeoutError extends Error {
@@ -617,16 +806,4 @@ function describe(error: unknown, fallback: string): string {
   if (error instanceof StageTimeoutError) return 'That took too long — try again'
   if (error instanceof Error && error.message) return error.message
   return fallback
-}
-
-/** Cheap RMS→0..1 level, duplicated from the VAD so the hot path stays allocation-free. */
-function levelOf(frame: Float32Array): number {
-  let sum = 0
-  for (let index = 0; index < frame.length; index += 1) {
-    const sample = frame[index] ?? 0
-    sum += sample * sample
-  }
-  const rms = Math.sqrt(sum / Math.max(1, frame.length))
-  const db = 20 * Math.log10(Math.max(rms, 1e-10))
-  return Math.min(1, Math.max(0, (db + 60) / 60))
 }

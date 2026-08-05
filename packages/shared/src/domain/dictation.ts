@@ -76,10 +76,14 @@ export const DictationEventSchema = z.discriminatedUnion('state', [
     handsFree: z.boolean().default(false),
     /** Normalised 0..1 mic amplitude. */
     level: z.number().min(0).max(1).default(0),
+    /** True when this utterance is editing a selection (PLAN §18.1). */
+    command: z.boolean().default(false),
   }),
   z.object({
     state: z.literal('processing'),
     stage: z.enum(['transcribing', 'polishing']).default('transcribing'),
+    /** True when this utterance is editing a selection (PLAN §18.1). */
+    command: z.boolean().default(false),
   }),
   z.object({ state: z.literal('inserting') }),
   z.object({
@@ -122,6 +126,43 @@ export const AudioFrameSchema = z.object({
   ts: z.number().nonnegative(),
 })
 export type AudioFrame = z.infer<typeof AudioFrameSchema>
+
+/**
+ * How long the momentary `inserted` / `error` events stay on screen
+ * (PLAN §2.1: "quick ✓ pulse", "auto-dismiss ~2.5 s").
+ *
+ * Shared because two processes honour the same hold: the Bar renderer keeps
+ * drawing the momentary visual for this long, and main keeps the Bar *window*
+ * alive for the same span before retiring it — the machine settles to idle
+ * silently when it emits a momentary event, so no idle event will do it.
+ */
+export const MOMENTARY_HOLD_MS = Object.freeze({
+  inserted: 900,
+  error: 2_500,
+})
+
+/**
+ * One selectable microphone, as the hidden capture renderer sees it.
+ *
+ * Enumerated in that renderer rather than in the Hub because `getUserMedia`
+ * lives there: device *labels* are only exposed to a context that holds (or has
+ * held) microphone permission, so any other window would render a list of
+ * anonymous ids. Main caches the last list and serves it to the pickers.
+ */
+export const AudioDeviceSchema = z.object({
+  /** `MediaDeviceInfo.deviceId`. */
+  deviceId: z.string().min(1),
+  /** Empty until microphone permission has been granted at least once. */
+  label: z.string().default(''),
+  /** True for the entry macOS reports as the system default input. */
+  isDefault: z.boolean().default(false),
+})
+export type AudioDevice = z.infer<typeof AudioDeviceSchema>
+
+export const AudioDeviceListSchema = z.object({
+  devices: z.array(AudioDeviceSchema).default([]),
+})
+export type AudioDeviceList = z.infer<typeof AudioDeviceListSchema>
 
 /** Lifecycle reports from the hidden capture renderer. */
 export const AudioCaptureStatusSchema = z.discriminatedUnion('status', [

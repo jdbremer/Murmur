@@ -22,6 +22,7 @@
 
 const DEFAULT_TARGET_RATE = 16000
 const DEFAULT_FRAME_SAMPLES = 1600 // 100 ms at 16 kHz
+const DEFAULT_METER_SAMPLES = 533 // ~33 ms at 16 kHz — a 30 Hz meter
 
 class CaptureProcessor extends AudioWorkletProcessor {
   constructor(options) {
@@ -30,6 +31,7 @@ class CaptureProcessor extends AudioWorkletProcessor {
     const processorOptions = (options && options.processorOptions) || {}
     const targetSampleRate = processorOptions.targetSampleRate || DEFAULT_TARGET_RATE
     const frameSamples = processorOptions.frameSamples || DEFAULT_FRAME_SAMPLES
+    const meterSamples = processorOptions.meterSamples || DEFAULT_METER_SAMPLES
 
     // `sampleRate` is a global in AudioWorkletGlobalScope: the context's rate.
     this.ratio = sampleRate / targetSampleRate
@@ -37,6 +39,13 @@ class CaptureProcessor extends AudioWorkletProcessor {
 
     this.frame = new Float32Array(frameSamples)
     this.filled = 0
+
+    // The ~30 Hz meter (PLAN §2.1). Raw sums only: the dB mapping the Bar wants
+    // lives in `meter.ts`, where it can be unit-tested — this file cannot be.
+    this.meterSamples = meterSamples
+    this.meterSum = 0
+    this.meterPeak = 0
+    this.meterCount = 0
 
     // Box-filter accumulator for the resampler.
     this.sum = 0
@@ -100,6 +109,23 @@ class CaptureProcessor extends AudioWorkletProcessor {
   }
 
   #emit(value) {
+    // Metered before the streaming gate: the meter reflects the microphone for
+    // as long as the graph runs, while frames are only posted on demand.
+    this.meterSum += value * value
+    const magnitude = value < 0 ? -value : value
+    if (magnitude > this.meterPeak) this.meterPeak = magnitude
+    this.meterCount += 1
+    if (this.meterCount >= this.meterSamples) {
+      this.port.postMessage({
+        type: 'meter',
+        rms: Math.sqrt(this.meterSum / this.meterCount),
+        peak: this.meterPeak > 1 ? 1 : this.meterPeak,
+      })
+      this.meterSum = 0
+      this.meterPeak = 0
+      this.meterCount = 0
+    }
+
     if (!this.streaming) return
 
     this.frame[this.filled] = value
@@ -121,6 +147,9 @@ class CaptureProcessor extends AudioWorkletProcessor {
     this.sum = 0
     this.count = 0
     this.phase = 0
+    this.meterSum = 0
+    this.meterPeak = 0
+    this.meterCount = 0
   }
 }
 

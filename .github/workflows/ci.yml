@@ -1,0 +1,91 @@
+# CI (PLAN §11, §15.4; HANDOFF #6).
+#
+# One macOS job runs the same gate a developer runs locally — install,
+# native module, typecheck, lint, format, tests, build — because macos-14 is
+# an arm64 machine and `npm run native:build` there is the check that would
+# have caught the ARC compile bug the hard way.
+#
+# Sidecars are deliberately NOT built per-PR: whisper.cpp + llama.cpp compile
+# for minutes and change only when a pin bumps, which PLAN §16 already gates
+# on the bench suite. They build on demand (workflow_dispatch) and weekly, so
+# a broken upstream tag is noticed within days rather than at release time.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly sidecar canary — Mondays 06:00 UTC (see the sidecars job).
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: typecheck · lint · test · build (macOS arm64)
+    if: github.event_name != 'schedule'
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the native module
+        run: npm run native:build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  sidecars:
+    name: sidecar binaries (on demand + weekly)
+    runs-on: macos-14
+    timeout-minutes: 60
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache by pinned tag
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: .sidecars/bin
+          key: sidecars-${{ runner.os }}-${{ hashFiles('scripts/sidecars/*.sh') }}
+
+      - name: Build whisper-server and llama-server
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          brew install cmake || true
+          scripts/sidecars/build-whisper.sh
+          scripts/sidecars/build-llama.sh
+
+      - name: Report
+        run: |
+          ls -la .sidecars/bin
+          lipo -info .sidecars/bin/whisper-server .sidecars/bin/llama-server
+
+# The weekly sidecar canary. Kept at the bottom so the trigger list above
+# stays readable.

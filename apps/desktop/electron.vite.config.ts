@@ -55,6 +55,17 @@ export default defineConfig({
       alias: { '@': rendererRoot },
     },
     build: {
+      /**
+       * The capture worklet must stay a real file.
+       *
+       * Vite inlines small assets as `data:` URLs, and
+       * `audioWorklet.addModule()` fetches its module under the page's CSP —
+       * where `script-src 'self'` (see `main/security.ts`) rejects `data:`
+       * outright. Inlining it would therefore break the microphone in
+       * production only, which is the worst possible place to find out.
+       */
+      assetsInlineLimit: (filePath: string) =>
+        filePath.endsWith('capture-processor.js') ? false : undefined,
       rollupOptions: {
         input: {
           hub: resolve(rendererRoot, 'hub/index.html'),

@@ -77,9 +77,13 @@ export class ExternalPolishEngine implements PolishEngine {
       baseUrl: endpoint.baseUrl,
       apiKey: endpoint.apiKey,
       model: endpoint.model,
+      // A user-supplied endpoint may legitimately be non-loopback (PLAN §7.1);
+      // the warning for that ships in this engine's status, not in the client.
+      fetchImpl: (url, init) => globalThis.fetch(url, init),
     })
-    const text = unwrapModelOutput(await client.complete(request))
-    return { text, durationMs: Date.now() - started }
+    const completion = await client.complete(request)
+    const text = unwrapModelOutput(completion.text)
+    return { text, durationMs: Date.now() - started, truncated: completion.truncated }
   }
 
   async unload(): Promise<void> {

@@ -1,13 +1,20 @@
 /**
- * The **only** way Murmur reaches the network (PLAN §10.2, §15.3).
+ * The **only** ways Murmur reaches a network (PLAN §10.2, §10.3, §15.3).
  *
- * Everything that could ever leave the machine funnels through
- * {@link allowlistedFetch}, which refuses any host that is not on the Hugging
- * Face allowlist. There is no escape hatch and no configuration knob: a
- * reviewer can grep for `fetch(` in `src/main`, find only this file, and be
- * done. The loopback sidecar clients do *not* use it — they talk to
- * `127.0.0.1` and are covered by {@link loopbackFetch}, which is equally strict
- * in the other direction (loopback only, never the internet).
+ * Two wrappers with opposite guarantees, and nothing else:
+ *
+ *  - {@link allowlistedFetch} — model downloads. Refuses any host that is not
+ *    on the Hugging Face allowlist, and re-checks every redirect hop.
+ *  - {@link loopbackFetch} — the sidecar clients. Refuses any host that is
+ *    *not* loopback, so a request that thinks it is going to our local
+ *    `whisper-server` or `llama-server` can never end up on the internet.
+ *
+ * A reviewer can verify the claim: `fetch(` in `src/main` resolves to this
+ * file's two wrappers, plus the polish `ChatClient`, which takes its fetch as
+ * an explicit constructor argument — {@link loopbackFetch} when it fronts the
+ * bundled llama-server, the plain global when the user configured their own
+ * endpoint (allowed by PLAN §7.1, and loudly warned about in the engine status
+ * when it is not loopback).
  *
  * Redirects are followed manually so every hop is re-checked; `fetch`'s own
  * `redirect: 'follow'` would let hop #2 land anywhere. Hugging Face always
@@ -151,6 +158,68 @@ function isRedirect(status: number): boolean {
 export function isLoopbackHost(host: string): boolean {
   const normalised = host.toLowerCase().replace(/^\[|\]$/g, '')
   return normalised === '127.0.0.1' || normalised === 'localhost' || normalised === '::1'
+}
+
+export class NonLoopbackHostError extends Error {
+  override readonly name = 'NonLoopbackHostError'
+  readonly host: string
+
+  constructor(url: string, host: string) {
+    super(
+      `Refused to send a sidecar request to "${host}" — sidecar traffic must stay on ` +
+        `loopback (PLAN §10.3). URL: ${scrubSecrets(url)}`,
+    )
+    this.host = host
+  }
+}
+
+/**
+ * Plain `RequestInit` plus the two conveniences every sidecar call wants.
+ * Extending `RequestInit` unmodified is deliberate: it makes `loopbackFetch`
+ * itself a valid {@link FetchLike}, so it can be handed to the polish
+ * `ChatClient` as its transport.
+ */
+export interface LoopbackFetchOptions extends RequestInit {
+  /** Bearer token added as an `authorization` header. */
+  token?: string | undefined
+  /** Overrides `globalThis.fetch`; tests pass a fake. */
+  fetchImpl?: FetchLike
+}
+
+/**
+ * `fetch`, restricted to loopback — the inverse guarantee to
+ * {@link allowlistedFetch}. A mistyped sidecar base URL fails here instead of
+ * leaking audio or a prompt (PLAN §10.3).
+ *
+ * @throws {NonLoopbackHostError} when the URL is unparseable or its host is
+ *   anything but `127.0.0.1`, `localhost` or `::1`.
+ */
+export async function loopbackFetch(
+  url: string,
+  options: LoopbackFetchOptions = {},
+): Promise<Response> {
+  const { token, fetchImpl, ...init } = options
+
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new NonLoopbackHostError(url, '<unparseable>')
+  }
+  if (!isLoopbackHost(parsed.hostname)) {
+    throw new NonLoopbackHostError(url, parsed.hostname)
+  }
+
+  const headers = new Headers(init.headers)
+  if (token) headers.set('authorization', `Bearer ${token}`)
+
+  const doFetch: FetchLike = fetchImpl ?? ((u, i) => globalThis.fetch(u, i))
+  // `redirect: 'error'`, unconditionally — a caller-supplied value is ignored.
+  // fetch's default is to follow up to 20 hops, and hop #2 can leave loopback:
+  // whatever answers on the port could 307 the body — audio, a prompt —
+  // straight off the machine. A sidecar has no business redirecting at all, so
+  // any redirect is treated as the attack it would be.
+  return doFetch(url, { ...init, headers, redirect: 'error' })
 }
 
 /**

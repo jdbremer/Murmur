@@ -21,6 +21,7 @@ const api: MurmurApi = {
   app: {
     version: () => ipc.invoke('app.version'),
     info: () => ipc.invoke('app.info'),
+    devMode: () => ipc.invoke('app.devMode'),
     quit: () => ipc.invoke('app.quit'),
     openHub: () => ipc.invoke('app.openHub'),
   },
@@ -43,8 +44,18 @@ const api: MurmurApi = {
   audio: {
     sendFrame: (frame) => ipc.send('audio.frame', frame),
     reportStatus: (status) => ipc.send('audio.status', status),
+    reportLevel: (level) => ipc.send('audio.meter', level),
+    reportDevices: (devices) => ipc.send('audio.devices', devices),
     onCommand: (listener) => ipc.on('audio.command', listener),
     onCaptureStatus: (listener) => ipc.on('audio.captureStatus', listener),
+    listDevices: () => ipc.invoke('audio.listDevices'),
+    onDevicesChanged: (listener) => ipc.on('audio.devicesChanged', listener),
+    captureStatus: () => ipc.invoke('audio.captureStatus'),
+    onCaptureChanged: (listener) => ipc.on('audio.captureChanged', listener),
+  },
+
+  bar: {
+    setPointerRegion: (region) => ipc.send('bar.pointerRegion', region),
   },
 
   models: {
