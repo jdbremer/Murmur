@@ -14,7 +14,7 @@ import type {
   StyleRepository,
 } from '../store/repositories'
 import type { WindowManager } from '../windows/manager'
-import type { AudioDeviceList } from '@murmur/shared'
+import type { AudioCaptureStatus, AudioDeviceList } from '@murmur/shared'
 import { framePcm } from '../audio/buffer'
 import { native } from '../native'
 import { simulateDictation } from '../dictation/simulator'
@@ -153,9 +153,18 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   ipc.receive('audio.frame', (frame) => {
     orchestrator.pushFrame(framePcm(frame.pcm, frame.sampleCount))
   })
+  // The orchestrator only cares about errors mid-dictation (an idle error has
+  // no dictation to fail). The Hub cares about *every* report — a permission
+  // denied at the startup warm used to vanish here (HANDOFF item #4) — so the
+  // last one is cached for `audio.captureStatus` and broadcast as
+  // `audio.captureChanged`.
+  let captureStatus: AudioCaptureStatus = { status: 'idle' }
   ipc.receive('audio.status', (status) => {
+    captureStatus = status
+    ipc.broadcast(windows.uiWebContents(), 'audio.captureChanged', status)
     if (status.status === 'error') orchestrator.reportAudioError(status.message)
   })
+  ipc.handle('audio.captureStatus', () => captureStatus)
   // The capture renderer meters at ~30 Hz; main is only the relay to the Bar,
   // which interpolates it up to 60 fps (PLAN §2.1).
   ipc.receive('audio.meter', (level) => {

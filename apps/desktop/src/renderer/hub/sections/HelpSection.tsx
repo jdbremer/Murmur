@@ -7,7 +7,8 @@ import type {
   PermissionsStatus,
 } from '@murmur/shared'
 
-import { Badge, Button, Card, InlineError, Row, Section } from '../../components/Section'
+import { Badge, Banner, Button, Card, InlineError, Row, Section } from '../../components/Section'
+import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useEngines } from '../../hooks/useEngines'
 import { engineLabel } from '../../format'
 import { dataLocation, isMacPlatform } from '../../lib/platform'
@@ -27,6 +28,7 @@ export function HelpSection(): React.JSX.Element {
   const [version, setVersion] = useState('—')
   const [error, setError] = useState<string | null>(null)
   const engines = useEngines()
+  const capture = useCaptureStatus()
   const mac = isMacPlatform()
 
   const refresh = useCallback(() => {
@@ -67,6 +69,15 @@ export function HelpSection(): React.JSX.Element {
       actions={<Button onClick={refresh}>Check again</Button>}
     >
       <InlineError>{error}</InlineError>
+
+      {capture?.status === 'error' ? (
+        <div className="mb-5">
+          <Banner tone="danger" title="The microphone is not working">
+            {capture.message} Dictation will fail until this is fixed — the usual causes are a
+            denied permission or another app holding the device.
+          </Banner>
+        </div>
+      ) : null}
 
       {!mac ? (
         <Card className="mb-5 border-dashed">

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import { SIDECAR, TIMEOUTS } from '../config'
 import { createLogger, type Logger } from '../logging'
+import { loopbackFetch } from '../net/fetch'
 
 /**
  * Lifecycle for the loopback inference servers (`whisper-server`,
@@ -283,8 +284,8 @@ export class SidecarProcess {
         throw new Error(`${this.spec.name} exited before becoming healthy`)
       }
       try {
-        const response = await fetch(url, {
-          headers: { authorization: `Bearer ${token}` },
+        const response = await loopbackFetch(url, {
+          token,
           signal: AbortSignal.timeout(2_000),
         })
         // Any answer at all means the HTTP server is up. 401 would mean our own

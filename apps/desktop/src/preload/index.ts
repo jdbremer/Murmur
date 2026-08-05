@@ -47,6 +47,8 @@ const api: MurmurApi = {
     onCommand: (listener) => ipc.on('audio.command', listener),
     listDevices: () => ipc.invoke('audio.listDevices'),
     onDevicesChanged: (listener) => ipc.on('audio.devicesChanged', listener),
+    captureStatus: () => ipc.invoke('audio.captureStatus'),
+    onCaptureChanged: (listener) => ipc.on('audio.captureChanged', listener),
   },
 
   bar: {

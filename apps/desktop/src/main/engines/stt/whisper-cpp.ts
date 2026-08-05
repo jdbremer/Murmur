@@ -9,7 +9,7 @@ import {
 
 import { AUDIO, TIMEOUTS } from '../../config'
 import { createLogger, redact, type Logger } from '../../logging'
-import { isLoopbackHost } from '../../net/fetch'
+import { loopbackFetch } from '../../net/fetch'
 import {
   resolveSidecarBinary,
   SidecarProcess,
@@ -179,9 +179,6 @@ export class WhisperCppEngine implements SttEngine {
     if (!sidecar || !baseUrl || !token || sidecar.info().state !== 'running') {
       throw new Error(`whisper-server is not ready (${this.#status.get().detail || 'not started'})`)
     }
-    // Belt and braces: a base URL that is not loopback means something replaced
-    // it, and a prompt must never leave the machine (PLAN §10.3).
-    assertLoopback(baseUrl)
 
     const started = Date.now()
     const form = new FormData()
@@ -196,10 +193,13 @@ export class WhisperCppEngine implements SttEngine {
     const prompt = buildInitialPrompt(options.vocabulary)
     if (prompt) form.append('prompt', prompt)
 
-    const response = await fetch(`${baseUrl}/inference`, {
+    // loopbackFetch refuses a non-loopback base URL outright: if something
+    // replaced it, the audio must fail loudly rather than leave the machine
+    // (PLAN §10.3).
+    const response = await loopbackFetch(`${baseUrl}/inference`, {
       method: 'POST',
       body: form,
-      headers: { authorization: `Bearer ${token}` },
+      token,
       signal: options.signal ?? AbortSignal.timeout(TIMEOUTS.sidecarRequestMs),
     })
 
@@ -307,11 +307,4 @@ export function averageLogProb(payload: WhisperResponse): number | null {
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
   if (values.length === 0) return null
   return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function assertLoopback(baseUrl: string): void {
-  const { hostname } = new URL(baseUrl)
-  if (!isLoopbackHost(hostname)) {
-    throw new Error(`Refusing to send audio to non-loopback sidecar host "${hostname}"`)
-  }
 }

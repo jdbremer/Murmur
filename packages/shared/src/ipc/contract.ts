@@ -135,6 +135,14 @@ export const invokeContract = {
    * notifications still has a list to render.
    */
   'audio.listDevices': { request: z.void(), response: AudioDeviceListSchema },
+  /**
+   * The capture renderer's last lifecycle report. This is how a mic failure
+   * that happened while nothing was listening — permission denied at the
+   * startup warm, a device already in use — stays visible: the orchestrator
+   * rightly ignores errors while idle (there is no dictation to fail), so the
+   * Hub reads the state from here instead (HANDOFF item #4).
+   */
+  'audio.captureStatus': { request: z.void(), response: AudioCaptureStatusSchema },
 
   // --- models (PLAN §8) --------------------------------------------------
   'models.list': { request: z.void(), response: ModelsListSchema },
@@ -235,6 +243,8 @@ export const eventContract = {
   'audio.command': AudioCommandSchema,
   /** The microphone list changed (device plugged in, AirPods connected). */
   'audio.devicesChanged': AudioDeviceListSchema,
+  /** The capture renderer's lifecycle changed — including errors while idle. */
+  'audio.captureChanged': AudioCaptureStatusSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract

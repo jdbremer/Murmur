@@ -4,6 +4,7 @@ import type { HotkeyKey } from '@murmur/shared'
 
 import {
   Badge,
+  Banner,
   Button,
   Card,
   InlineError,
@@ -13,6 +14,7 @@ import {
   Toggle,
 } from '../../components/Section'
 import { useAudioDevices, micOptions } from '../../hooks/useAudioDevices'
+import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDictationState } from '../../hooks/useDictationState'
 import { useSettings } from '../../hooks/useSettings'
 import { isMacPlatform } from '../../lib/platform'
@@ -76,6 +78,7 @@ const HISTORY_RETENTION = [
 export function SettingsSection(): React.JSX.Element {
   const { settings, update, error } = useSettings()
   const devices = useAudioDevices()
+  const capture = useCaptureStatus()
 
   if (!settings) {
     return <Section title="Settings" description="Loading…" />
@@ -141,6 +144,13 @@ export function SettingsSection(): React.JSX.Element {
       </Card>
 
       <h2 className="mb-2 text-[13px] font-semibold text-ink">Audio</h2>
+      {capture?.status === 'error' ? (
+        <div className="mb-3">
+          <Banner tone="danger" title="The microphone is not working">
+            {capture.message}
+          </Banner>
+        </div>
+      ) : null}
       <Card className="mb-6">
         <Row
           label="Microphone"

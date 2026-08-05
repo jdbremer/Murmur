@@ -61,6 +61,9 @@ export interface MurmurApi {
     /** Mic pickers: the last known device list. */
     listDevices(): Promise<Res<'audio.listDevices'>>
     onDevicesChanged(listener: (devices: Evt<'audio.devicesChanged'>) => void): Unsubscribe
+    /** The capture renderer's last lifecycle report — errors included. */
+    captureStatus(): Promise<Res<'audio.captureStatus'>>
+    onCaptureChanged(listener: (status: Evt<'audio.captureChanged'>) => void): Unsubscribe
   }
 
   /** Bar renderer only. */

@@ -92,10 +92,7 @@ describe('starterOptions', () => {
   })
 
   it('steps the recommendation down when the advisor says the big pair is tight', () => {
-    const options = starterOptions(
-      hardware({ 'gemma-3-4b-it-qat-q4_0': 'tight' }),
-      CATALOG,
-    )
+    const options = starterOptions(hardware({ 'gemma-3-4b-it-qat-q4_0': 'tight' }), CATALOG)
     expect(options[0]?.sttId).toBe('whisper-small-en')
     // The smaller option becomes the minimal pair, with polishing off.
     expect(options[1]?.sttId).toBe('whisper-tiny-en')
