@@ -280,7 +280,10 @@ export const invokeContract = {
        * are pushed instead of a generated sine — for agent G7 speech-file proof.
        * Cap keeps IPC bounded (~30 s at 16 kHz).
        */
-      samples: z.array(z.number()).max(16_000 * 30).optional(),
+      samples: z
+        .array(z.number())
+        .max(16_000 * 30)
+        .optional(),
     }),
     response: z.object({
       frames: z.number().int().nonnegative(),

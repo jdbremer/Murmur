@@ -8,6 +8,7 @@ dictation). Platform-shared product items (language picker UX, Parakeet catalog,
 History tab, insert-fallback copy toast) live in **HANDOFF.md**, not here.
 
 ---
+
 # Handoff ΓÇö remaining work
 
 Written 2026-08-05, superseding the 2026-08-04 version. Everything below is
@@ -28,15 +29,15 @@ Read this alongside [PLAN.md](./PLAN.md) (the product & engineering spec),
 
 ## Closed since the last handoff
 
-| # (old) | Item                      | How it closed                                                                                                                                                                                                                |
-| ------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| # (old) | Item                      | How it closed                                                                                                                                                                                                                    |
+| ------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1       | The Bar's real visuals    | 28-bar 60 fps canvas waveform fed by a ~30 Hz worklet meter (`audio.meter` ΓåÆ `audio.level`), shimmer, Γ£ô pulse, error hold, Reduce Motion path, click-through window + hover controls, Esc-while-listening via `EscapeCancel` |
-| 2       | Microphone picker         | Device list enumerated in the capture renderer (the only context that can see labels), cached in main, picker in Settings and in the Bar's hover menu                                                                        |
-| 3       | Onboarding                | Full PLAN ┬º2.4 sequence gated on the new `onboardingCompleted` setting; step logic pure + tested; Help rebuilt with live permission/engine panels                                                                            |
-| 4       | Idle mic errors swallowed | `audio.captureStatus` invoke + `audio.captureChanged` broadcast; surfaced in Settings and Help. The orchestrator's idle early-return stands ΓÇö it was right                                                                   |
-| 5       | `loopbackFetch` fiction   | Now real; whisper + sidecar health go through it, polish `ChatClient` takes its transport as a required ctor arg (loopback for bundled, global for external)                                                                 |
-| 6       | CI                        | `.github/workflows/ci.yml` ΓÇö full gate on macos-14; sidecars on demand + weekly canary                                                                                                                                       |
-| 7       | Never proven end to end   | Proven ΓÇö see header. `kill -USR2 <pid>` (dev builds) drives the real pipeline from a shell; `say` provides the speech                                                                                                        |
+| 2       | Microphone picker         | Device list enumerated in the capture renderer (the only context that can see labels), cached in main, picker in Settings and in the Bar's hover menu                                                                            |
+| 3       | Onboarding                | Full PLAN ┬º2.4 sequence gated on the new `onboardingCompleted` setting; step logic pure + tested; Help rebuilt with live permission/engine panels                                                                               |
+| 4       | Idle mic errors swallowed | `audio.captureStatus` invoke + `audio.captureChanged` broadcast; surfaced in Settings and Help. The orchestrator's idle early-return stands ΓÇö it was right                                                                     |
+| 5       | `loopbackFetch` fiction   | Now real; whisper + sidecar health go through it, polish `ChatClient` takes its transport as a required ctor arg (loopback for bundled, global for external)                                                                     |
+| 6       | CI                        | `.github/workflows/ci.yml` ΓÇö full gate on macos-14; sidecars on demand + weekly canary                                                                                                                                         |
+| 7       | Never proven end to end   | Proven ΓÇö see header. `kill -USR2 <pid>` (dev builds) drives the real pipeline from a shell; `say` provides the speech                                                                                                          |
 
 Two sidecar-spawn bugs found by the proof (the exact class HANDOFF predicted):
 whisper.cpp v1.9.2's server has **no `--api-key` flag** (exits at launch;
@@ -120,4 +121,3 @@ npm run typecheck && npm run lint && npm test && npm run build
 npm run dev               # MURMUR_DEBUG=1 MURMUR_LOG_TRANSCRIPTS=1 for the full trail
 # hands-off dictation: kill -USR2 <electron pid>; say "words"; kill -USR2 <pid>
 ```
-

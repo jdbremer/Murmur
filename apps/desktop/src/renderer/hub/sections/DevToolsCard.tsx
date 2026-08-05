@@ -143,10 +143,7 @@ export function DevToolsCard(): React.JSX.Element {
           <Button disabled={busy} onClick={() => void holdThenRelease()}>
             Hold {HOLD_MS / 1000}s then release
           </Button>
-          <Button
-            disabled={busy}
-            onClick={() => void edge('doubleTap', 'Double-tap → hands-free')}
-          >
+          <Button disabled={busy} onClick={() => void edge('doubleTap', 'Double-tap → hands-free')}>
             Double-tap
           </Button>
         </div>
@@ -167,7 +164,11 @@ export function DevToolsCard(): React.JSX.Element {
         >
           Re-warm mic
         </Button>
-        <Button disabled={busy} variant="danger" onClick={() => void window.murmur.dictation.cancel()}>
+        <Button
+          disabled={busy}
+          variant="danger"
+          onClick={() => void window.murmur.dictation.cancel()}
+        >
           Cancel
         </Button>
       </div>
@@ -221,9 +222,7 @@ function engineHint(status: EngineStatus | undefined): string | undefined {
   return bits.length > 0 ? bits.join(' · ') : undefined
 }
 
-function captureTone(
-  status: AudioCaptureStatus | null,
-): 'neutral' | 'positive' | 'warning' {
+function captureTone(status: AudioCaptureStatus | null): 'neutral' | 'positive' | 'warning' {
   if (!status) return 'neutral'
   if (status.status === 'ready') return 'positive'
   if (status.status === 'error') return 'warning'

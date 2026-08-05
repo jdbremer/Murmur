@@ -16,13 +16,7 @@
 
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import {
-  mkdirSync,
-  writeFileSync,
-  existsSync,
-  rmSync,
-  readFileSync,
-} from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -375,7 +369,9 @@ async function utterance(body = {}) {
 
   if (speechPath && body.useSine !== true) {
     const { samples, sampleRate } = wavToFloat32(speechPath)
-    log(`utterance: injecting speech WAV ${speechPath} (${samples.length} samples @ ${sampleRate} Hz)`)
+    log(
+      `utterance: injecting speech WAV ${speechPath} (${samples.length} samples @ ${sampleRate} Hz)`,
+    )
     // Cap IPC size: first ~12 s is enough for JFK.
     const capped = samples.length > 16_000 * 12 ? samples.slice(0, 16_000 * 12) : samples
     await injectPcm({ samples: capped, durationMs: Math.round((capped.length / 16_000) * 1000) })
@@ -502,8 +498,7 @@ const server = createServer(async (req, res) => {
       return json(res, 200, {
         ...(await injectPcm(body)),
         mode: 'internal-injectPcm',
-        note:
-          'Uses debug.injectPcm into the orchestrator. For real getUserMedia, install VB-Audio Cable and set MURMUR_AGENT_FAKE_AUDIO or play into CABLE Input.',
+        note: 'Uses debug.injectPcm into the orchestrator. For real getUserMedia, install VB-Audio Cable and set MURMUR_AGENT_FAKE_AUDIO or play into CABLE Input.',
       })
     }
 
@@ -542,7 +537,11 @@ server.listen(PORT, HOST, () => {
   log(`listening on http://${HOST}:${PORT}`)
   writeFileSync(
     join(AGENT_DIR, 'server.json'),
-    JSON.stringify({ host: HOST, port: PORT, pid: process.pid, startedAt: new Date().toISOString() }, null, 2),
+    JSON.stringify(
+      { host: HOST, port: PORT, pid: process.pid, startedAt: new Date().toISOString() },
+      null,
+      2,
+    ),
   )
 })
 

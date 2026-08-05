@@ -27,9 +27,7 @@ try {
 }
 
 export function osBackend() {
-  return nut
-    ? { backend: 'nut-js', error: null }
-    : { backend: 'powershell-win32', error: nutError }
+  return nut ? { backend: 'nut-js', error: null } : { backend: 'powershell-win32', error: nutError }
 }
 
 function ps(script) {
@@ -150,14 +148,19 @@ export async function pressKeys(input) {
   let keys
   let holdMs = 0
   if (typeof input === 'string') {
-    keys = input.split('+').map((k) => k.trim()).filter(Boolean)
-  } else if (Array.isArray(input)) {
     keys = input
-  } else if (input && typeof input === 'object') {
-    keys = input.keys || String(input.chord || '')
       .split('+')
       .map((k) => k.trim())
       .filter(Boolean)
+  } else if (Array.isArray(input)) {
+    keys = input
+  } else if (input && typeof input === 'object') {
+    keys =
+      input.keys ||
+      String(input.chord || '')
+        .split('+')
+        .map((k) => k.trim())
+        .filter(Boolean)
     holdMs = Number(input.holdMs || 0)
   } else {
     throw new Error('pressKeys expects a chord string or keys array')
@@ -267,7 +270,8 @@ function toSendKeysChord(keys) {
     left: '{LEFT}',
     right: '{RIGHT}',
   }
-  const body = special[String(main).toLowerCase()] || (main.length === 1 ? main : `{${main.toUpperCase()}}`)
+  const body =
+    special[String(main).toLowerCase()] || (main.length === 1 ? main : `{${main.toUpperCase()}}`)
   return mods.join('') + body
 }
 

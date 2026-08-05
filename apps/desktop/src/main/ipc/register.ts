@@ -49,7 +49,13 @@ export interface IpcContext {
   /** Mic stream controller — Dev tools re-warm through this. */
   audio: CaptureController
   /** Real paste path — exposed to Dev/agent for G5 insert proof. */
-  injector: { insert: (text: string) => { ok: boolean; method: 'paste' | 'accessibility' | 'none'; error?: string } }
+  injector: {
+    insert: (text: string) => {
+      ok: boolean
+      method: 'paste' | 'accessibility' | 'none'
+      error?: string
+    }
+  }
   dictations: DictationsRepository
   dictionary: DictionaryRepository
   style: StyleRepository

@@ -21,6 +21,7 @@ import {
   Row,
   Section,
 } from '../../components/Section'
+import { isWindowsPlatform } from '../../lib/platform'
 import { useModels } from '../../hooks/useModels'
 import { useSettings } from '../../hooks/useSettings'
 import { formatBytes, formatLanguages } from '../../format'
@@ -184,7 +185,9 @@ function ModelGroup({
         {engine ? <EngineBadge engine={engine} /> : null}
       </div>
 
-      {kind === 'polish' && !llamaRuntimeReady ? (
+      {/* The in-app download flow ships Windows builds only (engines.installSidecar
+          refuses elsewhere); mac/linux keep the engine badge + searched-paths story. */}
+      {kind === 'polish' && !llamaRuntimeReady && isWindowsPlatform() ? (
         <SidecarInstallCard
           title="Polishing needs llama-server"
           body="Gemma and other polish models are weights only. Murmur also needs the local llama-server runtime (like whisper-server for speech). Without it, dictation still works — text is inserted raw."
@@ -192,7 +195,7 @@ function ModelGroup({
           onInstalled={onRefresh}
         />
       ) : null}
-      {kind === 'stt' && !whisperRuntimeReady ? (
+      {kind === 'stt' && !whisperRuntimeReady && isWindowsPlatform() ? (
         <SidecarInstallCard
           title="Speech needs whisper-server"
           body="Whisper models need the local whisper-server binary next to the app."

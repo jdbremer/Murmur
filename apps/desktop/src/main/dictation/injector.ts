@@ -95,7 +95,8 @@ export class TextInjector {
       return {
         ok: false,
         reason: 'unsupported-platform',
-        message: 'Text insertion needs the native helper, which is not available yet on this build.',
+        message:
+          'Text insertion needs the native helper, which is not available yet on this build.',
       }
     }
     if (native.isSecureInputActive()) {

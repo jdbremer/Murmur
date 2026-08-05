@@ -1,4 +1,12 @@
-import { copyFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import {
+  copyFileSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
@@ -87,7 +95,8 @@ export async function installSidecarBinary(
       which,
       path: null,
       error: 'unsupported-platform',
-      detail: 'In-app sidecar install is Windows-only for now. Use scripts/sidecars/build-*.sh on macOS.',
+      detail:
+        'In-app sidecar install is Windows-only for now. Use scripts/sidecars/build-*.sh on macOS.',
     }
   }
 
@@ -135,7 +144,10 @@ export async function installSidecarBinary(
       }
     }
 
-    const destExe = join(outDir, which === 'llama-server' ? 'llama-server.exe' : 'whisper-server.exe')
+    const destExe = join(
+      outDir,
+      which === 'llama-server' ? 'llama-server.exe' : 'whisper-server.exe',
+    )
     copyFileSync(exe.path, destExe)
 
     // Copy sibling DLLs from the same directory as the exe.
@@ -176,10 +188,7 @@ async function downloadFile(url: string, dest: string): Promise<void> {
   await pipeline(nodeStream, createWriteStream(dest))
 }
 
-function findFile(
-  root: string,
-  names: readonly string[],
-): { path: string; dir: string } | null {
+function findFile(root: string, names: readonly string[]): { path: string; dir: string } | null {
   const wanted = new Set(names.map((n) => n.toLowerCase()))
   const stack = [root]
   while (stack.length > 0) {
@@ -207,4 +216,3 @@ function findFile(
   }
   return null
 }
-

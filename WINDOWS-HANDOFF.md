@@ -3,22 +3,23 @@
 **Scope: Windows only.** Cross-platform product queue: [HANDOFF.md](./HANDOFF.md).
 macOS: [MAC-HANDOFF.md](./MAC-HANDOFF.md). Spec: [PLAN.md](./PLAN.md).
 
-| Doc | Owner / purpose |
-| --- | --- |
-| [PLAN.md](./PLAN.md) | Shared product & engineering spec. Windows is §4.1 and milestone **M7**. |
-| [HANDOFF.md](./HANDOFF.md) | **App-wide** product backlog (language, Parakeet, History tab, insert-copy toast, privacy). |
-| [MAC-HANDOFF.md](./MAC-HANDOFF.md) | macOS residual work. |
-| **WINDOWS-HANDOFF.md** (this file) | Windows port status, gates, agent automation, OS-specific residual work. |
+| Doc                                | Owner / purpose                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------- |
+| [PLAN.md](./PLAN.md)               | Shared product & engineering spec. Windows is §4.1 and milestone **M7**.                    |
+| [HANDOFF.md](./HANDOFF.md)         | **App-wide** product backlog (language, Parakeet, History tab, insert-copy toast, privacy). |
+| [MAC-HANDOFF.md](./MAC-HANDOFF.md) | macOS residual work.                                                                        |
+| **WINDOWS-HANDOFF.md** (this file) | Windows port status, gates, agent automation, OS-specific residual work.                    |
 
 Session-only AI notes stay **out of the repo** (local agent state, scratch
 plans). Anything durable for the product lands here or in a small code change.
 
 **Autonomous loop:** hybrid computer-use via `scripts/agent/` (Playwright in-app
-+ nut.js/Win32 OS control + injectPcm mic). Humans optional.
 
-- Control API: [scripts/agent/README.md](./scripts/agent/README.md)  
-- Acceptance gates: [scripts/agent/DEFINITION-OF-DONE.md](./scripts/agent/DEFINITION-OF-DONE.md)  
-- Overnight prompt: [scripts/agent/OVERNIGHT-PROMPT.md](./scripts/agent/OVERNIGHT-PROMPT.md)
+- nut.js/Win32 OS control + injectPcm mic). Humans optional.
+
+* Control API: [scripts/agent/README.md](./scripts/agent/README.md)
+* Acceptance gates: [scripts/agent/DEFINITION-OF-DONE.md](./scripts/agent/DEFINITION-OF-DONE.md)
+* Overnight prompt: [scripts/agent/OVERNIGHT-PROMPT.md](./scripts/agent/OVERNIGHT-PROMPT.md)
 
 ```bash
 npm run agent:server          # keep running
@@ -36,33 +37,33 @@ npm run agent -- stop
 
 Verified on a Windows dev box (agent overnight loop — **commits only, never push**):
 
-| Gate | Status | Notes |
-| --- | --- | --- |
-| G0 Boot | **pass** | Hub loads; `platform=win32` |
-| G1 Dev loop | **pass** | `utterance` → listening→…→`stt-failed` (no model) |
-| G2 Mic sim | **pass** | `play-mic` / injectPcm frames land |
-| G3 UI Windows | **pass** | Settings = Right Ctrl / chords; **no** fn/⌘/⌥ |
-| G4 Native load | **pass** | `@murmur/native: active — win32 x64` (`src/win/murmur_native_win.cpp`) |
-| G5 Paste | **pass** | `debug.insertText` → Notepad file contains `hello` (SendInput + focus fix) |
-| G5b Word | **pass (canned)** | Recognizable word pasted; real STT word still G7 |
-| G6 Hotkey | **pass** | `WH_KEYBOARD_LL` installed; `startHotkeyListener` → true; Right Ctrl down/up via nut.js |
-| G7 STT | **pass** | `whisper-server.exe` + `whisper-tiny-en`; JFK sample → `inserted` (107 chars, paste) |
-| G8 Secure field | **pass** | Password TextBox focus → `secure-input` / “Secure field — Murmur will not type here.” |
-| G9 Elevated | **pass** | Early refuse via `isForegroundElevated` + clear admin/UIPI message (unit + native API; live elevated Notepad needs UAC) |
-| G10 Stability | **pass** | 20× short JFK utterance: 20 inserted, 0 stuck, 0 crash (~600 ms each) |
+| Gate            | Status            | Notes                                                                                                                   |
+| --------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| G0 Boot         | **pass**          | Hub loads; `platform=win32`                                                                                             |
+| G1 Dev loop     | **pass**          | `utterance` → listening→…→`stt-failed` (no model)                                                                       |
+| G2 Mic sim      | **pass**          | `play-mic` / injectPcm frames land                                                                                      |
+| G3 UI Windows   | **pass**          | Settings = Right Ctrl / chords; **no** fn/⌘/⌥                                                                           |
+| G4 Native load  | **pass**          | `@murmur/native: active — win32 x64` (`src/win/murmur_native_win.cpp`)                                                  |
+| G5 Paste        | **pass**          | `debug.insertText` → Notepad file contains `hello` (SendInput + focus fix)                                              |
+| G5b Word        | **pass (canned)** | Recognizable word pasted; real STT word still G7                                                                        |
+| G6 Hotkey       | **pass**          | `WH_KEYBOARD_LL` installed; `startHotkeyListener` → true; Right Ctrl down/up via nut.js                                 |
+| G7 STT          | **pass**          | `whisper-server.exe` + `whisper-tiny-en`; JFK sample → `inserted` (107 chars, paste)                                    |
+| G8 Secure field | **pass**          | Password TextBox focus → `secure-input` / “Secure field — Murmur will not type here.”                                   |
+| G9 Elevated     | **pass**          | Early refuse via `isForegroundElevated` + clear admin/UIPI message (unit + native API; live elevated Notepad needs UAC) |
+| G10 Stability   | **pass**          | 20× short JFK utterance: 20 inserted, 0 stuck, 0 crash (~600 ms each)                                                   |
 
 **Gates G0–G10** were green on the agent overnight loop. Human field testing
 continues; treat E2E with real voice + polish as still worth a casual poke.
 
 ### Windows residual (platform-specific)
 
-| Item | Notes |
-| --- | --- |
-| Ctrl+Space / Alt+Space chords | Removed from Settings; boot migrates to Right Ctrl — re-add only when Space latch is proven solid |
-| Bar visibility on multi-monitor | Repositions to cursor display; verify on real multi-monitor desks |
-| In-app sidecar install | Models UI installs whisper/llama from GitHub after confirm; keep HF allowlist story honest in docs |
-| Polish “Ready” after install | After `Install llama-server` + Gemma download, badge should be Ready — re-verify |
-| App-wide product items | See [HANDOFF.md](./HANDOFF.md) (language, Parakeet, History tab, insert-copy toast) |
+| Item                            | Notes                                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Ctrl+Space / Alt+Space chords   | Removed from Settings; boot migrates to Right Ctrl — re-add only when Space latch is proven solid  |
+| Bar visibility on multi-monitor | Repositions to cursor display; verify on real multi-monitor desks                                  |
+| In-app sidecar install          | Models UI installs whisper/llama from GitHub after confirm; keep HF allowlist story honest in docs |
+| Polish “Ready” after install    | After `Install llama-server` + Gemma download, badge should be Ready — re-verify                   |
+| App-wide product items          | See [HANDOFF.md](./HANDOFF.md) (language, Parakeet, History tab, insert-copy toast)                |
 
 Idle policy: if blocked, walk every Hub section — “would I like this as a user?” / advances hold→speak→insert.
 
@@ -89,27 +90,27 @@ Idle policy: if blocked, walk every Hub section — “would I like this as a us
 
 Only `@murmur/native` and packaging are per-OS. Windows implements:
 
-| Concern | Approach |
-| --- | --- |
-| Hold-to-talk | `WH_KEYBOARD_LL` in the native module; chords + suppression |
-| Text insert | Clipboard swap (already in main) + `SendInput` Ctrl+V; UIA fallback |
-| Frontmost app | `GetForegroundWindow` → process name / AUMID |
-| Permissions UI | Mic privacy; no fake Accessibility / Input Monitoring as on macOS |
-| Sidecars | `*.exe` resolution + PowerShell/CMake builds; ONNX path can land first |
-| Packaging | NSIS + signing later (after E2E) |
+| Concern        | Approach                                                               |
+| -------------- | ---------------------------------------------------------------------- |
+| Hold-to-talk   | `WH_KEYBOARD_LL` in the native module; chords + suppression            |
+| Text insert    | Clipboard swap (already in main) + `SendInput` Ctrl+V; UIA fallback    |
+| Frontmost app  | `GetForegroundWindow` → process name / AUMID                           |
+| Permissions UI | Mic privacy; no fake Accessibility / Input Monitoring as on macOS      |
+| Sidecars       | `*.exe` resolution + PowerShell/CMake builds; ONNX path can land first |
+| Packaging      | NSIS + signing later (after E2E)                                       |
 
 ---
 
 ## Phases (effort: S / M / L — not calendar)
 
-### A — Iteration cockpit · **M** · *landed (in tree)*
+### A — Iteration cockpit · **M** · _landed (in tree)_
 
 Dev-only Hub tools so we can iterate without a native hook:
 
 - Simulate Bar tour (`debug.simulateDictation`).
 - **Real pipeline** edges: hotkey down / up / double-tap / hold-then-release
   (`debug.simulateHotkey` exposed in Help → Developer).
-- Live mic level + capture status broadcast (`audio.captureStatus`), including
+- Live mic level + capture status broadcast (`audio.captureChanged`), including
   errors while idle.
 - Engine + native status strip; platform badge (`win32` / `darwin`).
 - Re-warm mic from the Hub (`debug.warmMic`).
@@ -124,12 +125,12 @@ Files (additive / small shared IPC): `WINDOWS-HANDOFF.md`, `DevToolsCard.tsx`,
 `scripts/agent/` — Playwright Electron driver for unattended start / screenshot /
 click / mic inject.
 
-### B — Windows surface (hide Mac chrome) · **S–M** · *landed (G3)*
+### B — Windows surface (hide Mac chrome) · **S–M** · _landed (G3)_
 
 Platform-specific Settings hotkey lists and Help copy. No fn / ⌘ / ⌥ on Windows.
 Schema accepts Windows presets (`rightCtrl`, `ctrlSpace`, `altSpace`, `capsLock`).
 
-### C — Native scaffold · **M** · *current*
+### C — Native scaffold · **M** · _current_
 
 `packages/native/src/win/`, binding.gyp win condition, load path, `available: true`.
 
@@ -173,12 +174,12 @@ H  Ship / CI             ✓ G8–G10 (secure / elevated refuse / 20× stable)
 
 ## File ownership (avoid merge pain)
 
-| Mostly Windows (additive) | Shared (coordinate) | Mostly Mac (avoid on this branch) |
-| --- | --- | --- |
-| `packages/native/src/win/**` | `packages/shared` schema/IPC | `packages/native/src/*.mm` |
-| `apps/desktop/.../platform/win32/**` | `packages/native/index.js`, `binding.gyp` | Mac-only Help/Settings strings if extracted |
-| `scripts/sidecars/*.ps1` | `sidecar.ts` (`.exe` resolve) | `scripts/sidecars/*.sh` |
-| `WINDOWS-HANDOFF.md`, `scripts/agent/**` | App-wide [HANDOFF.md](./HANDOFF.md) items | [MAC-HANDOFF.md](./MAC-HANDOFF.md) |
+| Mostly Windows (additive)                | Shared (coordinate)                       | Mostly Mac (avoid on this branch)           |
+| ---------------------------------------- | ----------------------------------------- | ------------------------------------------- |
+| `packages/native/src/win/**`             | `packages/shared` schema/IPC              | `packages/native/src/*.mm`                  |
+| `apps/desktop/.../platform/win32/**`     | `packages/native/index.js`, `binding.gyp` | Mac-only Help/Settings strings if extracted |
+| `scripts/sidecars/*.ps1`                 | `sidecar.ts` (`.exe` resolve)             | `scripts/sidecars/*.sh`                     |
+| `WINDOWS-HANDOFF.md`, `scripts/agent/**` | App-wide [HANDOFF.md](./HANDOFF.md) items | [MAC-HANDOFF.md](./MAC-HANDOFF.md)          |
 
 Branch practice: long-lived Windows work off `main`; rebase often; no drive-by
 Mac refactors.
@@ -197,9 +198,9 @@ one STT path; Mac PRs do not thrash Windows-only files.
 
 ## Defaults
 
-| Choice | Default |
-| --- | --- |
+| Choice                 | Default                                                             |
+| ---------------------- | ------------------------------------------------------------------- |
 | Default Windows hotkey | **Right Ctrl** hold (Ctrl+Space / Alt+Space / Caps Lock as presets) |
-| First STT | **whisper.cpp `.exe` first** (ONNX later) |
-| Caps Lock | Preset available, not default |
-| Installer | After E2E once on this machine |
+| First STT              | **whisper.cpp `.exe` first** (ONNX later)                           |
+| Caps Lock              | Preset available, not default                                       |
+| Installer              | After E2E once on this machine                                      |

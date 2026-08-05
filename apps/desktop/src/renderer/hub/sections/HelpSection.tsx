@@ -14,6 +14,7 @@ import { useEngines } from '../../hooks/useEngines'
 import { engineLabel } from '../../format'
 import { dataLocation, isMacPlatform } from '../../lib/platform'
 import { PERMISSIONS } from '../permissions'
+import { DevToolsCard } from './DevToolsCard'
 
 /**
  * Help (PLAN §2.2.6).
@@ -27,6 +28,7 @@ import { PERMISSIONS } from '../permissions'
 export function HelpSection(): React.JSX.Element {
   const [permissions, setPermissions] = useState<PermissionsStatus | null>(null)
   const [version, setVersion] = useState('—')
+  const [showDevTools, setShowDevTools] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const engines = useEngines()
   const capture = useCaptureStatus()
@@ -48,6 +50,10 @@ export function HelpSection(): React.JSX.Element {
     void window.murmur.app
       .version()
       .then(setVersion)
+      .catch(() => undefined)
+    void window.murmur.app
+      .info()
+      .then((info) => setShowDevTools(info.showDevTools))
       .catch(() => undefined)
   }, [refresh])
 
@@ -145,6 +151,8 @@ export function HelpSection(): React.JSX.Element {
           </Row>
         ) : null}
       </Card>
+
+      {showDevTools ? <DevToolsCard /> : null}
     </Section>
   )
 }

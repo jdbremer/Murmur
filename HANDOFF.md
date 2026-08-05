@@ -2,11 +2,11 @@
 
 **Scope: the whole app** (macOS + Windows + shared). Platform-specific queues:
 
-| Doc | Scope |
-| --- | --- |
-| **[HANDOFF.md](./HANDOFF.md)** (this file) | Cross-platform product, UX, catalog, security, CI |
-| **[MAC-HANDOFF.md](./MAC-HANDOFF.md)** | macOS-only (native module, Metal, notarization, field proof) |
-| **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** | Windows-only (native hook/paste, sidecars, agent loop) |
+| Doc                                            | Scope                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------ |
+| **[HANDOFF.md](./HANDOFF.md)** (this file)     | Cross-platform product, UX, catalog, security, CI            |
+| **[MAC-HANDOFF.md](./MAC-HANDOFF.md)**         | macOS-only (native module, Metal, notarization, field proof) |
+| **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** | Windows-only (native hook/paste, sidecars, agent loop)       |
 
 Canonical product/engineering spec remains **[PLAN.md](./PLAN.md)**. Layout and
 IPC conventions: **[README.md](./README.md)**.
@@ -96,12 +96,12 @@ insert into the focused app fails.
 
 ## Other shared follow-ups
 
-| Item | Notes |
-| --- | --- |
-| Onboarding polish | Mac path more complete; Windows still needs platform-true permission copy |
-| Streaming partials in Bar | PLAN M5 |
-| CI matrix | macOS exists; add Windows leg (`typecheck` / `test` / `native:build`) |
-| Packaging | DMG (Mac) / NSIS (Windows) still release-track |
+| Item                      | Notes                                                                     |
+| ------------------------- | ------------------------------------------------------------------------- |
+| Onboarding polish         | Mac path more complete; Windows still needs platform-true permission copy |
+| Streaming partials in Bar | PLAN M5                                                                   |
+| CI matrix                 | macOS exists; add Windows leg (`typecheck` / `test` / `native:build`)     |
+| Packaging                 | DMG (Mac) / NSIS (Windows) still release-track                            |
 
 ---
 

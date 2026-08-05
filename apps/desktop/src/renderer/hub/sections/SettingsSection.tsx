@@ -18,7 +18,7 @@ import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDevMode } from '../../hooks/useDevMode'
 import { useDictationState } from '../../hooks/useDictationState'
 import { useSettings } from '../../hooks/useSettings'
-import { isMacPlatform } from '../../lib/platform'
+import { isMacPlatform, isWindowsPlatform } from '../../lib/platform'
 
 /**
  * Settings (PLAN §2.2.5).
@@ -95,12 +95,15 @@ export function SettingsSection(): React.JSX.Element {
   const historyValue =
     settings.historyRetention.mode === 'off' ? 'off' : String(settings.historyRetention.days)
   const isMac = isMacPlatform()
-  const hotkeyOptions = isMac ? MAC_HOTKEYS : WINDOWS_HOTKEYS
+  const isWindows = isWindowsPlatform()
+  // Linux keeps the mac list + stored value: the listener never fires there,
+  // so the Select's job is to show what is stored, not to migrate it.
+  const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : MAC_HOTKEYS
   const hotkeyValue = hotkeyOptions.some((o) => o.value === settings.hotkey.key)
     ? settings.hotkey.key
-    : isMac
-      ? 'fn'
-      : 'rightCtrl'
+    : isWindows
+      ? 'rightCtrl'
+      : 'fn'
 
   return (
     <Section
@@ -116,7 +119,9 @@ export function SettingsSection(): React.JSX.Element {
           hint={
             isMac
               ? 'fn is the default. The right-hand modifiers exist for external keyboards that have no fn key.'
-              : 'Right Ctrl is the Windows default. Space chords are disabled until key-latch is rock-solid.'
+              : isWindows
+                ? 'Right Ctrl is the Windows default. Space chords are disabled until key-latch is rock-solid.'
+                : 'The key listener is macOS- and Windows-only; on this platform the key is stored but never fires.'
           }
           htmlFor="settings-hotkey"
         >

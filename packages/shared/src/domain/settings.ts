@@ -37,7 +37,12 @@ export const HotkeyKeySchema = z.enum([
 export type HotkeyKey = z.infer<typeof HotkeyKeySchema>
 
 /** Presets shown on macOS (no Windows chords). */
-export const MAC_HOTKEY_KEYS = ['fn', 'rightCmd', 'rightOpt', 'custom'] as const satisfies readonly HotkeyKey[]
+export const MAC_HOTKEY_KEYS = [
+  'fn',
+  'rightCmd',
+  'rightOpt',
+  'custom',
+] as const satisfies readonly HotkeyKey[]
 
 /** Presets shown on Windows (no fn / ⌘ / ⌥). Overnight default: Right Ctrl. */
 export const WINDOWS_HOTKEY_KEYS = [

@@ -105,8 +105,7 @@ export class HotkeyBridge {
       // Native may return `false` when the OS hook/tap could not be installed
       // (e.g. missing Input Monitoring on macOS, or WH_KEYBOARD_LL failure on Windows).
       const started = native.startHotkeyListener(config, (event) => this.handle(event)) as
-        | boolean
-        | void
+        boolean | void
       if (started === false) {
         this.#running = false
         this.#log.warn(
