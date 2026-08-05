@@ -1,7 +1,7 @@
 # SESSION STATE — Murmur
 
 Updated: 2026-08-05T00:45-05:00 | Focus: donor harvest + bug fixes + first-ever E2E dictation proof, on branch `buildout/flow-parity`
-Claimed by: Preston's overnight autonomous session (merge to main + push in progress; clear when landed)
+Claimed by: (none — merge landed on main and pushed)
 
 ## DONE (this session)
 
@@ -15,14 +15,13 @@ Claimed by: Preston's overnight autonomous session (merge to main + push in prog
 
 ## IN-FLIGHT
 
-- Adversarial review workflow (4 lenses → refuting verifiers) over the branch diff — fold confirmed findings in, then merge `buildout/flow-parity` → main and push.
+- Nothing. The review ran (11 agents, 14 findings, 7 confirmed — all fixed, including the presenter/window settle-to-idle seam and the loopback redirect hole), the branch merged to main, and main is pushed.
 
 ## NEXT
 
-1. Fix confirmed review findings; re-gate; merge + push to origin/main.
-2. Real `fn`-key hold test (Preston's finger + Input Monitoring grant; mic already granted, paste already works).
-3. llama.cpp pin bump for macOS 27 Metal (bench-gated, PLAN §16) — polish drops from ~1.0 s toward ~0.4 s.
-4. Parity: streaming partials (M5) → command mode (§18.1) → voice punctuation → snippets → menu-bar quick controls → icon + DMG.
+1. Real `fn`-key hold test (Preston's finger + Input Monitoring grant; mic already granted, paste already works).
+2. llama.cpp pin bump for macOS 27 Metal (bench-gated, PLAN §16) — polish drops from ~1.0 s toward ~0.4 s.
+3. Parity: streaming partials (M5) → command mode (§18.1) → voice punctuation → snippets → menu-bar quick controls → icon + DMG.
 
 ## GOTCHAS / CONSTRAINTS
 
