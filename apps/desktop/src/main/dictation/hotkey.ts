@@ -77,7 +77,18 @@ export class HotkeyBridge {
       return
     }
 
-    native.startHotkeyListener(config, (event) => this.handle(event))
+    // Native may return `false` when the OS hook/tap could not be installed
+    // (e.g. missing Input Monitoring on macOS, or WH_KEYBOARD_LL failure on Windows).
+    const started = native.startHotkeyListener(config, (event) => this.handle(event)) as
+      | boolean
+      | void
+    if (started === false) {
+      this.#running = false
+      this.#log.warn(
+        `native hotkey listener failed to start for ${describeKey(config)} — use debug.simulateHotkey`,
+      )
+      return
+    }
     this.#running = true
     this.#log.info(`listening for ${describeKey(config)}`)
   }

@@ -9,9 +9,10 @@
 //   - getFrontmostApp (GetForegroundWindow → process image name)
 //   - isSecureInputActive (best-effort: password edit styles)
 //   - permissions check (Windows has no TCC twins; report honest defaults)
-//   - hotkey listener scaffold (start/stop no-op until WH_KEYBOARD_LL lands)
+//   - WH_KEYBOARD_LL hotkey listener (Right Ctrl default + Windows chords)
 //
-// Privacy: never buffer or log non-hotkey content.
+// Privacy: never buffer or log non-hotkey content. The LL hook returns
+// immediately for every key that is not the configured hotkey/chord.
 
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
@@ -23,6 +24,8 @@
 #include <napi.h>
 
 #include <atomic>
+#include <chrono>
+#include <cstring>
 #include <string>
 
 #pragma comment(lib, "user32.lib")
@@ -213,10 +216,303 @@ Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
 }
 
 // ---------------------------------------------------------------------------
-// Hotkey: scaffold — WH_KEYBOARD_LL lands in G6
+// Hotkey: WH_KEYBOARD_LL (G6)
+//
+// Same privacy contract as macOS: listen only for the configured hotkey/chord;
+// never buffer other key content. Suppression is targeted (Space in chords,
+// Caps Lock, custom keys) — Right Ctrl is never swallowed system-wide so the
+// rest of the keyboard keeps working.
 // ---------------------------------------------------------------------------
 
+enum class HotkeyKind {
+  RightCtrl,
+  CtrlSpace,
+  AltSpace,
+  CapsLock,
+  Custom,
+  Unsupported,  // Mac-only presets on a Windows build
+};
+
+struct WinHotkeyConfig {
+  HotkeyKind kind = HotkeyKind::RightCtrl;
+  int customVk = -1;
+  bool doubleTapHandsFree = true;
+};
+
+// Two presses inside this window are a double-tap (mirrors HOTKEY.doubleTapMs).
+constexpr double kDoubleTapSeconds = 0.35;
+
+struct HotkeyEventPayload {
+  int type;  // 0 = down, 1 = up, 2 = doubleTap
+  double timestamp;
+};
+
 std::atomic<bool> gListening{false};
+std::atomic<bool> gHotkeyDown{false};
+std::atomic<bool> gCtrlHeld{false};
+std::atomic<bool> gAltHeld{false};
+
+WinHotkeyConfig gConfig{};
+double gLastDownAt = 0.0;
+
+HHOOK gHook = nullptr;
+HANDLE gHookThread = nullptr;
+DWORD gHookThreadId = 0;
+HANDLE gHookReadyEvent = nullptr;
+std::atomic<bool> gHookInstallOk{false};
+
+Napi::ThreadSafeFunction gCallback;
+
+double NowSeconds() {
+  using namespace std::chrono;
+  return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+
+void EmitHotkeyEvent(int type, double timestamp) {
+  if (!gListening.load()) return;
+  if (!gCallback) return;
+
+  HotkeyEventPayload* payload = new HotkeyEventPayload{type, timestamp};
+  napi_status status = gCallback.NonBlockingCall(
+      payload, [](Napi::Env env, Napi::Function callback, HotkeyEventPayload* data) {
+        Napi::Object event = Napi::Object::New(env);
+        const char* name = data->type == 0 ? "down" : (data->type == 1 ? "up" : "doubleTap");
+        event.Set("type", Napi::String::New(env, name));
+        event.Set("timestamp", Napi::Number::New(env, data->timestamp * 1000.0));
+        delete data;
+        callback.Call({event});
+      });
+
+  // Queue full or TSFN closing: drop rather than block the hook thread
+  // (which would stall every keystroke on the system).
+  if (status != napi_ok) delete payload;
+}
+
+void HandleEdge(bool down) {
+  const double now = NowSeconds();
+
+  if (down) {
+    if (gHotkeyDown.exchange(true)) return;  // auto-repeat; already down
+
+    const bool isDoubleTap = gConfig.doubleTapHandsFree && gLastDownAt > 0.0 &&
+                             (now - gLastDownAt) <= kDoubleTapSeconds;
+    gLastDownAt = now;
+    EmitHotkeyEvent(isDoubleTap ? 2 : 0, now);
+    return;
+  }
+
+  if (!gHotkeyDown.exchange(false)) return;  // spurious up
+  EmitHotkeyEvent(1, now);
+}
+
+bool IsKeyDownEvent(const KBDLLHOOKSTRUCT* kb) {
+  return (kb->flags & LLKHF_UP) == 0;
+}
+
+bool IsRightControlKey(const KBDLLHOOKSTRUCT* kb) {
+  if (kb->vkCode == VK_RCONTROL) return true;
+  // Some stacks report right Ctrl as extended VK_CONTROL.
+  if (kb->vkCode == VK_CONTROL && (kb->flags & LLKHF_EXTENDED) != 0) return true;
+  return false;
+}
+
+bool IsLeftOrRightControl(DWORD vk) {
+  return vk == VK_LCONTROL || vk == VK_RCONTROL || vk == VK_CONTROL;
+}
+
+bool IsLeftOrRightAlt(DWORD vk) {
+  return vk == VK_LMENU || vk == VK_RMENU || vk == VK_MENU;
+}
+
+void UpdateModifierState(const KBDLLHOOKSTRUCT* kb) {
+  const bool down = IsKeyDownEvent(kb);
+  // Aggregate left/right for chord presets. On key-up, re-sample async state so
+  // releasing one side while the other is still held stays correct.
+  if (IsLeftOrRightControl(kb->vkCode)) {
+    if (down) {
+      gCtrlHeld.store(true);
+    } else {
+      const bool still = (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0 ||
+                         (GetAsyncKeyState(VK_RCONTROL) & 0x8000) != 0;
+      gCtrlHeld.store(still);
+    }
+  }
+  if (IsLeftOrRightAlt(kb->vkCode)) {
+    if (down) {
+      gAltHeld.store(true);
+    } else {
+      const bool still = (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0 ||
+                         (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
+      gAltHeld.store(still);
+    }
+  }
+}
+
+// Returns true when the event should be swallowed (targeted suppression).
+bool ProcessHotkeyEvent(const KBDLLHOOKSTRUCT* kb) {
+  UpdateModifierState(kb);
+  const bool down = IsKeyDownEvent(kb);
+
+  switch (gConfig.kind) {
+    case HotkeyKind::RightCtrl: {
+      if (!IsRightControlKey(kb)) return false;
+      HandleEdge(down);
+      // Never suppress Right Ctrl system-wide (matches Mac modifier policy).
+      return false;
+    }
+
+    case HotkeyKind::CtrlSpace: {
+      if (kb->vkCode == VK_SPACE) {
+        if (down) {
+          if (!gCtrlHeld.load() && (GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0) return false;
+          HandleEdge(true);
+          return true;  // swallow Space so the chord does not type a space
+        }
+        if (gHotkeyDown.load()) {
+          HandleEdge(false);
+          return true;
+        }
+        return false;
+      }
+      // Ctrl released while chord latched → end hold.
+      if (!down && IsLeftOrRightControl(kb->vkCode) && gHotkeyDown.load()) {
+        if ((GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0 &&
+            (GetAsyncKeyState(VK_RCONTROL) & 0x8000) == 0) {
+          HandleEdge(false);
+        }
+      }
+      return false;
+    }
+
+    case HotkeyKind::AltSpace: {
+      if (kb->vkCode == VK_SPACE) {
+        if (down) {
+          if (!gAltHeld.load() && (GetAsyncKeyState(VK_MENU) & 0x8000) == 0) return false;
+          HandleEdge(true);
+          return true;
+        }
+        if (gHotkeyDown.load()) {
+          HandleEdge(false);
+          return true;
+        }
+        return false;
+      }
+      if (!down && IsLeftOrRightAlt(kb->vkCode) && gHotkeyDown.load()) {
+        if ((GetAsyncKeyState(VK_LMENU) & 0x8000) == 0 &&
+            (GetAsyncKeyState(VK_RMENU) & 0x8000) == 0) {
+          HandleEdge(false);
+        }
+      }
+      return false;
+    }
+
+    case HotkeyKind::CapsLock: {
+      if (kb->vkCode != VK_CAPITAL) return false;
+      HandleEdge(down);
+      // Swallow so hold-to-talk does not toggle Caps Lock.
+      return true;
+    }
+
+    case HotkeyKind::Custom: {
+      if (gConfig.customVk < 0 || static_cast<int>(kb->vkCode) != gConfig.customVk) return false;
+      HandleEdge(down);
+      return true;  // suppress custom key so it does not type
+    }
+
+    case HotkeyKind::Unsupported:
+    default:
+      return false;
+  }
+}
+
+LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+  if (nCode == HC_ACTION && gListening.load() && lParam != 0) {
+    const KBDLLHOOKSTRUCT* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
+    // Only key messages — ignore injected synthetic input from ourselves if flagged
+    // (optional: still process injected so agent-driven keys work for G6 proof).
+    if (ProcessHotkeyEvent(kb)) {
+      return 1;  // swallow this key only
+    }
+  }
+  return CallNextHookEx(gHook, nCode, wParam, lParam);
+}
+
+DWORD WINAPI HookThreadMain(LPVOID) {
+  // Ensure this thread has a message queue before installing the hook.
+  MSG msg;
+  PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+
+  HMODULE mod = nullptr;
+  GetModuleHandleExW(
+      GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+      reinterpret_cast<LPCWSTR>(&LowLevelKeyboardProc), &mod);
+
+  gHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, mod, 0);
+  gHookInstallOk.store(gHook != nullptr);
+
+  if (gHookReadyEvent != nullptr) SetEvent(gHookReadyEvent);
+
+  if (gHook == nullptr) return 1;
+
+  // Low-level hooks are delivered via this thread's message loop.
+  while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    TranslateMessage(&msg);
+    DispatchMessageW(&msg);
+  }
+
+  if (gHook != nullptr) {
+    UnhookWindowsHookEx(gHook);
+    gHook = nullptr;
+  }
+  return 0;
+}
+
+void ReleaseCallback() {
+  if (gCallback) {
+    gCallback.Release();
+    gCallback = Napi::ThreadSafeFunction();
+  }
+}
+
+void TearDownHook() {
+  gListening.store(false);
+  gHotkeyDown.store(false);
+  gCtrlHeld.store(false);
+  gAltHeld.store(false);
+  gLastDownAt = 0.0;
+
+  if (gHookThreadId != 0) {
+    PostThreadMessageW(gHookThreadId, WM_QUIT, 0, 0);
+  }
+  if (gHookThread != nullptr) {
+    WaitForSingleObject(gHookThread, 3000);
+    CloseHandle(gHookThread);
+    gHookThread = nullptr;
+  }
+  gHookThreadId = 0;
+
+  // If the thread never ran Unhook (crash path), try once more.
+  if (gHook != nullptr) {
+    UnhookWindowsHookEx(gHook);
+    gHook = nullptr;
+  }
+  gHookInstallOk.store(false);
+
+  if (gHookReadyEvent != nullptr) {
+    CloseHandle(gHookReadyEvent);
+    gHookReadyEvent = nullptr;
+  }
+}
+
+HotkeyKind ParseWinKind(const std::string& key) {
+  if (key == "rightCtrl") return HotkeyKind::RightCtrl;
+  if (key == "ctrlSpace") return HotkeyKind::CtrlSpace;
+  if (key == "altSpace") return HotkeyKind::AltSpace;
+  if (key == "capsLock") return HotkeyKind::CapsLock;
+  if (key == "custom") return HotkeyKind::Custom;
+  // fn / rightCmd / rightOpt are Mac-only — install nothing useful.
+  return HotkeyKind::Unsupported;
+}
 
 Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -225,14 +521,69 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
         .ThrowAsJavaScriptException();
     return env.Undefined();
   }
-  // Return false so main knows the global hook is not active yet — UI can still
-  // use debug.simulateHotkey. G6 installs WH_KEYBOARD_LL here.
-  gListening.store(false);
-  return Napi::Boolean::New(env, false);
+
+  // Restart is normal (settings rebind).
+  TearDownHook();
+  ReleaseCallback();
+
+  Napi::Object config = info[0].As<Napi::Object>();
+  WinHotkeyConfig parsed;
+  if (config.Has("key") && config.Get("key").IsString()) {
+    parsed.kind = ParseWinKind(config.Get("key").As<Napi::String>().Utf8Value());
+  }
+  if (config.Has("customKeyCode") && config.Get("customKeyCode").IsNumber()) {
+    // On Windows customKeyCode is a Win32 virtual-key code (not a Mac keycode).
+    parsed.customVk = config.Get("customKeyCode").As<Napi::Number>().Int32Value();
+  }
+  if (config.Has("doubleTapHandsFree") && config.Get("doubleTapHandsFree").IsBoolean()) {
+    parsed.doubleTapHandsFree = config.Get("doubleTapHandsFree").As<Napi::Boolean>().Value();
+  }
+
+  if (parsed.kind == HotkeyKind::Custom && parsed.customVk < 0) {
+    Napi::Error::New(env, "custom hotkey requires customKeyCode").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  if (parsed.kind == HotkeyKind::Unsupported) {
+    // Do not install a hook that can never fire.
+    return Napi::Boolean::New(env, false);
+  }
+
+  gConfig = parsed;
+
+  gCallback = Napi::ThreadSafeFunction::New(env, info[1].As<Napi::Function>(), "murmurHotkey",
+                                            /* maxQueueSize */ 64, /* initialThreadCount */ 1);
+
+  gHookReadyEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  gHookInstallOk.store(false);
+
+  gHookThread = CreateThread(nullptr, 0, HookThreadMain, nullptr, 0, &gHookThreadId);
+  if (gHookThread == nullptr) {
+    ReleaseCallback();
+    if (gHookReadyEvent) {
+      CloseHandle(gHookReadyEvent);
+      gHookReadyEvent = nullptr;
+    }
+    return Napi::Boolean::New(env, false);
+  }
+
+  // Wait for the hook thread to finish SetWindowsHookEx.
+  if (gHookReadyEvent != nullptr) {
+    WaitForSingleObject(gHookReadyEvent, 5000);
+  }
+
+  if (!gHookInstallOk.load()) {
+    TearDownHook();
+    ReleaseCallback();
+    return Napi::Boolean::New(env, false);
+  }
+
+  gListening.store(true);
+  return Napi::Boolean::New(env, true);
 }
 
 Napi::Value StopHotkeyListener(const Napi::CallbackInfo& info) {
-  gListening.store(false);
+  TearDownHook();
+  ReleaseCallback();
   return info.Env().Undefined();
 }
 

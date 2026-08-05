@@ -44,10 +44,10 @@ Verified on a Windows dev box (agent overnight loop — **commits only, never pu
 | G4 Native load | **pass** | `@murmur/native: active — win32 x64` (`src/win/murmur_native_win.cpp`) |
 | G5 Paste | **pass** | `debug.insertText` → Notepad file contains `hello` (SendInput + focus fix) |
 | G5b Word | **pass (canned)** | Recognizable word pasted; real STT word still G7 |
-| G6 Hotkey | **open** | `startHotkeyListener` returns false — WH_KEYBOARD_LL next |
+| G6 Hotkey | **pass** | `WH_KEYBOARD_LL` installed; `startHotkeyListener` → true; Right Ctrl down/up via nut.js |
 | G7–G10 | **open** | whisper.exe, secure field, elevated, stability |
 
-**Next gate:** G6 — Right Ctrl `WH_KEYBOARD_LL`.
+**Next gate:** G7 — whisper.cpp `.exe` STT + catalog model so utterance inserts text.
 
 Idle policy: if blocked, walk every Hub screen — “would I like this as a user?” / advances hold→speak→insert.
 
@@ -146,12 +146,12 @@ Win11 acceptance; NSIS/signing when ready; `windows-latest` CI leg.
 ```
 A  Iteration cockpit     ✓ G0–G2
 B  Windows-only UI       ✓ G3
-C  Native scaffold       ← current (G4)
-D  Paste
-E  Hotkey + chords
+C  Native scaffold       ✓ G4
+D  Paste                 ✓ G5 / G5b (canned)
+E  Hotkey + chords       ✓ G6 (Right Ctrl + chords in native)
 F  App categories
-G  STT
-H  Ship / CI
+G  STT                   ← current (G7 whisper.exe)
+H  Ship / CI             G8–G10
 ```
 
 ---
