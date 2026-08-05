@@ -41,15 +41,28 @@ export function fromMediaAccessStatus(status: string): PermissionState {
   }
 }
 
+/**
+ * Last raw value from macOS, logged when it changes.
+ *
+ * The four-state vocabulary collapses `denied` and `restricted` into one, and
+ * they need completely different advice: a denial the user can reverse in
+ * System Settings, a restriction they cannot (it is MDM policy, and the app
+ * will not even appear in the Privacy pane). Keeping the raw string in the log
+ * is what makes a "the microphone just does not work" report diagnosable.
+ */
+let lastRawMicrophoneStatus: string | null = null
+
 export function checkPermissions(): PermissionsStatus {
   const status = native().permissions.check()
   if (process.platform !== 'darwin') return status
 
   try {
-    return {
-      ...status,
-      microphone: fromMediaAccessStatus(systemPreferences.getMediaAccessStatus('microphone')),
+    const raw = systemPreferences.getMediaAccessStatus('microphone')
+    if (raw !== lastRawMicrophoneStatus) {
+      lastRawMicrophoneStatus = raw
+      log.info(`microphone access status: ${raw}`)
     }
+    return { ...status, microphone: fromMediaAccessStatus(raw) }
   } catch (error) {
     log.warn('reading microphone access status failed:', error)
     return status
