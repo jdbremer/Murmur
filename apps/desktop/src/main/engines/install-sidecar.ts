@@ -4,6 +4,7 @@ import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { Readable } from 'node:stream'
+import { type ReadableStream as WebReadableStream } from 'node:stream/web'
 
 import { createLogger } from '../logging'
 import { resolveSidecarBinary } from './sidecar'
@@ -171,7 +172,7 @@ async function downloadFile(url: string, dest: string): Promise<void> {
     throw new Error(`Download failed (${response.status}) for ${url}`)
   }
   // Node 18+ fetch body is a web stream; convert for pipeline.
-  const nodeStream = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream)
+  const nodeStream = Readable.fromWeb(response.body as WebReadableStream)
   await pipeline(nodeStream, createWriteStream(dest))
 }
 
@@ -191,7 +192,7 @@ function findFile(
     }
     for (const name of entries) {
       const full = join(dir, name)
-      let isDir = false
+      let isDir: boolean
       try {
         isDir = statSync(full).isDirectory()
       } catch {

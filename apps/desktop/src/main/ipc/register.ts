@@ -197,8 +197,6 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
       captureStatus = status
       lastCapture = status
       ipc.broadcast(windows.uiWebContents(), 'audio.captureChanged', status)
-      // Alias event name used by Windows Dev tools / older Hub code.
-      ipc.broadcast(windows.uiWebContents(), 'audio.captureStatus', status)
     }
     if (status.status === 'error') orchestrator.reportAudioError(status.message)
   })

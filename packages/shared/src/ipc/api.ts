@@ -61,8 +61,6 @@ export interface MurmurApi {
     reportDevices(devices: Msg<'audio.devices'>): void
     /** Capture commands from the orchestrator: warm / start / stop / release. */
     onCommand(listener: (command: Evt<'audio.command'>) => void): Unsubscribe
-    /** Hub/Dev: last capture lifecycle (ready / error / idle). */
-    onCaptureStatus(listener: (status: Evt<'audio.captureStatus'>) => void): Unsubscribe
     /** Mic pickers: the last known device list. */
     listDevices(): Promise<Res<'audio.listDevices'>>
     onDevicesChanged(listener: (devices: Evt<'audio.devicesChanged'>) => void): Unsubscribe

@@ -610,7 +610,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     const polishModelId = context.settings.polishModelId ?? status.modelId
 
     let edited: string
-    let polishMs = 0
+    let polishMs: number
     try {
       const prompt = buildCommandPrompt({
         instruction,

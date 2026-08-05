@@ -328,12 +328,6 @@ export const eventContract = {
   'dictation.state': DictationEventSchema,
   /** High-rate mic amplitude for the Bar's waveform. */
   'audio.level': AudioLevelEventSchema,
-  /**
-   * Capture renderer lifecycle (ready / error / idle). Broadcast so the Hub
-   * can surface mic failures even while the orchestrator is idle — the
-   * orchestrator only turns errors into dictation failures mid-utterance.
-   */
-  'audio.captureStatus': AudioCaptureStatusSchema,
   /** Broadcast after any successful `settings.set`, to all windows. */
   'settings.changed': SettingsSchema,
   'models.downloadProgress': ModelDownloadProgressSchema,

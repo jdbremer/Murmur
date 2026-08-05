@@ -50,7 +50,7 @@ export function DevToolsCard(): React.JSX.Element {
       window.murmur.engines.subscribe(setEngines),
       window.murmur.dictation.subscribe(setDictation),
       window.murmur.dictation.onLevel((event) => setLevel(event.level)),
-      window.murmur.audio.onCaptureStatus(setCapture),
+      window.murmur.audio.onCaptureChanged(setCapture),
     ]
     return () => {
       for (const off of unsubs) off()

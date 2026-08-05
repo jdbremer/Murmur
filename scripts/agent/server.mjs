@@ -277,7 +277,6 @@ async function evaluate(expression) {
   const page = await ensureHub()
   // expression is the body of an async function that receives window.
   const result = await page.evaluate(async (expr) => {
-    // eslint-disable-next-line no-new-func
     const fn = new Function(`return (async () => { ${expr} })()`)
     return await fn()
   }, expression)
@@ -289,7 +288,7 @@ async function murmur(methodPath, args = []) {
   const result = await page.evaluate(
     async ({ methodPath, args }) => {
       const parts = methodPath.split('.')
-      let cur = window.murmur
+      let cur = globalThis.murmur
       for (const part of parts) {
         if (cur == null) throw new Error(`missing window.murmur.${methodPath}`)
         cur = cur[part]
