@@ -296,7 +296,9 @@ function TryIt({ hotkey }: { hotkey: HotkeyKey }): React.JSX.Element {
   const dev = useDevMode()
   const [simulating, setSimulating] = useState(false)
 
-  const label = HOTKEYS.find((option) => option.value === hotkey)?.label ?? 'your key'
+  const label =
+    [...MAC_HOTKEYS, ...WINDOWS_HOTKEYS].find((option) => option.value === hotkey)?.label ??
+    'your key'
   const message =
     event.state === 'listening'
       ? 'Listening — Murmur can hear you.'

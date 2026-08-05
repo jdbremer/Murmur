@@ -672,6 +672,38 @@ Napi::Value ReleaseHotkeyLatch(const Napi::CallbackInfo& info) {
   return info.Env().Undefined();
 }
 
+Napi::Value HotkeyPhysicallyDown(const Napi::CallbackInfo& info) {
+  // Windows reconciliation: prefer async HID state for the active preset.
+  bool down = gHotkeyDown.load();
+  switch (gConfig.kind) {
+    case HotkeyKind::RightCtrl:
+      down = (GetAsyncKeyState(VK_RCONTROL) & 0x8000) != 0 ||
+             ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+              (GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0);
+      break;
+    case HotkeyKind::CtrlSpace:
+      down = gHotkeyDown.load() ||
+             ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 &&
+              (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0);
+      break;
+    case HotkeyKind::AltSpace:
+      down = gHotkeyDown.load() ||
+             ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0 &&
+              (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0);
+      break;
+    case HotkeyKind::CapsLock:
+      down = (GetAsyncKeyState(VK_CAPITAL) & 0x8000) != 0;
+      break;
+    case HotkeyKind::Custom:
+      if (gConfig.customVk >= 0)
+        down = (GetAsyncKeyState(static_cast<int>(gConfig.customVk)) & 0x8000) != 0;
+      break;
+    default:
+      break;
+  }
+  return Napi::Boolean::New(info.Env(), down);
+}
+
 Napi::Value StopHotkeyListener(const Napi::CallbackInfo& info) {
   TearDownHook();
   ReleaseCallback();
@@ -734,6 +766,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("startHotkeyListener", Napi::Function::New(env, StartHotkeyListener));
   exports.Set("stopHotkeyListener", Napi::Function::New(env, StopHotkeyListener));
   exports.Set("releaseHotkeyLatch", Napi::Function::New(env, ReleaseHotkeyLatch));
+  exports.Set("hotkeyPhysicallyDown", Napi::Function::New(env, HotkeyPhysicallyDown));
   exports.Set("sendPasteShortcut", Napi::Function::New(env, SendPasteShortcut));
   exports.Set("insertTextViaAccessibility", Napi::Function::New(env, InsertTextViaAccessibility));
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));
