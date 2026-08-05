@@ -14,13 +14,16 @@
     "pack:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
-    "@murmur/shared": "*"
+    "@murmur/shared": "*",
+    "better-sqlite3": "^13.0.2"
   },
   "optionalDependencies": {
-    "@murmur/native": "file:../../packages/native"
+    "@murmur/native": "file:../../packages/native",
+    "onnxruntime-node": "^1.27.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^5.2.0",

@@ -13,9 +13,14 @@ build/
 packages/native/build/
 packages/native/prebuilds/
 
-# downloaded model weights (never committed — see PLAN.md §8)
-models/
-resources/models/
+# downloaded model weights (never committed — see PLAN.md §8).
+# Anchored to the repo root: a bare `models/` also shadows the main process's
+# own src/main/models source directory.
+/resources/models/
+/models/
+
+# sidecar checkouts and binaries, built by scripts/sidecars/*.sh
+.sidecars/
 
 # local env / editor / os
 .env

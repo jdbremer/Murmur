@@ -80,6 +80,13 @@ export const ModelCatalogSchema = z
      */
     originPolicy: z.array(OriginCodeSchema).min(1),
     models: z.array(ModelEntrySchema),
+    /**
+     * Free-form provenance note for the catalog as a whole — how it was built,
+     * and which models were deliberately *left out*. A `.strict()` schema would
+     * otherwise reject a `$comment`, and a catalog whose omissions are
+     * undocumented is a catalog nobody can audit.
+     */
+    notes: z.string().optional(),
   })
   .strict()
 export type ModelCatalog = z.infer<typeof ModelCatalogSchema>

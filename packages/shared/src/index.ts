@@ -12,6 +12,8 @@ export * from './domain/dictation'
 export * from './domain/dictionary'
 export * from './domain/style'
 export * from './domain/permissions'
+export * from './domain/engine'
+export * from './domain/hardware'
 
 // Model catalog (PLAN §8) --------------------------------------------------
 export * from './catalog/schema'
