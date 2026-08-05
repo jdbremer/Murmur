@@ -135,20 +135,23 @@ export class WhisperCppEngine implements SttEngine {
       name: WHISPER_SERVER_BINARY,
       binaryPath,
       healthPath: '/',
-      buildArgs: ({ port, token }) => [
+      // whisper.cpp's server (v1.9.2) has **no** auth flag — verified against
+      // the binary's own usage output; passing `--api-key` makes it exit at
+      // startup. Its isolation is the loopback bind plus an OS-chosen port
+      // (PLAN §10.3's bearer token applies to llama-server, which does support
+      // one). The client still sends its Bearer header; the server ignores it,
+      // and if upstream ever grows auth the flag gets added back here.
+      // `--convert` is likewise omitted: it is a bare flag that already
+      // defaults to off, and we send 16 kHz mono WAV that needs no conversion.
+      buildArgs: ({ port }) => [
         '--host',
         '127.0.0.1',
         '--port',
         String(port),
         '--model',
         join(model.directory, modelFile),
-        '--api-key',
-        token,
         '--threads',
         String(this.#options.threads ?? 4),
-        // Keep the server's own conversion off: we already send 16 kHz mono.
-        '--convert',
-        'false',
       ],
     }
 

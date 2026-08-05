@@ -194,6 +194,18 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
       // still exercise capture → VAD → STT → polish → insert end to end.
       context.hotkeys.handle({ type: action, timestamp: Date.now() })
     })
+
+    // `kill -USR2 <pid>` is the terminal-driven twin of debug.simulateHotkey:
+    // each signal alternates a synthetic hotkey down/up through the real
+    // pipeline. It exists so a shell can run a whole dictation hands-off —
+    // signal, `say` a sentence at the microphone, signal again — which is how
+    // the loop is exercised on a machine nobody is sitting at. Unpackaged
+    // builds only, like everything else in this block.
+    let signalHeld = false
+    process.on('SIGUSR2', () => {
+      signalHeld = !signalHeld
+      context.hotkeys.handle({ type: signalHeld ? 'down' : 'up', timestamp: Date.now() })
+    })
   }
 
   return ipc
