@@ -68,6 +68,18 @@ for arch in ${ARCHS}; do
   metal="OFF"
   [ "${arch}" = "arm64" ] && metal="ON"
 
+  # GGML_NATIVE=OFF is load-bearing twice over.
+  #
+  # It has to be off to cross-compile at all: ggml's default adds
+  # `-march=native`, which on an Apple Silicon host resolves to `apple-m1`
+  # even while the target is x86_64, and clang rejects it — "unknown target
+  # CPU 'apple-m1'". That is what broke the first release build.
+  #
+  # It also has to be off for anything we *ship*. `-march=native` tunes the
+  # binary to the machine that compiled it, so a runner with newer vector
+  # extensions than the user's Mac produces a whisper-server that dies with
+  # SIGILL the first time it hits one. A portable build is the point.
+
   cmake -S "${WORK_DIR}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_ARCHITECTURES="${arch}" \
@@ -77,6 +89,7 @@ for arch in ${ARCHS}; do
     -DWHISPER_BUILD_TESTS=OFF \
     -DGGML_METAL="${metal}" \
     -DGGML_METAL_EMBED_LIBRARY="${metal}" \
+    -DGGML_NATIVE=OFF \
     -DGGML_ACCELERATE=ON
 
   log "building ${arch}"

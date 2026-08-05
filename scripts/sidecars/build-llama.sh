@@ -68,6 +68,11 @@ for arch in ${ARCHS}; do
   metal="OFF"
   [ "${arch}" = "arm64" ] && metal="ON"
 
+  # GGML_NATIVE=OFF for the same two reasons as build-whisper.sh: `-march=native`
+  # resolves to `apple-m1` when cross-compiling x86_64 on an arm64 host and
+  # clang rejects it, and a shipped binary must not be tuned to whichever
+  # machine happened to build it.
+
   cmake -S "${WORK_DIR}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_ARCHITECTURES="${arch}" \
@@ -79,6 +84,7 @@ for arch in ${ARCHS}; do
     -DLLAMA_CURL=OFF \
     -DGGML_METAL="${metal}" \
     -DGGML_METAL_EMBED_LIBRARY="${metal}" \
+    -DGGML_NATIVE=OFF \
     -DGGML_ACCELERATE=ON
 
   log "building ${arch}"
