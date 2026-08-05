@@ -25,6 +25,7 @@
 
 - Windows/Linux (Electron keeps the door open; macOS-only integrations are isolated behind an interface).
 - Mobile, sync, accounts, teams.
+- Shipping Windows/Linux **in v1**. Both are now on the roadmap (M7/M8, §4.1) — macOS ships first, and the platform layer is isolated so the ports are additive, not rewrites.
 - Real-time streaming captions (arrives in M5 as an upgrade; v1 transcribes on key-release).
 - Reusing anything *from* Wispr Flow itself. The UI is a deliberate, close recreation of Flow's (§2), but built entirely from our own code and artwork — nothing extracted from their app bundle, and their name/logo stay out.
 
@@ -155,6 +156,22 @@ Cancel paths: Esc during listening; empty/silent audio → "No speech detected";
 Prototype-stage shortcut: `uiohook-napi` can stand in for the event tap during M1 development, but the plan of record is our own tap in `@murmur/native` — `fn` handling, key *suppression* while dictating (so hold-`fn` doesn't also trigger app shortcuts), and double-tap timing all want first-party control.
 
 Bundled sidecar binaries (`whisper-server`, `llama-server`) are compiled in CI for arm64 + x86_64, code-signed with hardened runtime, and shipped inside `Contents/Resources/bin/` (notarization requirement — see §16 risks).
+
+### 4.1 Windows & Linux ports (planned — M7/M8)
+
+Only `@murmur/native` and packaging are per-OS; the inference stack, Electron shell, and the entire Hub/Bar UI are already cross-platform. A port implements this table plus an installer — nothing else changes:
+
+| Concern | Windows (M7) | Linux (M8, best-effort) |
+|---|---|---|
+| Hold-to-talk hotkey | low-level keyboard hook (`SetWindowsHookEx` WH_KEYBOARD_LL) in the native module, with key suppression | X11: XGrabKey/XInput2; Wayland: GlobalShortcuts portal where the compositor supports it |
+| Text insertion | clipboard swap + `SendInput` Ctrl+V; UI Automation fallback | X11: XTEST Ctrl+V; Wayland: virtual-keyboard protocol, else clipboard-assist mode |
+| Frontmost app (tone category) | `GetForegroundWindow` → process name | X11: `_NET_ACTIVE_WINDOW`; Wayland: often unavailable → falls back to the global default tone |
+| GPU acceleration | llama.cpp/whisper.cpp Vulkan (or CUDA) builds; CPU int8 via sherpa-onnx | same (Vulkan/CPU) |
+| OS permissions | none beyond the mic privacy toggle | none |
+| Tray + Bar | system tray; Bar works as-is | StatusNotifier tray; Bar solid on X11, per-compositor on Wayland |
+| Packaging | signed NSIS installer + winget manifest + auto-update | AppImage + .deb + Flatpak |
+
+Sequencing: Windows right after macOS v1.0 (well-trodden mechanics). Linux last and explicitly best-effort — Wayland fragments global hotkeys and synthetic paste across compositors, so Linux ships X11-first with a published Wayland support matrix.
 
 ---
 
@@ -377,9 +394,17 @@ Hub Home with search (FTS5), copy/delete, stats (words, WPM, streak), per-app ca
 Streaming STT (NVIDIA NeMo streaming models via sherpa-onnx; evaluate Moonshine's streaming mode) with live partial text in the Bar, hands-free double-tap mode with VAD auto-finalize, prompt caching for polish, Intel-Mac performance pass.
 **Accept:** perceived latency (release → text) ≤ 1 s with streaming pipeline on M-series; hands-free dictates three consecutive utterances without touching the keyboard.
 
-### M6 — Distribution hardening (week 13)
-Auto-update via electron-updater + GitHub Releases (opt-in, off by default for corporate installs), SBOM, README/user docs, Homebrew cask, license audit of bundled components, v1.0 tag.
-**Accept:** clean-Mac install → dictating in < 5 min including model download; update flow verified; all bundled licenses documented.
+### M6 — Distribution & easy install (week 13)
+Release automation: tag → CI builds, signs, notarizes, staples, and publishes the universal DMG to **GitHub Releases** with SHA-256 checksums; auto-update via electron-updater with beta→stable channels (opt-in, off by default for corporate installs); **Homebrew cask** (`brew install --cask murmur`); a one-page **download site** (GitHub Pages) with an OS-detecting download button, checksums, and the IT one-pager (network/telemetry statement) linked; SBOM, user docs, license audit of bundled components, v1.0 tag.
+**Accept:** a coworker with the link is dictating in < 5 min including model download, with no Gatekeeper warnings (notarized build); update flow verified; all bundled licenses documented.
+
+### M7 — Windows port (post-1.0)
+`@murmur/native` win32 backend (low-level keyboard hook, SendInput paste, foreground-app lookup), Vulkan/CPU sidecar builds, NSIS installer + Authenticode signing + winget manifest, Windows CI leg, QA matrix (Win 10/11).
+**Accept:** M1-parity on Windows 11 — hold-key → text lands in Notepad/Teams/Chrome in ≤ 2.5 s; installer, auto-update, and download page verified.
+
+### M8 — Linux port (post-1.0, best-effort)
+X11 backend (XGrabKey + XTEST), StatusNotifier tray, AppImage/.deb/Flatpak packaging, documented Wayland support matrix (GlobalShortcuts portal where available).
+**Accept:** M1-parity on Ubuntu LTS under X11; Wayland matrix published with per-compositor status.
 
 ### 13.4 Evals (built alongside M3, run in CI)
 - **Polish golden set**: ~150 transcript → expected-output pairs per level (fillers, self-corrections, lists, emails, mixed-language), scored by exact/fuzzy match; run against every catalog polish model in a nightly job on a self-hosted Apple Silicon runner.
@@ -462,7 +487,23 @@ The roadmap says what gets built; this section says when it is allowed to be cal
 
 ---
 
-## 18. References
+## 18. Backlog — post-v1 feature candidates
+
+Ranked by value-for-effort; none block v1.0. The first two are the strongest differentiators local models make uniquely private.
+
+1. **Command mode** (Flow parity; v1.1 flagship) — select text in any app, hold a *second* hotkey, speak an instruction ("tighten this up", "turn it into bullets", "reply yes but ask for an agenda") → the local LLM rewrites the selection in place. Reuses the whole pipeline: selection read via AX/clipboard round-trip, instruction prompt template, same injection path.
+2. **Long-form transcription mode** — record meetings or voice memos (mic first; system audio later), chunked transcription with timestamps into a Hub document view, export as Markdown. Same engines, different loop (no paste).
+3. **Re-polish from history** — any history row → "rewrite as email / casual / shorter"; result copied to clipboard. Cheap win that showcases the local LLM.
+4. **Voice punctuation & commands toggle** — deterministic pre-polish handling of "period", "new line", "scratch that" for users who dictate punctuation explicitly.
+5. **Clipboard-only mode** — per-app or global fallback that copies the result and notifies instead of pasting (RDP/VMs/locked-down apps).
+6. **Auto-benchmark on first run** — a ~10 s on-device micro-bench picks default models per machine instead of static RAM tiers.
+7. **Mic priority list** — ordered preferred devices (AirPods → built-in) with auto-switch and per-device input-gain memory.
+8. **Menu-bar quick controls** — switch polishing level and language without opening the Hub.
+9. **Voice snippets** — "insert my standup template" expands saved snippets; the Dictionary's bigger sibling.
+10. **Local translation mode** (experimental) — dictate in language A, insert in language B via the polish LLM.
+11. **Shared team dictionaries** — import/export dictionary packs as files (no server, keeps the zero-network posture).
+
+## 19. References
 
 - Wispr Flow UX (Hub/Flow Bar/hotkeys/dictionary/tones): [navigating the app](https://docs.wisprflow.ai/articles/5096240724-navigating-the-wispr-flow-app-desktop-ios-and-android), [features](https://wisprflow.ai/features), [what is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow)
 - STT landscape 2026: [Northflank open-source STT benchmarks](https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks), [Gladia open-source STT roundup](https://www.gladia.io/blog/best-open-source-speech-to-text-models), [local STT comparison](https://www.onresonant.com/resources/local-stt-models-2026)
