@@ -217,16 +217,38 @@ export class HotkeyBridge {
     this.#stopWatchdog()
     const native = this.#native()
     if (!native.available) return
+
+    // Trust probe. The tap just delivered a physical down, so the HID system
+    // must agree the key is held *right now*. If it says "not held" at this
+    // instant, the answer is not coming from the window server — it is the
+    // stub behind a stale native binary that predates hotkeyPhysicallyDown —
+    // and a watchdog fed by that stub would end every real hold 250 ms in.
+    // Disable reconciliation rather than become the bug it exists to fix.
+    if (!native.hotkeyPhysicallyDown()) {
+      this.#log.warn(
+        'HID state disagrees immediately after a physical down — stale native build? ' +
+          'Release reconciliation is disabled; run `npm run native:build`.',
+      )
+      return
+    }
+
+    let misses = 0
     this.#watchdog = setInterval(() => {
       if (this.#downAt === null) {
         this.#stopWatchdog()
         return
       }
-      if (!native.hotkeyPhysicallyDown()) {
-        this.#log.warn('hotkey release was lost in delivery; reconciling from HID state')
-        this.#stopWatchdog()
-        this.handle({ type: 'up', timestamp: this.#now(), synthetic: true })
+      if (native.hotkeyPhysicallyDown()) {
+        misses = 0
+        return
       }
+      // Two consecutive misses before reconciling: one read can race the
+      // window server's own flag update on the release edge.
+      misses += 1
+      if (misses < 2) return
+      this.#log.warn('hotkey release was lost in delivery; reconciling from HID state')
+      this.#stopWatchdog()
+      this.handle({ type: 'up', timestamp: this.#now(), synthetic: true })
     }, HOTKEY.physicalPollMs)
     this.#watchdog.unref?.()
   }

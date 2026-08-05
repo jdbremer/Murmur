@@ -160,7 +160,12 @@ async function bootstrap(): Promise<void> {
       const result = native().getSelectedText()
       if (!result.ok) return null
       const text = (result.text ?? '').trim()
-      return text.length > 0 ? text : null
+      if (text.length === 0) return null
+      // A selection this large cannot be edited within the polish model's
+      // context window — the result would be refused as truncated every time.
+      // Treat it as plain dictation instead of a guaranteed failure.
+      if (text.length > 6_000) return null
+      return text
     },
     persist: (record) => {
       dictations.insert(record)

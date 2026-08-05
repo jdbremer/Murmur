@@ -255,7 +255,13 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
   startHandsFree(): void {
     if (this.#phase === 'listening') {
       this.#handsFree = true
-      this.#deps.machine.startListening(true)
+      // Hands-free never edits a selection: a latched session would fire the
+      // edit on its first silence and then keep dictating over the result. If
+      // this hold began in command mode, demote it to plain dictation.
+      if (this.#context && this.#context.mode === 'command') {
+        this.#context = { ...this.#context, mode: 'dictate', selection: null }
+      }
+      this.#deps.machine.startListening(true, false)
       return
     }
     if (this.#phase === 'idle') this.begin({ handsFree: true })

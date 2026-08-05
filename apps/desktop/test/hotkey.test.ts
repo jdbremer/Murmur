@@ -141,13 +141,26 @@ describe('the physical-state watchdog', () => {
     vi.advanceTimersByTime(5_000)
     physicallyDown.current = false
 
-    // Within one poll interval the bridge notices and ends the utterance.
-    vi.advanceTimersByTime(HOTKEY.physicalPollMs + 5)
+    // Two consecutive misses (one can race the release edge), then reconcile.
+    vi.advanceTimersByTime(HOTKEY.physicalPollMs * 2 + 10)
     expect(recorded.ends).toBe(1)
 
     // The eventually-delivered real up (if any) is a harmless no-op shape:
     press('up')
     expect(recorded.ends).toBe(2) // orchestrator.end() while idle is a no-op
+  })
+
+  it('disables itself when the HID disagrees at arm time — the stale-binary tell', () => {
+    // A murmur_native.node older than hotkeyPhysicallyDown answers through the
+    // stub: always false. The tap just said "down", so an immediate false is
+    // that stub, not the window server — and a watchdog fed by it would end
+    // every real hold 250 ms in. It must stand down instead.
+    physicallyDown.current = false
+    press('down') // real (non-synthetic) edge, HID says "not held"
+    vi.advanceTimersByTime(HOTKEY.physicalPollMs * 20)
+    expect(recorded.ends).toBe(0)
+    press('up')
+    expect(recorded.ends).toBe(1)
   })
 
   it('does not fire while the key is genuinely held', () => {
