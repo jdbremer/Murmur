@@ -10,13 +10,17 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 ## Status
 
-Early implementation. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)** — UX spec, architecture, model catalogs, roadmap (M0–M6), risks, and open questions. Remaining work and known gaps are tracked in **[HANDOFF.md](./HANDOFF.md)**.
+**Working, on real hardware.** Hold `fn`, speak, release — polished text lands in the frontmost app. Verified end to end on an M5 Pro (macOS 27): a 7-second utterance transcribes in ~550 ms (Whisper large-v3-turbo, Metal), polishes in ~1 s (Gemma 3 4B), and is inserted about 1.3 s after release — inside PLAN §7.3's target. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)**; remaining work is tracked in **[HANDOFF.md](./HANDOFF.md)**.
 
-The **main process is complete**: the dictation orchestrator with per-stage timeouts and typed error states, the no-ML VAD, both STT engines (whisper.cpp sidecar, ONNX Runtime utility process), the polish engine with its prompt builder and hallucination guard, the model manager with a resumable checksum-verified downloader, the SQLite store with FTS5 search, clipboard-swap text insertion, and the macOS native module (event tap, paste synthesis, permissions).
+What works today:
 
-The **capture renderer and the Hub are now wired**: `getUserMedia` plus an AudioWorklet streaming 16 kHz mono frames, and Hub sections that really do download, verify, select and delete models, search history, edit the dictionary, and set per-app tone.
+- **The whole dictation loop**: event tap (own thread, HID-reconciled release so a lost up-edge can never strand a dictation) → capture renderer → pre-roll + VAD → whisper.cpp or ONNX Runtime → local LLM polish with the hallucination guard → clipboard-swap insertion with AX fallback → history.
+- **Command mode** (PLAN §18.1): hold the key with text selected and speak an instruction — the selection is rewritten in place by the local model, with a no-fallback failure discipline that never pastes over a selection on error.
+- **The Bar**: 28-bar 60 fps canvas waveform on a ~30 Hz mic meter, shimmer, ✓ pulse, error hold, click-through window with hover controls (cancel · mic picker · Hub), Esc-to-cancel, Reduce Motion support, and a distinct indicator when an utterance is editing a selection.
+- **The Hub**: first-run onboarding (permissions → starter models → tutorial), Models with the enforced US-only catalog, History with FTS5 search and stats, Dictionary, per-app-category Style, Settings (hotkey, mic picker, language, retention), Help with live permission/engine/capture status.
+- **CI**: the full gate on macOS arm64 per push/PR; sidecar builds on demand and weekly.
 
-Still to come: the Bar's real waveform (it renders a stand-in today), the microphone picker, onboarding, and CI. **Dictation has not yet been demonstrated end to end** — every stage is implemented, but proving the loop needs built sidecars, a downloaded model and granted macOS permissions on one machine. See [HANDOFF.md](./HANDOFF.md).
+Still to come, in order: llama.cpp pin bump so polishing gets Metal on macOS 27 (runs on CPU today), streaming partial transcripts in the Bar (M5), voice punctuation commands, snippets, packaging (M6). See [HANDOFF.md](./HANDOFF.md).
 
 ## Development
 

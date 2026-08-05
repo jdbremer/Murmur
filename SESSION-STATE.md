@@ -18,6 +18,10 @@ Claimed by: (none — all commits pushed to origin/main)
 - Stage 6 `4a72f07` — CI: full gate on macos-14; sidecar builds on demand + weekly canary.
 - 497 tests green at every commit. HANDOFF.md rewritten from ground truth.
 
+## FIELD VERIFICATION (owner, 2026-08-05)
+
+- The fn release fix is confirmed on the physical key, with Wispr Flow running: "it's quicker, it looks good, the app is working." HANDOFF item #1 is closed.
+
 ## IN-FLIGHT
 
 - Nothing. The review ran (11 agents, 14 findings, 7 confirmed — all fixed, including the presenter/window settle-to-idle seam and the loopback redirect hole), the branch merged to main, and main is pushed.

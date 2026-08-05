@@ -35,17 +35,17 @@ spawn args. Whisper's isolation is its loopback bind; llama keeps the token.
 
 ## What is left
 
-### 1. Real `fn`-key hold — verify the release fix by hand
+### 1. Real `fn`-key hold — VERIFIED in the field
 
-The physical key now works (field-tested 2026-08-05) but long holds sometimes
-never stopped. Root cause was delivery loss (tap on Electron's busy main run
-loop + Wispr Flow's active tap in the same chain); fixed with a dedicated tap
-thread plus a 250 ms HID reconciliation watchdog, and the phantom double-tap
-route (arrow-key flagsChanged noise) is closed by key-code matching. What
-remains human: hold `fn`, talk for a solid 30+ seconds, release — it must stop
-within ~250 ms even with Wispr Flow running. Also try: double-tap to latch
-hands-free, single tap to exit; and Command Mode — select text anywhere, hold
-`fn`, say "tighten this up".
+Owner-confirmed 2026-08-05, with Wispr Flow running alongside: hold `fn`,
+speak, release — "it's quicker, it looks good, the app is working." The
+release-loss root cause (tap starved on Electron's main run loop; another
+app's active tap in the chain) is fixed by the dedicated tap thread plus the
+250 ms HID reconciliation watchdog, and the phantom double-tap route
+(arrow-key flagsChanged noise) is closed by key-code matching. Still worth a
+casual poke when convenient: double-tap to latch hands-free and a single tap
+to exit, and Command Mode by hand (select text, hold `fn`, say "tighten this
+up").
 
 ### 2. llama.cpp Metal fails to compile on macOS 27 — pin bump, bench-gated
 
