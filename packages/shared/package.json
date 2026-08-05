@@ -1,6 +1,6 @@
 {
   "name": "@murmur/shared",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "description": "Domain types, zod schemas, model-catalog origin policy and the typed IPC contract shared by Murmur's main process, preload and renderers.",
