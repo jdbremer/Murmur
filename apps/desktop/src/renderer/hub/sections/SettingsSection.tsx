@@ -139,6 +139,16 @@ export function SettingsSection(): React.JSX.Element {
             }
           />
         </Row>
+        <Row
+          label="Edit selected text by voice"
+          hint="Hold your key with text selected and speak an instruction — the selection is rewritten in place. Needs a polishing model."
+        >
+          <Toggle
+            label="Edit selected text by voice"
+            checked={settings.commandModeEnabled}
+            onChange={(commandModeEnabled) => void update({ commandModeEnabled })}
+          />
+        </Row>
         <div className="pt-3">
           <TryIt hotkey={settings.hotkey.key} />
         </div>

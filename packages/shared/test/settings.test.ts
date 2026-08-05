@@ -27,6 +27,7 @@ describe('SettingsSchema', () => {
       externalEndpoint: null,
       appearance: 'system',
       onboardingCompleted: false,
+      commandModeEnabled: true,
     } satisfies Settings)
   })
 

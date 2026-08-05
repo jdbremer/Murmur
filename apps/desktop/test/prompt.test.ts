@@ -7,6 +7,9 @@ import { StyleProfileSchema, type DictionaryEntry } from '@murmur/shared'
 
 import { POLISH } from '../src/main/config'
 import {
+  maxCommandOutputTokens,
+  checkCommandOutput,
+  buildCommandPrompt,
   buildPolishPrompt,
   checkPolishOutput,
   countWords,
@@ -288,5 +291,44 @@ describe('unwrapModelOutput', () => {
     expect(unwrapModelOutput('She said "hello" to me.')).toBe('She said "hello" to me.')
     // …as must one that merely starts with a quote.
     expect(unwrapModelOutput('"Hello," she said.')).toBe('"Hello," she said.')
+  })
+})
+
+describe('buildCommandPrompt (PLAN §18.1)', () => {
+  const built = buildCommandPrompt({
+    instruction: 'make it friendlier',
+    selection: 'Send the report.',
+    language: 'en',
+  })
+
+  it('states the output discipline and the unchanged-fallback rule', () => {
+    expect(built.systemPrompt).toContain('Output only the edited text')
+    expect(built.systemPrompt).toContain('output TEXT unchanged')
+  })
+
+  it('carries the instruction and the selection as the user turn', () => {
+    expect(built.userText).toBe('INSTRUCTION: make it friendlier\n\nTEXT:\nSend the report.')
+  })
+
+  it('ships examples as real chat turns in the same shape', () => {
+    expect(built.examples.length).toBeGreaterThanOrEqual(2)
+    for (const example of built.examples) {
+      expect(example.user).toContain('INSTRUCTION:')
+      expect(example.user).toContain('TEXT:')
+      expect(example.assistant.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('command output rules', () => {
+  it('caps output relative to the selection, with a generous floor', () => {
+    expect(maxCommandOutputTokens('hi')).toBe(256)
+    expect(maxCommandOutputTokens('x'.repeat(4000))).toBe(3000)
+  })
+
+  it('rejects an empty edit — pasting emptiness would destroy the selection', () => {
+    expect(checkCommandOutput('').ok).toBe(false)
+    expect(checkCommandOutput('  \n ').ok).toBe(false)
+    expect(checkCommandOutput('Fine.').ok).toBe(true)
   })
 })
