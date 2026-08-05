@@ -25,6 +25,8 @@ type Msg<K extends IpcMessageChannel> = MessageInput<K>
 export interface MurmurApi {
   readonly app: {
     version(): Promise<Res<'app.version'>>
+    /** True in unpackaged builds; gates the Simulate widgets. */
+    devMode(): Promise<Res<'app.devMode'>>
     quit(): Promise<void>
     openHub(): Promise<void>
   }
@@ -48,10 +50,28 @@ export interface MurmurApi {
 
   /** Only the hidden capture renderer uses this half of the bridge. */
   readonly audio: {
+    /** Capture renderer only: one ~100 ms chunk of 16 kHz mono Float32 PCM. */
     sendFrame(frame: Msg<'audio.frame'>): void
+    /** Capture renderer only. */
     reportStatus(status: Msg<'audio.status'>): void
+    /** Capture renderer only: the ~30 Hz meter main relays as `audio.level`. */
+    reportLevel(level: Msg<'audio.meter'>): void
+    /** Capture renderer only: the result of `enumerateDevices`. */
+    reportDevices(devices: Msg<'audio.devices'>): void
     /** Capture commands from the orchestrator: warm / start / stop / release. */
     onCommand(listener: (command: Evt<'audio.command'>) => void): Unsubscribe
+    /** Mic pickers: the last known device list. */
+    listDevices(): Promise<Res<'audio.listDevices'>>
+    onDevicesChanged(listener: (devices: Evt<'audio.devicesChanged'>) => void): Unsubscribe
+    /** The capture renderer's last lifecycle report — errors included. */
+    captureStatus(): Promise<Res<'audio.captureStatus'>>
+    onCaptureChanged(listener: (status: Evt<'audio.captureChanged'>) => void): Unsubscribe
+  }
+
+  /** Bar renderer only. */
+  readonly bar: {
+    /** Take the window out of click-through while the pointer is on the pill. */
+    setPointerRegion(region: Msg<'bar.pointerRegion'>): void
   }
 
   readonly models: {

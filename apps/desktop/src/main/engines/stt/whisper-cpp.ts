@@ -9,7 +9,7 @@ import {
 
 import { AUDIO, TIMEOUTS } from '../../config'
 import { createLogger, redact, type Logger } from '../../logging'
-import { isLoopbackHost } from '../../net/fetch'
+import { loopbackFetch } from '../../net/fetch'
 import {
   resolveSidecarBinary,
   SidecarProcess,
@@ -135,20 +135,23 @@ export class WhisperCppEngine implements SttEngine {
       name: WHISPER_SERVER_BINARY,
       binaryPath,
       healthPath: '/',
-      buildArgs: ({ port, token }) => [
+      // whisper.cpp's server (v1.9.2) has **no** auth flag — verified against
+      // the binary's own usage output; passing `--api-key` makes it exit at
+      // startup. Its isolation is the loopback bind plus an OS-chosen port
+      // (PLAN §10.3's bearer token applies to llama-server, which does support
+      // one). The client still sends its Bearer header; the server ignores it,
+      // and if upstream ever grows auth the flag gets added back here.
+      // `--convert` is likewise omitted: it is a bare flag that already
+      // defaults to off, and we send 16 kHz mono WAV that needs no conversion.
+      buildArgs: ({ port }) => [
         '--host',
         '127.0.0.1',
         '--port',
         String(port),
         '--model',
         join(model.directory, modelFile),
-        '--api-key',
-        token,
         '--threads',
         String(this.#options.threads ?? 4),
-        // Keep the server's own conversion off: we already send 16 kHz mono.
-        '--convert',
-        'false',
       ],
     }
 
@@ -179,9 +182,6 @@ export class WhisperCppEngine implements SttEngine {
     if (!sidecar || !baseUrl || !token || sidecar.info().state !== 'running') {
       throw new Error(`whisper-server is not ready (${this.#status.get().detail || 'not started'})`)
     }
-    // Belt and braces: a base URL that is not loopback means something replaced
-    // it, and a prompt must never leave the machine (PLAN §10.3).
-    assertLoopback(baseUrl)
 
     const started = Date.now()
     const form = new FormData()
@@ -196,10 +196,13 @@ export class WhisperCppEngine implements SttEngine {
     const prompt = buildInitialPrompt(options.vocabulary)
     if (prompt) form.append('prompt', prompt)
 
-    const response = await fetch(`${baseUrl}/inference`, {
+    // loopbackFetch refuses a non-loopback base URL outright: if something
+    // replaced it, the audio must fail loudly rather than leave the machine
+    // (PLAN §10.3).
+    const response = await loopbackFetch(`${baseUrl}/inference`, {
       method: 'POST',
       body: form,
-      headers: { authorization: `Bearer ${token}` },
+      token,
       signal: options.signal ?? AbortSignal.timeout(TIMEOUTS.sidecarRequestMs),
     })
 
@@ -307,11 +310,4 @@ export function averageLogProb(payload: WhisperResponse): number | null {
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
   if (values.length === 0) return null
   return values.reduce((sum, value) => sum + value, 0) / values.length
-}
-
-function assertLoopback(baseUrl: string): void {
-  const { hostname } = new URL(baseUrl)
-  if (!isLoopbackHost(hostname)) {
-    throw new Error(`Refusing to send audio to non-loopback sidecar host "${hostname}"`)
-  }
 }

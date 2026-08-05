@@ -71,6 +71,9 @@ transcript redaction (local debugging only — see `src/main/logging.ts`).
 In an unpackaged build two dev-only IPC channels exist:
 `debug.simulateDictation` cycles the state machine with no mic or models, and
 `debug.simulateHotkey` feeds the **real** orchestrator a synthetic hotkey edge.
+From a shell, `kill -USR2 <electron pid>` does the same as `simulateHotkey` —
+each signal alternates down/up — so a whole dictation can be driven without
+touching the app: signal, `say` a sentence, signal again.
 
 ### macOS vs. other platforms
 

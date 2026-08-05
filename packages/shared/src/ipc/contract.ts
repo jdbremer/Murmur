@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AudioCaptureStatusSchema,
   AudioCommandSchema,
+  AudioDeviceListSchema,
   AudioFrameSchema,
   AudioLevelEventSchema,
   DictationEventSchema,
@@ -114,6 +115,12 @@ export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 export const invokeContract = {
   // --- app ---------------------------------------------------------------
   'app.version': { request: z.void(), response: z.string().min(1) },
+  /**
+   * True in unpackaged builds. UI that fronts a dev-only channel (the three
+   * Simulate widgets) renders only when this is true — a button whose backing
+   * handler does not exist in a packaged build must not exist either.
+   */
+  'app.devMode': { request: z.void(), response: z.boolean() },
   'app.quit': { request: z.void(), response: z.void() },
   'app.openHub': { request: z.void(), response: z.void() },
 
@@ -126,6 +133,22 @@ export const invokeContract = {
   'dictation.cancel': { request: z.void(), response: z.void() },
   'dictation.startHandsFree': { request: z.void(), response: z.void() },
   'dictation.stopHandsFree': { request: z.void(), response: z.void() },
+
+  // --- audio devices (PLAN §2.2.5 mic picker) ----------------------------
+  /**
+   * The microphones main last heard about from the capture renderer. An invoke
+   * rather than a bare event so a picker that opens between `devicechange`
+   * notifications still has a list to render.
+   */
+  'audio.listDevices': { request: z.void(), response: AudioDeviceListSchema },
+  /**
+   * The capture renderer's last lifecycle report. This is how a mic failure
+   * that happened while nothing was listening — permission denied at the
+   * startup warm, a device already in use — stays visible: the orchestrator
+   * rightly ignores errors while idle (there is no dictation to fail), so the
+   * Hub reads the state from here instead (HANDOFF item #4).
+   */
+  'audio.captureStatus': { request: z.void(), response: AudioCaptureStatusSchema },
 
   // --- models (PLAN §8) --------------------------------------------------
   'models.list': { request: z.void(), response: ModelsListSchema },
@@ -224,6 +247,10 @@ export const eventContract = {
    * the renderer only obeys (PLAN §5: warm the stream, capture on hotkey-down).
    */
   'audio.command': AudioCommandSchema,
+  /** The microphone list changed (device plugged in, AirPods connected). */
+  'audio.devicesChanged': AudioDeviceListSchema,
+  /** The capture renderer's lifecycle changed — including errors while idle. */
+  'audio.captureChanged': AudioCaptureStatusSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract
@@ -237,6 +264,24 @@ export const messageContract = {
   /** 16 kHz mono Float32 PCM chunks from the hidden capture renderer (PLAN §5). */
   'audio.frame': AudioFrameSchema,
   'audio.status': AudioCaptureStatusSchema,
+  /**
+   * Mic amplitude from the capture renderer at ~30 Hz, which main relays to the
+   * Bar as `audio.level`. It rides its own channel rather than being derived
+   * from `audio.frame` because frames are ~100 ms apart: a 10 Hz envelope makes
+   * the waveform look like it is stepping, and PLAN §2.1 wants it dancing.
+   */
+  'audio.meter': AudioLevelEventSchema,
+  /**
+   * The Bar renderer telling main whether the pointer is over the pill.
+   *
+   * The Bar window is click-through (`setIgnoreMouseEvents(true, forward)`) so
+   * it never blocks the app underneath; mouse *moves* still arrive, and the
+   * renderer flips the window back to interactive for as long as the pointer is
+   * inside the capsule (PLAN §2.1 "click-through everywhere except the pill").
+   */
+  'bar.pointerRegion': z.object({ interactive: z.boolean() }),
+  /** The capture renderer's view of the available microphones. */
+  'audio.devices': AudioDeviceListSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type MessageContract = typeof messageContract

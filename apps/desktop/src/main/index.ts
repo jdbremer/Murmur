@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron'
 
 import {
   createMainIpc,
+  MOMENTARY_HOLD_MS,
   type DictationEvent,
   type EnginesStatus,
   type Settings,
@@ -9,6 +10,7 @@ import {
 
 import { CaptureController } from './audio/controller'
 import { AUDIO } from './config'
+import { EscapeCancel } from './dictation/escape'
 import { HotkeyBridge } from './dictation/hotkey'
 import { TextInjector } from './dictation/injector'
 import { DictationOrchestrator } from './dictation/orchestrator'
@@ -153,9 +155,10 @@ async function bootstrap(): Promise<void> {
     persist: (record) => {
       dictations.insert(record)
     },
-    onLevel: (level) => {
-      ipc.broadcast(windows.uiWebContents(), 'audio.level', { level, peak: null })
-    },
+    // No `onLevel`: the Bar's waveform is fed by the capture renderer's ~30 Hz
+    // `audio.meter` messages (relayed as `audio.level` in the IPC registry).
+    // Deriving it from the ~100 ms PCM frames instead would meter at 10 Hz and
+    // make the bars step rather than dance (PLAN §2.1).
   })
 
   const hotkeys = new HotkeyBridge({
@@ -221,6 +224,13 @@ async function bootstrap(): Promise<void> {
     applyBarVisibility(settings.get(), event)
   })
 
+  // Esc cancels while listening, and only while listening (PLAN §2.1).
+  const escape = new EscapeCancel({ cancel: () => orchestrator.cancel() })
+  machine.on('state', (next) => {
+    if (next === 'listening') escape.arm()
+    else escape.disarm()
+  })
+
   engines.on('status', (status: EnginesStatus) => {
     ipc.broadcast(windows.uiWebContents(), 'engines.changed', status)
   })
@@ -232,7 +242,12 @@ async function bootstrap(): Promise<void> {
   })
 
   /** PLAN §2.1: show while dictating (default) · always · hidden. */
+  let barHideTimer: NodeJS.Timeout | null = null
   function applyBarVisibility(current: Settings, event: DictationEvent): void {
+    if (barHideTimer) {
+      clearTimeout(barHideTimer)
+      barHideTimer = null
+    }
     switch (current.barVisibility) {
       case 'always':
         windows.showBar()
@@ -240,10 +255,32 @@ async function bootstrap(): Promise<void> {
       case 'hidden':
         windows.hideBar()
         return
-      case 'showWhileDictating':
-        if (event.state === 'idle') windows.hideBar()
-        else windows.showBar()
+      case 'showWhileDictating': {
+        if (event.state === 'idle') {
+          windows.hideBar()
+          return
+        }
+        windows.showBar()
+        // `inserted` and `error` are the last events of their dictation: the
+        // machine settles to idle *silently* (RESTING_STATE moves; nothing is
+        // emitted), so no idle event will ever hide the window. Retire it
+        // ourselves once the renderer's hold — plus the shrink morph — has
+        // played out. Any newer event cancels this via the clear above.
+        const hold =
+          event.state === 'inserted'
+            ? MOMENTARY_HOLD_MS.inserted
+            : event.state === 'error'
+              ? MOMENTARY_HOLD_MS.error
+              : 0
+        if (hold > 0) {
+          barHideTimer = setTimeout(() => {
+            barHideTimer = null
+            if (settings.get().barVisibility === 'showWhileDictating') windows.hideBar()
+          }, hold + 250)
+          barHideTimer.unref?.()
+        }
         return
+      }
     }
   }
 
@@ -335,6 +372,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(): Promise<void> {
     log.info('shutting down')
     tray.destroy()
+    escape.dispose()
     hotkeys.stop()
     orchestrator.dispose()
     injector.dispose()

@@ -1,5 +1,5 @@
 import { POLISH, TIMEOUTS } from '../../config'
-import { isLoopbackHost, isPrivateHost } from '../../net/fetch'
+import { isLoopbackHost, isPrivateHost, type FetchLike } from '../../net/fetch'
 import type { PolishRequest } from '../types'
 
 /**
@@ -31,6 +31,14 @@ export interface ChatClientOptions {
   /** Bearer token. The sidecar's per-launch token, or a user-supplied key. */
   apiKey: string | null
   model: string
+  /**
+   * The transport, chosen consciously by whoever constructs the client:
+   * `loopbackFetch` when fronting the bundled llama-server (a prompt must
+   * never leave the machine), the plain global for a user-configured external
+   * endpoint (allowed by PLAN §7.1 and warned about when not loopback).
+   * Required so that no call site gets a network path by accident.
+   */
+  fetchImpl: FetchLike
 }
 
 interface ChatCompletionResponse {
@@ -117,7 +125,7 @@ export class ChatClient {
     const headers: Record<string, string> = { 'content-type': 'application/json' }
     if (this.#options.apiKey) headers['authorization'] = `Bearer ${this.#options.apiKey}`
 
-    const response = await fetch(url, {
+    const response = await this.#options.fetchImpl(url, {
       method: 'POST',
       headers,
       body: JSON.stringify({

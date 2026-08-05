@@ -26,6 +26,7 @@ describe('SettingsSchema', () => {
       polishModelId: null,
       externalEndpoint: null,
       appearance: 'system',
+      onboardingCompleted: false,
     } satisfies Settings)
   })
 

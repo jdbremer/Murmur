@@ -149,6 +149,13 @@ export class ModelManager extends EventEmitter<ModelManagerEvents> {
     const entry = this.entry(modelId)
     if (!entry) throw new Error(`"${modelId}" is not in the catalog`)
 
+    // One download per model: a second start while one is in flight would put
+    // two writers on the same .partial file and corrupt it. Handing back the
+    // existing id makes a double-click (or two windows racing) harmless.
+    for (const [existingId, existing] of this.#downloads) {
+      if (existing.modelId === modelId) return existingId
+    }
+
     const downloadId = randomUUID()
     const controller = new AbortController()
     this.#downloads.set(downloadId, { modelId, controller })

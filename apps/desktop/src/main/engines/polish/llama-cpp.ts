@@ -4,6 +4,7 @@ import { EngineStatusSchema, type EngineStatus, type EngineUnavailableReason } f
 
 import { POLISH } from '../../config'
 import { createLogger, type Logger } from '../../logging'
+import { loopbackFetch } from '../../net/fetch'
 import {
   resolveSidecarBinary,
   SidecarProcess,
@@ -101,7 +102,14 @@ export class LlamaCppPolishEngine implements PolishEngine {
     }
 
     const started = Date.now()
-    const client = new ChatClient({ baseUrl, apiKey: token, model: this.#modelId ?? 'local' })
+    const client = new ChatClient({
+      baseUrl,
+      apiKey: token,
+      model: this.#modelId ?? 'local',
+      // The bundled server is loopback by construction; enforcing it in the
+      // transport means a corrupted base URL fails instead of leaking a prompt.
+      fetchImpl: (url, init) => loopbackFetch(url, init),
+    })
     const text = unwrapModelOutput(await client.complete(request))
     this.#armIdleTimer()
     return { text, durationMs: Date.now() - started }
