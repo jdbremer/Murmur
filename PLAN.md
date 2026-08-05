@@ -19,7 +19,7 @@
 2. Fully local speech-to-text (STT) and local LLM polishing (filler removal, punctuation, formatting, tone).
 3. User-selectable models for both stages, from a curated catalog **restricted to models from US-based organizations** (hard policy, §8), each labeled with origin, license, size, and hardware needs — plus "bring your own model" (a GGUF/ONNX file or a local OpenAI-compatible endpoint; imports bypass the catalog and are labeled origin-unverified).
 4. Wispr Flow's interface shape: a floating **Bar** (recording pill) + a **Hub** window (history, dictionary, style, settings) + menu-bar presence.
-5. Signed, notarized Electron app distributed as a DMG (not Mac App Store — see §15).
+5. Signed, notarized Electron app distributed as a DMG (not Mac App Store — see §16).
 
 ### Non-goals (v1)
 
@@ -154,7 +154,7 @@ Cancel paths: Esc during listening; empty/silent audio → "No speech detected";
 
 Prototype-stage shortcut: `uiohook-napi` can stand in for the event tap during M1 development, but the plan of record is our own tap in `@murmur/native` — `fn` handling, key *suppression* while dictating (so hold-`fn` doesn't also trigger app shortcuts), and double-tap timing all want first-party control.
 
-Bundled sidecar binaries (`whisper-server`, `llama-server`) are compiled in CI for arm64 + x86_64, code-signed with hardened runtime, and shipped inside `Contents/Resources/bin/` (notarization requirement — see §15 risks).
+Bundled sidecar binaries (`whisper-server`, `llama-server`) are compiled in CI for arm64 + x86_64, code-signed with hardened runtime, and shipped inside `Contents/Resources/bin/` (notarization requirement — see §16 risks).
 
 ---
 
@@ -292,7 +292,7 @@ Guardrail: if polish output diverges wildly in length from input (hallucination 
 ## 10. Privacy & security posture (the selling point — make it auditable)
 
 1. **No telemetry, no analytics, no accounts, no crash uploads.** Crash reports write to local disk; the user chooses whether to share them.
-2. Network access happens **only** for: model catalog refresh + model downloads (user-initiated, to Hugging Face) and the optional update check (off by default in v1; see §15). Enforced in code by a single fetch wrapper with an allowlist, and documented so IT can verify with Little Snitch/proxy logs.
+2. Network access happens **only** for: model catalog refresh + model downloads (user-initiated, to Hugging Face) and the optional update check (off by default in v1; see §16). Enforced in code by a single fetch wrapper with an allowlist, and documented so IT can verify with Little Snitch/proxy logs.
 3. Sidecars bind to `127.0.0.1` with a random port + bearer token generated per launch (no other local user/process can use our inference servers or read prompts).
 4. Audio in memory only by default; history is local SQLite; both retention windows user-controlled.
 5. The event tap is **listen-only for the configured hotkey** — key events other than the hotkey are never logged, buffered, or transmitted; this is stated in-app and verifiable in source.
@@ -400,7 +400,42 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 
 ---
 
-## 15. Risks & mitigations
+## 15. Production readiness — definition of done & quality gates
+
+The roadmap says what gets built; this section says when it is allowed to be called production. v1.0 does not ship until every box here is checked.
+
+### 15.1 Reliability
+- 48-hour soak on real hardware: app resident with regular dictations; zero crashes; main-process RSS stable (< 150 MB idle, models excluded); no listener/child-process leaks (counted before/after).
+- Sidecar watchdog: a whisper/llama server exit triggers auto-restart with exponential backoff; surfaced to the user only after 3 consecutive failures; the state machine returns to a safe idle on every failure path — no dead ends, asserted by unit tests over the full transition table.
+- Every stage of the dictation loop has a timeout and a user-visible error state; no silent hangs anywhere.
+- Survives (manual QA script + automated where possible): sleep/wake mid-dictation, display hot-plug and resolution change, mic hot-swap (AirPods connecting/disconnecting while listening), Space switches and full-screen transitions, fast user switching, app relaunch while a model download is in flight.
+
+### 15.2 Data safety
+- SQLite in WAL mode; integrity check at boot; corrupt DB → timestamped backup + clean re-init, never a crash loop.
+- Atomic settings writes (temp file + rename); versioned forward-only migrations with automatic pre-migration backup.
+- Downloads land in temp files renamed only after checksum verification; partials are resumed or reaped; a checksum failure quarantines the file with a visible error.
+
+### 15.3 Security & privacy (verified, not asserted)
+- An integration test asserts the app contacts no host other than the Hugging Face download hosts (plus the update host when enabled) — run in CI behind a recording proxy.
+- Sidecars: loopback bind + per-launch bearer token, both covered by tests; the token is never logged.
+- IPC: every channel zod-validated at the boundary; renderer input treated as untrusted; no renderer-supplied file path reaches disk without normalization + allowlist (the downloader and model-import paths are the sensitive ones).
+- Logs redact transcript content by default (verbose local debugging is opt-in); no analytics of any kind; `npm audit`/osv-scanner clean or explicitly waived in-repo; SBOM per release.
+
+### 15.4 Release engineering
+- CI on every PR: typecheck, lint, unit suite, main+renderer builds, and a Playwright smoke test (launch with the stubbed native layer → simulated dictation → Bar state assertions → history row written).
+- Nightly on a self-hosted Apple Silicon runner: model-in-the-loop polish evals (§13.4) and the latency bench with a ±20% regression gate.
+- Tagged releases: universal (arm64 + x86_64) build including sidecars and the native module, Developer ID signing, notarization + stapling, DMG + SBOM + CHANGELOG published together; the previous DMG is retained as the rollback path; auto-update ships to a beta channel before stable.
+- Crash handling: local minidumps with per-release symbolication assets archived (no automatic upload — privacy posture, §10).
+
+### 15.5 UX & accessibility bar
+- VoiceOver labels and full keyboard navigation across the Hub; the Bar respects Reduce Motion; dark/light parity audit; text scaling 100–200%; a copy pass over every user-facing string — every error message names a next action.
+
+### 15.6 Execution quality gates (how the code gets written)
+- Every implementation stage lands only with install + typecheck + lint + tests + build green — no red-to-red baton passes between stages.
+- A dedicated adversarial review stage follows implementation: independent review passes over (a) correctness of the dictation state machine and engine lifecycles, (b) security of the injection/IPC/downloader/token paths, (c) resource lifecycle (listeners, child processes, streams, windows), (d) macOS-specific correctness. Confirmed findings are fixed and re-verified, then a full-diff security review closes the stage.
+- Honest boundary: development happens in a Linux container. Everything compilable and testable runs there, but permissions flows, the `fn` event tap, cross-app paste, Metal latency, and notarization can only be certified on physical Macs. The first on-Mac session executes the M1 acceptance checklist (§13) verbatim before any further feature work — "green in CI" is never conflated with "production".
+
+## 16. Risks & mitigations
 
 | Risk | Severity | Mitigation |
 |---|---|---|
@@ -417,7 +452,7 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 
 ---
 
-## 16. Open questions (defaults chosen; flag disagreement)
+## 17. Open questions (defaults chosen; flag disagreement)
 
 1. **Minimum macOS**: proposed macOS 13 Ventura+ (covers modern permission APIs; Electron support window). Intel supported but tier-C.
 2. **Starter default**: onboarding proposes Parakeet v3 + Gemma 3 4B on 16 GB+ machines, Whisper small.en + Gemma 3 1B on 8 GB — one opinionated default per tier.
@@ -427,7 +462,7 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 
 ---
 
-## 17. References
+## 18. References
 
 - Wispr Flow UX (Hub/Flow Bar/hotkeys/dictionary/tones): [navigating the app](https://docs.wisprflow.ai/articles/5096240724-navigating-the-wispr-flow-app-desktop-ios-and-android), [features](https://wisprflow.ai/features), [what is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow)
 - STT landscape 2026: [Northflank open-source STT benchmarks](https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks), [Gladia open-source STT roundup](https://www.gladia.io/blog/best-open-source-speech-to-text-models), [local STT comparison](https://www.onresonant.com/resources/local-stt-models-2026)
