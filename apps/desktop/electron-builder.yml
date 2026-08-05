@@ -29,6 +29,26 @@ extraResources:
   - from: ../../resources/catalog
     to: catalog
     filter: ['**/*.json']
+  # The speech and polishing servers, landing in `Contents/Resources/bin` —
+  # exactly where `sidecarSearchPaths()` looks first in a packaged app.
+  #
+  # Without this a downloaded build can never transcribe. The Hub can fetch the
+  # *weights*, but the servers that run them were only ever built into the dev
+  # repo's `.sidecars/bin`, so an installed app searched two paths inside its
+  # own bundle, found nothing, and told the user to run a build script that
+  # does not ship with it.
+  #
+  # The directory is created (empty if need be) by the pack scripts, because
+  # electron-builder treats a missing `from` as fatal and a developer who has
+  # not built the sidecars must still be able to package the app.
+  - from: ../../.sidecars/bin
+    to: bin
+    filter:
+      - whisper-server
+      - llama-server
+      - whisper-server.exe
+      - llama-server.exe
+      - '*.dll'
 
 asar: true
 # The compiled N-API addon must stay outside the archive to be dlopen-able.

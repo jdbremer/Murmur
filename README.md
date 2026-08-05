@@ -33,9 +33,8 @@ declared in `apps/desktop/electron-builder.yml`, waiting on a certificate.
 Also note macOS ties Accessibility and Input Monitoring grants to an app's code
 signature, so with an unsigned build those permissions can reset on each update.
 
-Fresh installs transcribe nothing until you download a model from the Hub, and
-on macOS until `whisper-server` / `llama-server` are built
-(`scripts/sidecars/build-*.sh`). Windows can install them from the Models tab.
+Installers bundle the `whisper-server` and `llama-server` binaries, so the only
+thing left after installing is downloading a model from the Hub.
 
 ## Status
 
@@ -76,6 +75,14 @@ Writes `apps/desktop/release/Murmur-<version>-arm64.dmg` and an x64 one. Run
 `pack:win` on Windows for the NSIS installer — the native module and
 `better-sqlite3` are compiled per platform, so each installer has to be built
 on its own OS.
+
+Whatever is in `.sidecars/bin` is bundled into `Contents/Resources/bin`, which
+is where a packaged app looks first. Build them first (`brew install cmake`,
+then `scripts/sidecars/build-whisper.sh` and `build-llama.sh`; the `.ps1`
+equivalents fetch prebuilds on Windows) or you get an installer that runs and
+cannot transcribe. Packaging without them succeeds deliberately, so a
+contributor who only needs the UI is not forced through a whisper.cpp build —
+the release workflow is where their absence is a hard failure.
 
 That env var skips code signing; see [Download](#download) for what unsigned
 means in practice. Drop it once a Developer ID is configured — `hardenedRuntime`,

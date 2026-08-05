@@ -28,7 +28,9 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    # Generous: a cold cache builds whisper.cpp and llama.cpp universal from
+    # source, which dominates everything else in this job.
+    timeout-minutes: 120
     permissions:
       # electron-builder creates the draft release and uploads to it.
       contents: write
@@ -77,6 +79,47 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Sidecars are bundled into the installer (electron-builder.yml
+      # extraResources). Cached on the pinned upstream tags, which live inside
+      # these scripts — so a pin bump invalidates the cache and nothing else
+      # does. Building whisper.cpp and llama.cpp universal from source is by
+      # far the slowest part of a release; the Windows side downloads official
+      # prebuilds instead and takes seconds.
+      - name: Cache sidecar binaries
+        id: sidecars
+        uses: actions/cache@v4
+        with:
+          path: .sidecars/bin
+          key: sidecars-${{ runner.os }}-${{ hashFiles('scripts/sidecars/build-*.sh', 'scripts/sidecars/fetch-*.ps1') }}
+
+      - name: Build sidecars (macOS)
+        if: runner.os == 'macOS' && steps.sidecars.outputs.cache-hit != 'true'
+        run: |
+          brew install cmake || true
+          scripts/sidecars/build-whisper.sh
+          scripts/sidecars/build-llama.sh
+
+      - name: Fetch sidecars (Windows)
+        if: runner.os == 'Windows' && steps.sidecars.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          ./scripts/sidecars/fetch-whisper-win.ps1
+          ./scripts/sidecars/fetch-llama-win.ps1
+
+      # A release that silently ships without them is the bug this whole step
+      # exists to prevent: the app installs, opens, downloads a model, and then
+      # cannot transcribe a word.
+      - name: Verify the sidecars are present
+        shell: bash
+        run: |
+          ls -la .sidecars/bin
+          for name in whisper-server llama-server; do
+            if [ ! -e ".sidecars/bin/$name" ] && [ ! -e ".sidecars/bin/$name.exe" ]; then
+              echo "::error::$name is missing from .sidecars/bin — the installer would ship unable to transcribe"
+              exit 1
+            fi
+          done
 
       # macOS code signing is NOT configured yet. Until a Developer ID is
       # available the DMG is ad-hoc signed, which means Gatekeeper will block
