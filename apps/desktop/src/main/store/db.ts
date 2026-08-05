@@ -60,12 +60,19 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): O
   // The first is the case a naive "open then check integrity" misses, because
   // the open itself is what fails.
   let db: DatabaseType
+  let opened: DatabaseType | null = null
   try {
-    db = openWithPragmas(path)
+    opened = openWithPragmas(path)
+    db = opened
     const problem = checkIntegrity(db)
     if (problem) throw new Error(`integrity check failed: ${problem}`)
   } catch (error) {
     log.error(`history database at ${path} is unusable; re-initialising:`, error)
+    // Close before moving the file. Windows refuses to rename or unlink a file
+    // that still has an open handle, so quarantine threw EBUSY and the app
+    // crash-looped on exactly the corruption this path exists to survive.
+    // POSIX lets you unlink an open file, which is why it went unnoticed.
+    closeQuietly(opened)
     recoveredFrom = quarantineDatabase(path, now())
     db = openWithPragmas(path)
   }
@@ -89,7 +96,8 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): O
     // A migration that throws leaves a database this build cannot use. Treat it
     // exactly like corruption: move aside, start clean, keep the old file.
     log.error('migration failed:', error)
-    db.close()
+    // Same Windows constraint as above: the handle goes before the file moves.
+    closeQuietly(db)
     recoveredFrom = quarantineDatabase(path, now())
     db = openWithPragmas(path)
     appliedMigrations = migrate(db).applied
@@ -102,17 +110,35 @@ export function openDatabase(path: string, options: OpenDatabaseOptions = {}): O
 
 function openWithPragmas(path: string): DatabaseType {
   const db = new Database(path)
-  // WAL: concurrent reads during a write, and no reader/writer stalls in the
-  // dictation loop (PLAN §15.2).
-  db.pragma('journal_mode = WAL')
-  // NORMAL is the documented companion to WAL: durable across app crashes,
-  // and only at risk from an OS-level power loss, which history rows survive
-  // losing far better than the app survives an fsync per insert.
-  db.pragma('synchronous = NORMAL')
-  db.pragma('foreign_keys = ON')
-  // Fail fast rather than hang if another instance somehow holds the lock.
-  db.pragma('busy_timeout = 5000')
-  return db
+  try {
+    // WAL: concurrent reads during a write, and no reader/writer stalls in the
+    // dictation loop (PLAN §15.2).
+    db.pragma('journal_mode = WAL')
+    // NORMAL is the documented companion to WAL: durable across app crashes,
+    // and only at risk from an OS-level power loss, which history rows survive
+    // losing far better than the app survives an fsync per insert.
+    db.pragma('synchronous = NORMAL')
+    db.pragma('foreign_keys = ON')
+    // Fail fast rather than hang if another instance somehow holds the lock.
+    db.pragma('busy_timeout = 5000')
+    return db
+  } catch (error) {
+    // "file is not a database" surfaces here, at the first pragma, not from the
+    // constructor — so the file is already open and the handle would leak. It
+    // has to be closed or Windows cannot move the file aside afterwards.
+    closeQuietly(db)
+    throw error
+  }
+}
+
+/** Close a handle we are about to abandon; a failure here changes nothing. */
+function closeQuietly(db: DatabaseType | null): void {
+  if (db === null) return
+  try {
+    db.close()
+  } catch {
+    /* already closed, or never fully opened */
+  }
 }
 
 /** `null` when healthy, otherwise the first problem SQLite reported. */
