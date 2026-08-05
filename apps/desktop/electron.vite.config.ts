@@ -19,9 +19,22 @@ const rendererRoot = resolve(__dirname, 'src/renderer')
 export default defineConfig({
   main: {
     build: {
-      externalizeDeps: { include: ['@murmur/native'], exclude: ['@murmur/shared'] },
+      externalizeDeps: {
+        // Native addons and the optional ONNX Runtime must stay external and be
+        // `require`d at runtime, so a missing one is a status rather than a
+        // bundling failure. electron-vite only externalises `dependencies` by
+        // default, hence the explicit `include`.
+        include: ['@murmur/native', 'onnxruntime-node', 'better-sqlite3'],
+        exclude: ['@murmur/shared'],
+      },
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/main/index.ts') },
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          // The STT utility process (PLAN §3.1). Built alongside the main
+          // bundle so `utilityProcess.fork` can point at `out/main/onnx-host.js`.
+          'onnx-host': resolve(__dirname, 'src/main/engines/stt/onnx/host.ts'),
+        },
+        output: { entryFileNames: '[name].js' },
       },
     },
   },

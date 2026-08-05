@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   AudioCaptureStatusSchema,
+  AudioCommandSchema,
   AudioFrameSchema,
   AudioLevelEventSchema,
   DictationEventSchema,
@@ -12,6 +13,8 @@ import {
   DictionaryEntryPatchSchema,
   DictionaryEntrySchema,
 } from '../domain/dictionary'
+import { EnginesStatusSchema } from '../domain/engine'
+import { HardwareReportSchema } from '../domain/hardware'
 import { PermissionKindSchema, PermissionsStatusSchema } from '../domain/permissions'
 import { SettingsPatchSchema, SettingsSchema } from '../domain/settings'
 import { StyleProfilePatchSchema, StyleProfileSetSchema } from '../domain/style'
@@ -57,6 +60,13 @@ export const ModelsListSchema = z.object({
   installed: z.array(InstalledModelSchema),
   imported: z.array(ImportedModelSchema),
   diskUsageBytes: z.number().int().nonnegative(),
+  /** Per-entry Runs well / Tight / Not recommended badges (PLAN §8). */
+  hardware: HardwareReportSchema,
+  /**
+   * Set when the shipped catalog failed validation — the list is then empty by
+   * design and the Models section must say why (PLAN §8 origin policy).
+   */
+  catalogError: z.string().nullable().default(null),
 })
 export type ModelsList = z.infer<typeof ModelsListSchema>
 
@@ -90,6 +100,12 @@ export type HistoryPage = z.infer<typeof HistoryPageSchema>
 const IdRequestSchema = z.object({ id: z.string().min(1) })
 const ModelIdRequestSchema = z.object({ modelId: z.string().min(1) })
 const PermissionKindRequestSchema = z.object({ kind: PermissionKindSchema })
+
+/** Dev-only: the hotkey edges the native tap would otherwise produce. */
+export const DebugHotkeyRequestSchema = z.object({
+  action: z.enum(['down', 'up', 'doubleTap']),
+})
+export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 
 // ---------------------------------------------------------------------------
 // renderer → main, request/response
@@ -129,6 +145,10 @@ export const invokeContract = {
   'models.delete': { request: ModelIdRequestSchema, response: z.void() },
   'models.import': { request: ModelImportRequestSchema, response: ImportedModelSchema },
 
+  // --- engines (PLAN §6.1, §7.1) -----------------------------------------
+  /** Current STT + polish engine lifecycle, for the Hub's Models/Help panels. */
+  'engines.status': { request: z.void(), response: EnginesStatusSchema },
+
   // --- history (PLAN §2.2.1) ---------------------------------------------
   'history.query': { request: HistoryQuerySchema, response: HistoryPageSchema },
   'history.delete': { request: IdRequestSchema, response: z.void() },
@@ -159,6 +179,13 @@ export const invokeContract = {
   // --- debug (registered only in unpackaged builds) -----------------------
   /** Cycles the dictation state machine so the Bar can be built without a mic. */
   'debug.simulateDictation': { request: z.void(), response: z.void() },
+  /**
+   * Feeds the *real* orchestrator a synthetic hotkey edge, so the whole
+   * pipeline (capture → VAD → STT → polish → insert) can be exercised on a dev
+   * machine that has no event tap. Unlike `debug.simulateDictation` this runs
+   * the production code path; it just replaces the trigger.
+   */
+  'debug.simulateHotkey': { request: DebugHotkeyRequestSchema, response: z.void() },
 } as const satisfies Record<string, IpcInvokeDefinition>
 
 export type InvokeContract = typeof invokeContract
@@ -176,6 +203,18 @@ export const eventContract = {
   /** Broadcast after any successful `settings.set`, to all windows. */
   'settings.changed': SettingsSchema,
   'models.downloadProgress': ModelDownloadProgressSchema,
+  /**
+   * Engine lifecycle changed — model swapped, sidecar died, runtime missing.
+   * Named `changed` rather than `status` because channel names are unique
+   * across all three maps (see the contract-hygiene test), and the
+   * request/response half already owns `engines.status`.
+   */
+  'engines.changed': EnginesStatusSchema,
+  /**
+   * Main → hidden capture renderer. The orchestrator owns when the mic opens;
+   * the renderer only obeys (PLAN §5: warm the stream, capture on hotkey-down).
+   */
+  'audio.command': AudioCommandSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract

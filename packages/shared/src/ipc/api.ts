@@ -50,6 +50,8 @@ export interface MurmurApi {
   readonly audio: {
     sendFrame(frame: Msg<'audio.frame'>): void
     reportStatus(status: Msg<'audio.status'>): void
+    /** Capture commands from the orchestrator: warm / start / stop / release. */
+    onCommand(listener: (command: Evt<'audio.command'>) => void): Unsubscribe
   }
 
   readonly models: {
@@ -60,6 +62,11 @@ export interface MurmurApi {
     select(request: Req<'models.select'>): Promise<Res<'models.select'>>
     remove(request: Req<'models.delete'>): Promise<void>
     import(request: Req<'models.import'>): Promise<Res<'models.import'>>
+  }
+
+  readonly engines: {
+    status(): Promise<Res<'engines.status'>>
+    subscribe(listener: (status: Evt<'engines.changed'>) => void): Unsubscribe
   }
 
   readonly history: {
@@ -89,6 +96,9 @@ export interface MurmurApi {
 
   /** Present in unpackaged builds only; the handler is not registered otherwise. */
   readonly debug: {
+    /** Canned state cycle — no mic, no models, no native tap. */
     simulateDictation(): Promise<void>
+    /** Drives the real pipeline with a synthetic hotkey edge. */
+    simulateHotkey(request: Req<'debug.simulateHotkey'>): Promise<void>
   }
 }

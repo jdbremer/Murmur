@@ -1,59 +1,57 @@
-import { app, ipcMain } from 'electron'
+import { app } from 'electron'
 
-import {
-  applyStyleProfilePatch,
-  createDefaultStyleProfiles,
-  createMainIpc,
-  type MainIpc,
-  type StyleProfileSet,
-} from '@murmur/shared'
+import type { MainIpc } from '@murmur/shared'
 
+import type { DictationOrchestrator } from '../dictation/orchestrator'
 import type { DictationStateMachine } from '../dictation/state-machine'
-import type { LoadedCatalog } from '../models/catalog'
+import type { EngineCoordinator } from '../engines/coordinator'
+import type { HotkeyBridge } from '../dictation/hotkey'
+import type { ModelManager } from '../models/manager'
 import type { SettingsStore } from '../store/settings-store'
+import type {
+  DictationsRepository,
+  DictionaryRepository,
+  StyleRepository,
+} from '../store/repositories'
 import type { WindowManager } from '../windows/manager'
+import { framePcm } from '../audio/buffer'
 import { native } from '../native'
 import { simulateDictation } from '../dictation/simulator'
 
 /**
  * Every `ipcMain` handler the app registers.
  *
- * Three tiers live here, and each one is labelled so the next stage knows what
- * it is looking at:
+ * By Stage 2 there are no placeholders left: every channel in the contract is
+ * backed by real state. The only conditional handlers are the `debug.*` pair,
+ * registered in unpackaged builds only, and `models.import`, which refuses
+ * Hugging-Face-repo imports explicitly rather than pretending.
  *
- *  - **wired** — backed by real state, round-trips for real today.
- *  - **read-only placeholder** — returns a truthful empty result because the
- *    store behind it does not exist yet (PLAN §9's SQLite arrives in Stage 2).
- *  - **not implemented** — throws a clear error rather than lying.
- *
- * To add a channel: declare it in `@murmur/shared/src/ipc/contract.ts`, then
- * register it here. The payload types follow automatically.
+ * To add a channel: declare it in `@murmur/shared/src/ipc/contract.ts`, register
+ * it here, expose it in the preload. The payload types follow automatically and
+ * zod validates both directions at the boundary.
  */
 
 export interface IpcContext {
+  /** Created by the composition root so subsystems can emit before this runs. */
+  ipc: MainIpc
   windows: WindowManager
   settings: SettingsStore
-  dictation: DictationStateMachine
-  catalog: LoadedCatalog
+  machine: DictationStateMachine
+  orchestrator: DictationOrchestrator
+  engines: EngineCoordinator
+  models: ModelManager
+  hotkeys: HotkeyBridge
+  dictations: DictationsRepository
+  dictionary: DictionaryRepository
+  style: StyleRepository
   isDev: boolean
   quit: () => void
 }
 
-function notImplemented(channel: string): never {
-  throw new Error(
-    `IPC channel "${channel}" is declared but not implemented yet (arrives in Stage 2).`,
-  )
-}
-
 export function registerIpcHandlers(context: IpcContext): MainIpc {
-  const ipc = createMainIpc(ipcMain)
-  const { windows, settings, dictation, catalog } = context
+  const { ipc, windows, settings, machine, orchestrator, engines, models } = context
 
-  // In-memory until PLAN §9's `style_profiles` table exists.
-  // TODO(stage-2): persist alongside history and the dictionary in SQLite.
-  let styleProfiles: StyleProfileSet = createDefaultStyleProfiles()
-
-  // -- app: wired ----------------------------------------------------------
+  // -- app -----------------------------------------------------------------
   ipc.handle('app.version', () => app.getVersion())
   ipc.handle('app.quit', () => {
     context.quit()
@@ -62,63 +60,70 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     windows.showHub()
   })
 
-  // -- settings: wired (round-trips to <userData>/settings.json) ------------
+  // -- settings ------------------------------------------------------------
   ipc.handle('settings.get', () => settings.get())
   ipc.handle('settings.set', (patch) => settings.set(patch))
 
-  // -- dictation: wired ----------------------------------------------------
-  ipc.handle('dictation.getState', () => dictation.getState())
+  // -- dictation -----------------------------------------------------------
+  ipc.handle('dictation.getState', () => machine.getState())
   ipc.handle('dictation.cancel', () => {
-    dictation.reset()
+    // Esc from the Bar is a deliberate user action, so the pill just closes
+    // rather than flashing an error at someone who meant to stop (PLAN §2.1).
+    orchestrator.cancel()
   })
   ipc.handle('dictation.startHandsFree', () => {
-    // TODO(stage-2): latch the mode and start capture; for now this only moves
-    // the state machine so the Bar's hands-free visual can be developed.
-    dictation.startListening(true)
+    orchestrator.startHandsFree()
   })
   ipc.handle('dictation.stopHandsFree', () => {
-    dictation.reset()
+    orchestrator.stopHandsFree()
   })
 
   // -- models --------------------------------------------------------------
-  // `models.list` is wired: it serves the catalog that already passed the
-  // origin policy at boot (PLAN §8). Installed/imported sets are empty until
-  // the downloader exists.
-  ipc.handle('models.list', () => ({
-    catalog: catalog.catalog,
-    installed: [],
-    imported: [],
-    diskUsageBytes: 0,
+  ipc.handle('models.list', () => models.list())
+  ipc.handle('models.downloadStart', ({ modelId }) => ({
+    downloadId: models.startDownload(modelId),
   }))
-  // Selecting a model is a settings write, so it works today.
+  ipc.handle('models.downloadCancel', ({ downloadId }) => {
+    models.cancelDownload(downloadId)
+  })
   ipc.handle('models.select', ({ kind, modelId }) =>
     settings.set(kind === 'stt' ? { sttModelId: modelId } : { polishModelId: modelId }),
   )
-  ipc.handle('models.downloadStart', () => notImplemented('models.downloadStart'))
-  ipc.handle('models.downloadCancel', () => notImplemented('models.downloadCancel'))
-  ipc.handle('models.delete', () => notImplemented('models.delete'))
-  ipc.handle('models.import', () => notImplemented('models.import'))
+  ipc.handle('models.delete', ({ modelId }) => {
+    models.delete(modelId)
+    // A deleted model must not leave a dangling selection pointing at it.
+    const current = settings.get()
+    if (current.sttModelId === modelId) settings.set({ sttModelId: null })
+    if (current.polishModelId === modelId) settings.set({ polishModelId: null })
+  })
+  ipc.handle('models.import', (request) => models.import(request))
 
-  // -- history: read-only placeholders (SQLite + FTS5 land in Stage 2) ------
-  ipc.handle('history.query', () => ({ records: [], total: 0 }))
-  ipc.handle('history.stats', () => ({ totalWords: 0, avgWpm: 0, streakDays: 0 }))
-  ipc.handle('history.delete', () => notImplemented('history.delete'))
-  ipc.handle('history.clear', () => notImplemented('history.clear'))
+  // -- engines -------------------------------------------------------------
+  ipc.handle('engines.status', () => engines.status())
 
-  // -- dictionary: read-only placeholder ------------------------------------
-  ipc.handle('dictionary.list', () => [])
-  ipc.handle('dictionary.create', () => notImplemented('dictionary.create'))
-  ipc.handle('dictionary.update', () => notImplemented('dictionary.update'))
-  ipc.handle('dictionary.delete', () => notImplemented('dictionary.delete'))
-
-  // -- style: in-memory ----------------------------------------------------
-  ipc.handle('style.get', () => styleProfiles)
-  ipc.handle('style.set', (patch) => {
-    styleProfiles = applyStyleProfilePatch(styleProfiles, patch)
-    return styleProfiles
+  // -- history -------------------------------------------------------------
+  ipc.handle('history.query', (query) => context.dictations.query(query))
+  ipc.handle('history.stats', () => context.dictations.stats())
+  ipc.handle('history.delete', ({ id }) => {
+    context.dictations.delete(id)
+  })
+  ipc.handle('history.clear', () => {
+    context.dictations.clear()
   })
 
-  // -- permissions: wired through the native module (stub-safe) -------------
+  // -- dictionary ----------------------------------------------------------
+  ipc.handle('dictionary.list', () => context.dictionary.list())
+  ipc.handle('dictionary.create', (draft) => context.dictionary.create(draft))
+  ipc.handle('dictionary.update', ({ id, patch }) => context.dictionary.update(id, patch))
+  ipc.handle('dictionary.delete', ({ id }) => {
+    context.dictionary.delete(id)
+  })
+
+  // -- style ---------------------------------------------------------------
+  ipc.handle('style.get', () => context.style.get())
+  ipc.handle('style.set', (patch) => context.style.set(patch))
+
+  // -- permissions ---------------------------------------------------------
   ipc.handle('permissions.status', () => native().permissions.check())
   ipc.handle('permissions.request', async ({ kind }) => {
     await native().permissions.request(kind)
@@ -129,17 +134,22 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   })
 
   // -- audio: frames from the hidden capture renderer ------------------------
-  ipc.receive('audio.frame', () => {
-    // TODO(stage-2): ring-buffer, VAD-trim, hand to the STT engine (PLAN §5).
+  ipc.receive('audio.frame', (frame) => {
+    orchestrator.pushFrame(framePcm(frame.pcm, frame.sampleCount))
   })
   ipc.receive('audio.status', (status) => {
-    console.log('[audio] capture status:', status.status)
+    if (status.status === 'error') orchestrator.reportAudioError(status.message)
   })
 
   // -- debug: unpackaged builds only ---------------------------------------
   if (context.isDev) {
     ipc.handle('debug.simulateDictation', async () => {
-      await simulateDictation(dictation)
+      await simulateDictation(machine)
+    })
+    ipc.handle('debug.simulateHotkey', ({ action }) => {
+      // Drives the *real* pipeline, so a dev machine with no event tap can
+      // still exercise capture → VAD → STT → polish → insert end to end.
+      context.hotkeys.handle({ type: action, timestamp: Date.now() })
     })
   }
 

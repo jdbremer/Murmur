@@ -21,9 +21,20 @@ export interface HotkeyEvent {
 
 export type HotkeyListener = (event: HotkeyEvent) => void
 
+/** What one native side effect reports back. Never throws across the boundary. */
+export interface NativeActionResult {
+  ok: boolean
+  /** Present when `ok` is false. Safe to show the user; never contains text. */
+  error?: string
+}
+
+/**
+ * The outcome of the *whole* injection sequence, assembled in the main process
+ * (PLAN §3.2.5). `method` is what actually worked, and it is the same union the
+ * `inserted` dictation event carries.
+ */
 export interface InsertTextResult {
   ok: boolean
-  /** How the text got in — or why it did not. */
   method: 'paste' | 'accessibility' | 'none'
   error?: string
 }
@@ -47,8 +58,19 @@ export interface MurmurNative {
   /** Begin listening for the configured hotkey. Listen-only (PLAN §10.5). */
   startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): void
   stopHotkeyListener(): void
-  /** Clipboard-swap + synthetic ⌘V, with AX insertion as fallback. */
-  insertText(text: string): InsertTextResult
+  /**
+   * Synthesize ⌘V into whatever owns input right now.
+   *
+   * Deliberately *only* the keystroke: the clipboard save/set/restore dance
+   * lives in the main process where Electron's `clipboard` module already
+   * handles every pasteboard type (PLAN §3.2.5).
+   */
+  sendPasteShortcut(): NativeActionResult
+  /**
+   * Fallback for apps that ignore synthetic keystrokes: write `text` straight
+   * into the focused `AXUIElement`.
+   */
+  insertTextViaAccessibility(text: string): NativeActionResult
   getFrontmostApp(): FrontmostApp | null
   /** True when a password field owns input; Murmur must refuse to type. */
   isSecureInputActive(): boolean
@@ -71,8 +93,11 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
     stopHotkeyListener() {
       /* no-op */
     },
-    insertText() {
-      return { ok: false, method: 'none', error: reason }
+    sendPasteShortcut() {
+      return { ok: false, error: reason }
+    },
+    insertTextViaAccessibility() {
+      return { ok: false, error: reason }
     },
     getFrontmostApp() {
       return null

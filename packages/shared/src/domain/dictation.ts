@@ -131,6 +131,23 @@ export const AudioCaptureStatusSchema = z.discriminatedUnion('status', [
 ])
 export type AudioCaptureStatus = z.infer<typeof AudioCaptureStatusSchema>
 
+/**
+ * Main → hidden capture renderer. The orchestrator decides when the mic is
+ * open; the renderer never starts on its own.
+ *
+ *  - `warm`    — open the stream and keep it running, but drop frames. Removes
+ *                the cold-start delay before the first utterance (PLAN §5).
+ *  - `start`   — begin streaming frames to main.
+ *  - `stop`    — stop streaming; the stream stays warm.
+ *  - `release` — close the stream entirely (idle timeout, mic changed).
+ */
+export const AudioCommandSchema = z.object({
+  action: z.enum(['warm', 'start', 'stop', 'release']),
+  /** `MediaDeviceInfo.deviceId`; `null` = system default input. */
+  deviceId: z.string().min(1).nullable().default(null),
+})
+export type AudioCommand = z.infer<typeof AudioCommandSchema>
+
 /** Aggregate numbers for the Hub's Home header (PLAN §2.2.1). */
 export const HistoryStatsSchema = z.object({
   totalWords: z.number().int().nonnegative(),

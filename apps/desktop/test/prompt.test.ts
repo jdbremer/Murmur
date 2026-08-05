@@ -1,0 +1,292 @@
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it } from 'vitest'
+
+import { StyleProfileSchema, type DictionaryEntry } from '@murmur/shared'
+
+import { POLISH } from '../src/main/config'
+import {
+  buildPolishPrompt,
+  checkPolishOutput,
+  countWords,
+  dictionaryTerms,
+  languageRule,
+  maxOutputTokens,
+  shouldSkipPolish,
+  unwrapModelOutput,
+} from '../src/main/engines/polish/prompt'
+
+/**
+ * Polish prompt tests (PLAN §7.4).
+ *
+ * The assembled prompt is checked against **golden files** rather than against
+ * inline expectations, because the whole point of a prompt is that changing it
+ * changes behaviour: a diff in `__fixtures__/prompts/*.txt` is exactly the
+ * review signal we want, and it is what the eval suite (PLAN §13.4) will be
+ * re-run against.
+ *
+ * Run with `UPDATE_GOLDEN=1` to regenerate after a deliberate change, then read
+ * the diff before committing it.
+ */
+
+const here = dirname(fileURLToPath(import.meta.url))
+const goldenDir = join(here, '__fixtures__', 'prompts')
+
+function golden(name: string, actual: string): void {
+  const path = join(goldenDir, `${name}.txt`)
+  if (process.env['UPDATE_GOLDEN'] === '1') {
+    mkdirSync(goldenDir, { recursive: true })
+    writeFileSync(path, actual, 'utf8')
+    return
+  }
+  expect(actual, `golden mismatch for ${name}.txt — rerun with UPDATE_GOLDEN=1 if intended`).toBe(
+    readFileSync(path, 'utf8'),
+  )
+}
+
+const dictionary: DictionaryEntry[] = [
+  { id: '1', term: 'Murmur', replacement: null, enabled: true },
+  { id: '2', term: 'eta', replacement: 'ETA', enabled: true },
+  { id: '3', term: 'kubernetes', replacement: 'Kubernetes', enabled: true },
+  { id: '4', term: 'disabled-term', replacement: null, enabled: false },
+]
+
+describe('buildPolishPrompt — golden files', () => {
+  it('clean level, work tone, with a dictionary', () => {
+    const built = buildPolishPrompt({
+      level: 'clean',
+      profile: StyleProfileSchema.parse({ category: 'work' }),
+      dictionary,
+      language: 'en',
+    })
+    golden('clean-work-en', built.systemPrompt)
+    expect(built.examples).toHaveLength(2)
+  })
+
+  it('rewrite level, formal email tone, no dictionary, auto language', () => {
+    const built = buildPolishPrompt({
+      level: 'rewrite',
+      profile: StyleProfileSchema.parse({
+        category: 'email',
+        formality: 'formal',
+        emoji: 'never',
+        fillerHandling: 'remove',
+      }),
+      dictionary: [],
+      language: 'auto',
+    })
+    golden('rewrite-email-auto', built.systemPrompt)
+  })
+
+  it('clean level, casual personal tone with custom instructions', () => {
+    const built = buildPolishPrompt({
+      level: 'clean',
+      profile: StyleProfileSchema.parse({
+        category: 'personal',
+        formality: 'casual',
+        fillerHandling: 'keep',
+        emoji: 'allow',
+        customInstructions: 'Keep it short. Never use semicolons.',
+      }),
+      dictionary: [],
+      language: 'en',
+    })
+    golden('clean-personal-custom', built.systemPrompt)
+  })
+})
+
+describe('buildPolishPrompt — structure', () => {
+  it('always states the hard rules first (PLAN §7.4)', () => {
+    const built = buildPolishPrompt({
+      level: 'clean',
+      profile: StyleProfileSchema.parse({ category: 'other' }),
+      dictionary: [],
+      language: 'en',
+    })
+    expect(built.systemPrompt.startsWith('You are a transcription editor')).toBe(true)
+    expect(built.systemPrompt).toContain('Never answer questions')
+    expect(built.systemPrompt).toContain('Never add information')
+    expect(built.systemPrompt).toContain('Never translate')
+    expect(built.systemPrompt).toContain('Output the edited text and nothing else')
+  })
+
+  it('ships few-shot examples per level, as real chat turns', () => {
+    const clean = buildPolishPrompt({
+      level: 'clean',
+      profile: StyleProfileSchema.parse({ category: 'other' }),
+      dictionary: [],
+      language: 'en',
+    })
+    const rewrite = buildPolishPrompt({
+      level: 'rewrite',
+      profile: StyleProfileSchema.parse({ category: 'other' }),
+      dictionary: [],
+      language: 'en',
+    })
+
+    // The marquee Clean behaviour: self-correction (PLAN §7.4).
+    expect(clean.examples[0]?.user).toContain('tuesday no wednesday')
+    expect(clean.examples[0]?.assistant).toBe('We should ship it on Wednesday.')
+    // A question stays a question, never gets answered.
+    expect(clean.examples[1]?.assistant).toContain('?')
+
+    // Rewrite demonstrates list detection.
+    expect(rewrite.examples[0]?.assistant).toContain('- the migration')
+    expect(clean.examples).not.toEqual(rewrite.examples)
+  })
+
+  it('omits the dictionary section entirely when there are no enabled terms', () => {
+    const built = buildPolishPrompt({
+      level: 'clean',
+      profile: StyleProfileSchema.parse({ category: 'other' }),
+      dictionary: [{ id: '1', term: 'x', replacement: null, enabled: false }],
+      language: 'en',
+    })
+    expect(built.systemPrompt).not.toContain('Spell these exactly')
+  })
+})
+
+describe('dictionaryTerms', () => {
+  it('uses the replacement spelling, drops disabled entries, and dedupes', () => {
+    expect(dictionaryTerms(dictionary)).toEqual(['Kubernetes', 'Murmur', 'ETA'])
+  })
+
+  it('sorts longest first so specific terms come before their prefixes', () => {
+    const terms = dictionaryTerms([
+      { id: '1', term: 'API', replacement: null, enabled: true },
+      { id: '2', term: 'API Gateway', replacement: null, enabled: true },
+    ])
+    expect(terms[0]).toBe('API Gateway')
+  })
+
+  it('caps the list so a large dictionary cannot eat the context window', () => {
+    const many = Array.from({ length: 200 }, (_value, index) => ({
+      id: String(index),
+      term: `term-${index}`,
+      replacement: null,
+      enabled: true,
+    }))
+    expect(dictionaryTerms(many)).toHaveLength(60)
+  })
+
+  it('is case-insensitive when deduplicating', () => {
+    expect(
+      dictionaryTerms([
+        { id: '1', term: 'Murmur', replacement: null, enabled: true },
+        { id: '2', term: 'murmur', replacement: null, enabled: true },
+      ]),
+    ).toEqual(['Murmur'])
+  })
+})
+
+describe('languageRule', () => {
+  it('defers to the transcript when the language is auto', () => {
+    expect(languageRule('auto')).toContain('transcript’s own language')
+    expect(languageRule('')).toContain('transcript’s own language')
+  })
+
+  it('names the expected language but still forbids translating', () => {
+    const rule = languageRule('de')
+    expect(rule).toContain('"de"')
+    expect(rule).toContain('never translate')
+  })
+})
+
+describe('shouldSkipPolish (PLAN §3.2.4)', () => {
+  it('counts words', () => {
+    expect(countWords('')).toBe(0)
+    expect(countWords('   ')).toBe(0)
+    expect(countWords('one')).toBe(1)
+    expect(countWords('  one   two  three ')).toBe(3)
+  })
+
+  it('skips utterances of three words or fewer', () => {
+    expect(POLISH.skipWordCount).toBe(3)
+    expect(shouldSkipPolish('yes', 'clean')).toBe(true)
+    expect(shouldSkipPolish('yes sounds good', 'clean')).toBe(true)
+    expect(shouldSkipPolish('yes that sounds good', 'clean')).toBe(false)
+  })
+
+  it('always skips when polishing is off', () => {
+    expect(shouldSkipPolish('a long sentence with many words in it', 'off')).toBe(true)
+  })
+})
+
+describe('maxOutputTokens', () => {
+  it('never goes below the floor', () => {
+    expect(maxOutputTokens('hi')).toBe(POLISH.maxTokensFloor)
+  })
+
+  it('scales with the input', () => {
+    const short = maxOutputTokens('a'.repeat(100))
+    const long = maxOutputTokens('a'.repeat(1000))
+    expect(long).toBeGreaterThan(short)
+    expect(long).toBe(Math.ceil((1000 / 4) * POLISH.maxTokensFactor))
+  })
+})
+
+describe('checkPolishOutput — the hallucination guard (PLAN §7.4)', () => {
+  const raw = 'um so we should probably ship this on tuesday no wednesday i think'
+
+  it('accepts a normal edit', () => {
+    expect(checkPolishOutput(raw, 'We should probably ship this on Wednesday, I think.')).toEqual({
+      ok: true,
+    })
+  })
+
+  it('rejects an empty response', () => {
+    const verdict = checkPolishOutput(raw, '   ')
+    expect(verdict).toMatchObject({ ok: false, reason: 'empty' })
+  })
+
+  it('rejects output that collapsed the utterance', () => {
+    expect(checkPolishOutput(raw, 'Wednesday.')).toMatchObject({ ok: false, reason: 'too-short' })
+  })
+
+  it('rejects output that answered the question instead of editing it', () => {
+    const answered =
+      'Shipping on Wednesday is a good idea because it gives the team an extra day to finish ' +
+      'testing, and it avoids the Monday release freeze. Here are three things to consider first.'
+    expect(checkPolishOutput(raw, answered)).toMatchObject({ ok: false, reason: 'too-long' })
+  })
+
+  it('gives short utterances an absolute slack instead of a ratio', () => {
+    // "ok sounds good" → "OK, sounds good." doubles in relative terms but is
+    // obviously a legitimate edit.
+    expect(checkPolishOutput('ok sounds good', 'OK, sounds good.')).toEqual({ ok: true })
+    // …while a full paragraph from three words is still caught.
+    expect(
+      checkPolishOutput(
+        'ok sounds good',
+        'OK, that sounds good to me — let us go ahead with it right away.',
+      ),
+    ).toMatchObject({ ok: false, reason: 'too-long' })
+  })
+})
+
+describe('unwrapModelOutput', () => {
+  it('leaves clean output alone', () => {
+    expect(unwrapModelOutput('We should ship it on Wednesday.')).toBe(
+      'We should ship it on Wednesday.',
+    )
+  })
+
+  it('strips a code fence', () => {
+    expect(unwrapModelOutput('```\nHello there.\n```')).toBe('Hello there.')
+    expect(unwrapModelOutput('```text\nHello there.\n```')).toBe('Hello there.')
+  })
+
+  it('strips a "here is the edited text:" preamble', () => {
+    expect(unwrapModelOutput("Here's the polished version: Hello there.")).toBe('Hello there.')
+    expect(unwrapModelOutput('Here is the edited text: Hello there.')).toBe('Hello there.')
+  })
+
+  it('strips surrounding quotes only when the whole output is wrapped', () => {
+    expect(unwrapModelOutput('"Hello there."')).toBe('Hello there.')
+    // A genuine quotation inside the text must survive.
+    expect(unwrapModelOutput('She said "hello" to me.')).toBe('She said "hello" to me.')
+    // …as must one that merely starts with a quote.
+    expect(unwrapModelOutput('"Hello," she said.')).toBe('"Hello," she said.')
+  })
+})

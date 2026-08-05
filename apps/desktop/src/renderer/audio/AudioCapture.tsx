@@ -4,12 +4,21 @@ import { useEffect } from 'react'
  * The hidden capture page (PLAN §3.1, §5).
  *
  * This window is never shown; it exists because `getUserMedia` lives in a
- * renderer. Stage 2 fills it in: open the mic lazily and keep it warm, run an
- * `AudioWorklet` that downsamples to 16 kHz mono Float32, maintain the ~300 ms
- * pre-roll ring buffer, and ship ~100 ms frames to main over `audio.frame`
- * while reporting amplitude for the Bar's waveform.
+ * renderer. The main-process half is finished — the orchestrator drives capture
+ * over the `audio.command` event and consumes `audio.frame` — so what remains
+ * for the renderer stage is:
  *
- * Stage 1 deliberately does **not** call `getUserMedia` — asking for the
+ *  1. subscribe with `window.murmur.audio.onCommand`; the payload is
+ *     `{ action: 'warm' | 'start' | 'stop' | 'release', deviceId: string | null }`.
+ *     `warm` opens the stream but drops frames, `start` begins streaming,
+ *     `stop` pauses without closing, `release` closes it;
+ *  2. run an `AudioWorklet` that downsamples to 16 kHz mono Float32 and emit
+ *     ~100 ms frames via `sendFrame({ pcm, sampleCount, sampleRate: 16000, ts })`
+ *     — `pcm` is the raw `ArrayBuffer`, and main copies it on arrival;
+ *  3. report lifecycle with `reportStatus`; an `error` status is turned into a
+ *     `mic-unavailable` dictation error by the orchestrator.
+ *
+ * It deliberately does **not** call `getUserMedia` on load: asking for the
  * microphone before the user has been told why would be the wrong first
  * impression, and the permission flow belongs to onboarding.
  */
@@ -30,7 +39,8 @@ export function AudioCapture(): React.JSX.Element {
         streamed to the main process as ~100 ms frames.
       </p>
       <p className="text-[12px] text-ink-faint">
-        Not capturing yet — no microphone is opened in this build.
+        Not capturing yet — the main process drives this page over{' '}
+        <code className="font-mono">audio.command</code>.
       </p>
     </main>
   )

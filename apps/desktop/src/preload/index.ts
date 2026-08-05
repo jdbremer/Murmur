@@ -42,6 +42,7 @@ const api: MurmurApi = {
   audio: {
     sendFrame: (frame) => ipc.send('audio.frame', frame),
     reportStatus: (status) => ipc.send('audio.status', status),
+    onCommand: (listener) => ipc.on('audio.command', listener),
   },
 
   models: {
@@ -79,8 +80,14 @@ const api: MurmurApi = {
     openSystemSettings: (request) => ipc.invoke('permissions.openSystemSettings', request),
   },
 
+  engines: {
+    status: () => ipc.invoke('engines.status'),
+    subscribe: (listener) => ipc.on('engines.changed', listener),
+  },
+
   debug: {
     simulateDictation: () => ipc.invoke('debug.simulateDictation'),
+    simulateHotkey: (request) => ipc.invoke('debug.simulateHotkey', request),
   },
 }
 
