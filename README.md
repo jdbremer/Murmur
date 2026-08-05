@@ -37,6 +37,28 @@ npm test             # vitest
 npm run lint         # eslint (flat config) — `npm run format` for prettier
 ```
 
+### Building a Mac app (DMG)
+
+```bash
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:mac --workspace @murmur/desktop
+```
+
+Writes `apps/desktop/release/Murmur-<version>-arm64.dmg` (and an x64 one).
+Open it and drag Murmur to Applications.
+
+That env var skips code signing, which is what makes this runnable without a
+Developer ID. The result is fine on the machine that built it and **not**
+distributable: Gatekeeper blocks an unsigned app that arrives from anywhere
+else, and because macOS keys Accessibility and Input Monitoring grants to the
+code signature, an ad-hoc signed build can lose its permissions on every
+rebuild. Drop the variable once a Developer ID is configured — `hardenedRuntime`,
+the entitlements and notarisation are already declared in
+`apps/desktop/electron-builder.yml`.
+
+Sidecars are not bundled, so a fresh install transcribes nothing until
+`whisper-server` / `llama-server` are on disk (`scripts/sidecars/build-*.sh`)
+and a model is downloaded from the Hub.
+
 ### Layout
 
 | Path                | What lives there                                                                                      |

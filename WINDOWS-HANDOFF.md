@@ -55,6 +55,14 @@ Verified on a Windows dev box (agent overnight loop — **commits only, never pu
 **Gates G0–G10** were green on the agent overnight loop. Human field testing
 continues; treat E2E with real voice + polish as still worth a casual poke.
 
+### Not yet done (native)
+
+| Item                               | Why it matters                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hook-health recovery               | Windows silently drops an LL hook whose callback repeatedly overruns `LowLevelHooksTimeout`. The mac tap re-enables itself; nothing here detects a dead hook, and the HID watchdog only rescues a lost _release_ during an active hold, not a listener that stopped delivering. Our hook proc only does a `NonBlockingCall`, so the risk is low — but the failure is silent and total. |
+| `altSpace` leaves a bare Alt press | Only Space is swallowed, so the target app sees Alt-down…Alt-up with nothing between and focuses its menu bar / ribbon. Space chords are off in Settings and healed away at boot, so this is unreachable today; fix before re-enabling them.                                                                                                                                           |
+| Sidecar release digests            | `PINS[*].sha256` is enforced but `null`: ggml-org publishes no digest to pin against. Record one per release and the supply-chain gap closes.                                                                                                                                                                                                                                          |
+
 ### Windows residual (platform-specific)
 
 | Item                            | Notes                                                                                              |
