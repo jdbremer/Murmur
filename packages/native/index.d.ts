@@ -27,6 +27,8 @@ export interface HotkeyConfig {
 export interface HotkeyEvent {
   type: 'down' | 'up' | 'doubleTap'
   timestamp: number
+  /** True for edges not produced by the physical keyboard. */
+  synthetic?: boolean
 }
 
 export type HotkeyListener = (event: HotkeyEvent) => void
@@ -60,8 +62,12 @@ export interface MurmurNative {
   stopHotkeyListener(): void
   /** Synthesize ⌘V. The clipboard save/set/restore dance lives in main. */
   sendPasteShortcut(): NativeActionResult
+  /** HID-truth: is the configured hotkey physically held right now? */
+  hotkeyPhysicallyDown(): boolean
   /** AX fallback for apps that drop synthetic keystrokes. */
   insertTextViaAccessibility(text: string): NativeActionResult
+  /** The focused element's selection; ok:true with empty text = no selection. */
+  getSelectedText(): { ok: boolean; text?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null
   isSecureInputActive(): boolean
   readonly permissions: NativePermissions

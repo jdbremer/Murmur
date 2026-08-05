@@ -152,6 +152,16 @@ async function bootstrap(): Promise<void> {
     applyDictionary: (text) => applyReplacements(text, dictionary.enabled()),
     styleFor: (category) => style.forCategory(category),
     frontmostApp: () => native().getFrontmostApp(),
+    // Command mode (PLAN §18.1): a non-empty selection at hotkey-down flips
+    // the utterance into an edit instruction. Gated on the setting and read
+    // through AX, which is already granted for insertion.
+    selection: () => {
+      if (!settings.get().commandModeEnabled) return null
+      const result = native().getSelectedText()
+      if (!result.ok) return null
+      const text = (result.text ?? '').trim()
+      return text.length > 0 ? text : null
+    },
     persist: (record) => {
       dictations.insert(record)
     },
@@ -170,6 +180,7 @@ async function bootstrap(): Promise<void> {
         if (orchestrator.handsFree) orchestrator.stopHandsFree()
         else orchestrator.startHandsFree()
       },
+      isHandsFree: () => orchestrator.handsFree,
     },
   })
 

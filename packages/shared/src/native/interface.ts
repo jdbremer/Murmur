@@ -17,6 +17,14 @@ export interface HotkeyEvent {
   type: 'down' | 'up' | 'doubleTap'
   /** Monotonic milliseconds, for double-tap timing. */
   timestamp: number
+  /**
+   * True for edges that did not come from the physical keyboard —
+   * `debug.simulateHotkey`, the SIGUSR2 driver, or the bridge's own
+   * reconciliation. The bridge skips the physical-state watchdog for these:
+   * asking the HID system about a key nobody pressed would end the utterance
+   * a poll later.
+   */
+  synthetic?: boolean
 }
 
 export type HotkeyListener = (event: HotkeyEvent) => void
@@ -67,10 +75,23 @@ export interface MurmurNative {
    */
   sendPasteShortcut(): NativeActionResult
   /**
+   * The HID system's own answer to "is the configured hotkey held right now",
+   * independent of event delivery. Taps can be disabled for slowness and other
+   * apps' active taps can swallow an edge; this is the reconciliation truth
+   * the bridge polls while a hold is live.
+   */
+  hotkeyPhysicallyDown(): boolean
+  /**
    * Fallback for apps that ignore synthetic keystrokes: write `text` straight
    * into the focused `AXUIElement`.
    */
   insertTextViaAccessibility(text: string): NativeActionResult
+  /**
+   * The focused element's current selection, for command mode (PLAN §18.1).
+   * `{ ok: true, text: '' }` means "no selection" — a normal answer; `ok:
+   * false` is reserved for a missing permission or an uncooperative app.
+   */
+  getSelectedText(): { ok: boolean; text?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null
   /** True when a password field owns input; Murmur must refuse to type. */
   isSecureInputActive(): boolean
@@ -96,7 +117,13 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
     sendPasteShortcut() {
       return { ok: false, error: reason }
     },
+    hotkeyPhysicallyDown() {
+      return false
+    },
     insertTextViaAccessibility() {
+      return { ok: false, error: reason }
+    },
+    getSelectedText() {
       return { ok: false, error: reason }
     },
     getFrontmostApp() {

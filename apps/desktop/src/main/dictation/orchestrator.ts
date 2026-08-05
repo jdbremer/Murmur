@@ -15,8 +15,11 @@ import { createLogger, redact, type Logger } from '../logging'
 import { SilenceTracker, trimSilence } from '../audio/vad'
 import { PreRollBuffer, UtteranceBuffer } from '../audio/buffer'
 import {
+  buildCommandPrompt,
   buildPolishPrompt,
+  checkCommandOutput,
   checkPolishOutput,
+  maxCommandOutputTokens,
   maxOutputTokens,
   shouldSkipPolish,
 } from '../engines/polish/prompt'
@@ -80,6 +83,13 @@ export interface OrchestratorDeps {
   styleFor(category: AppCategory): StyleProfile
   /** Frontmost app at hotkey-down. `null` on non-macOS or when unknown. */
   frontmostApp(): { bundleId: string; name: string } | null
+  /**
+   * The focused element's selected text at hotkey-down, or `null` when there
+   * is none (or command mode is disabled). A non-empty selection flips the
+   * utterance into command mode (PLAN §18.1): the speech becomes an edit
+   * instruction and the result replaces the selection.
+   */
+  selection?(): string | null
   /** Persists a finished dictation. Failures here must not break the loop. */
   persist(record: Omit<DictationRecord, 'id'>): void
   log?: Logger
@@ -193,7 +203,15 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       return
     }
 
-    this.#handsFree = options.handsFree ?? false
+    // Read the selection *now*, not at insert time: it is the thing the user
+    // was pointing at when they pressed the key, and reading it later would
+    // race their own click-away. Hands-free never enters command mode — an
+    // open-ended latched session over a selection would edit it on every
+    // silence-finalise.
+    const handsFree = options.handsFree ?? false
+    const selection = handsFree ? null : (this.#deps.selection?.() ?? null)
+
+    this.#handsFree = handsFree
     this.#finishing = false
     this.#context = {
       startedAt: this.#now(),
@@ -201,6 +219,8 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       category,
       settings,
       sttModelId: settings.sttModelId ?? status.modelId ?? 'unknown',
+      mode: selection ? 'command' : 'dictate',
+      selection,
     }
 
     this.#buffer.clear()
@@ -396,6 +416,12 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
     this.#log.debug(`transcript ${redact(rawText)} in ${transcript.durationMs} ms`)
 
+    // -- command mode: the speech is an instruction, not content -------------
+    if (context.mode === 'command' && context.selection) {
+      await this.#finishCommand(context, runId, rawText, transcript.durationMs, durationMs)
+      return
+    }
+
     // -- polish (skippable) ------------------------------------------------
     let polishedText: string | null = null
     let polishMs = 0
@@ -504,9 +530,144 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.#abort = null
     this.#context = null
     this.#phase = 'idle'
+    this.#handsFree = false
     this.#finishing = false
     this.#deps.machine.finishInserted(
       finalText.length,
+      injection.method === 'accessibility' ? 'accessibility' : 'paste',
+    )
+    this.emit('completed', { ...record, id: '' })
+  }
+
+  /**
+   * Command mode's back half (PLAN §18.1). The transcript is an instruction;
+   * the polishing model rewrites the *selection* per that instruction, and the
+   * result replaces it through the normal injection path — a paste with a live
+   * selection replaces it in every ordinary app, and the AX fallback writes
+   * `kAXSelectedText` which does the same by definition.
+   *
+   * Failure discipline differs from dictation on purpose: there is no raw
+   * fallback here. Inserting the spoken *instruction* over the user's selected
+   * text would be destructive, so every failure path refuses and leaves the
+   * selection alone.
+   */
+  async #finishCommand(
+    context: UtteranceContext,
+    runId: number,
+    instruction: string,
+    sttMs: number,
+    durationMs: number,
+  ): Promise<void> {
+    const selection = context.selection
+    if (!selection) {
+      this.#fail('unknown', 'The selection went away.')
+      return
+    }
+
+    const polishEngine = this.#deps.polish()
+    const status = polishEngine?.status()
+    if (!polishEngine || status?.state !== 'ready') {
+      this.#fail(
+        'polish-failed',
+        'Editing a selection needs a polishing model — pick one in the Hub.',
+      )
+      return
+    }
+
+    this.#phase = 'polishing'
+    this.#deps.machine.startProcessing('polishing')
+    const polishModelId = context.settings.polishModelId ?? status.modelId
+
+    let edited: string
+    let polishMs = 0
+    try {
+      const prompt = buildCommandPrompt({
+        instruction,
+        selection,
+        language: context.settings.language,
+      })
+      const abort = this.#abort ?? new AbortController()
+      this.#abort = abort
+      const result = await this.#withTimeout(
+        TIMEOUTS.polishMs,
+        'polishing',
+        polishEngine.polish({
+          systemPrompt: prompt.systemPrompt,
+          examples: prompt.examples,
+          userText: prompt.userText,
+          maxTokens: maxCommandOutputTokens(selection),
+          signal: abort.signal,
+        }),
+      )
+      polishMs = result.durationMs
+
+      const verdict = checkCommandOutput(result.text)
+      if (!verdict.ok) {
+        this.#fail('polish-failed', 'The model returned nothing — your selection is untouched.')
+        return
+      }
+      edited = result.text.trim()
+    } catch (error) {
+      if (this.#runId !== runId) return
+      this.#fail(
+        error instanceof StageTimeoutError ? 'timeout' : 'polish-failed',
+        describe(error, 'Could not edit the selection'),
+      )
+      return
+    }
+    if (this.#runId !== runId) return
+
+    this.#phase = 'inserting'
+    this.#deps.machine.startInserting()
+
+    let injection: InjectionResult
+    try {
+      injection = await this.#withTimeout(
+        TIMEOUTS.insertMs,
+        'inserting',
+        Promise.resolve(this.#deps.injector.insert(edited)),
+      )
+    } catch (error) {
+      if (this.#runId !== runId) return
+      this.#fail(
+        error instanceof StageTimeoutError ? 'timeout' : 'insert-failed',
+        describe(error, 'Could not replace the selection'),
+      )
+      return
+    }
+    if (this.#runId !== runId) return
+    if (!injection.ok) {
+      this.#fail(
+        injection.reason === 'secure-input' ? 'secure-input' : 'insert-failed',
+        injection.error ?? 'Could not replace the selection',
+      )
+      return
+    }
+
+    const record: Omit<DictationRecord, 'id'> = {
+      ts: context.startedAt,
+      rawText: instruction,
+      polishedText: edited,
+      appBundleId: context.frontmostBundleId,
+      appCategory: context.category,
+      durationMs,
+      sttModelId: context.sttModelId,
+      polishModelId,
+      timings: { sttMs, polishMs, totalMs: this.#now() - context.startedAt },
+    }
+    try {
+      this.#deps.persist(record)
+    } catch (error) {
+      this.#log.error('could not persist the history row:', error)
+    }
+
+    this.#abort = null
+    this.#context = null
+    this.#phase = 'idle'
+    this.#handsFree = false
+    this.#finishing = false
+    this.#deps.machine.finishInserted(
+      edited.length,
       injection.method === 'accessibility' ? 'accessibility' : 'paste',
     )
     this.emit('completed', { ...record, id: '' })
@@ -581,6 +742,9 @@ interface UtteranceContext {
   category: AppCategory
   settings: OrchestratorSettings
   sttModelId: string
+  /** `command` when text was selected at hotkey-down (PLAN §18.1). */
+  mode: 'dictate' | 'command'
+  selection: string | null
 }
 
 export class StageTimeoutError extends Error {

@@ -200,7 +200,9 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     ipc.handle('debug.simulateHotkey', ({ action }) => {
       // Drives the *real* pipeline, so a dev machine with no event tap can
       // still exercise capture → VAD → STT → polish → insert end to end.
-      context.hotkeys.handle({ type: action, timestamp: Date.now() })
+      // `synthetic` keeps the bridge's physical-state watchdog disarmed — the
+      // HID system rightly reports "not held" for a key nobody pressed.
+      context.hotkeys.handle({ type: action, timestamp: Date.now(), synthetic: true })
     })
 
     // `kill -USR2 <pid>` is the terminal-driven twin of debug.simulateHotkey:
@@ -212,7 +214,11 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     let signalHeld = false
     process.on('SIGUSR2', () => {
       signalHeld = !signalHeld
-      context.hotkeys.handle({ type: signalHeld ? 'down' : 'up', timestamp: Date.now() })
+      context.hotkeys.handle({
+        type: signalHeld ? 'down' : 'up',
+        timestamp: Date.now(),
+        synthetic: true,
+      })
     })
   }
 
