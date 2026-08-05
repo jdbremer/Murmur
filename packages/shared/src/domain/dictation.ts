@@ -124,6 +124,20 @@ export const AudioFrameSchema = z.object({
 export type AudioFrame = z.infer<typeof AudioFrameSchema>
 
 /**
+ * How long the momentary `inserted` / `error` events stay on screen
+ * (PLAN §2.1: "quick ✓ pulse", "auto-dismiss ~2.5 s").
+ *
+ * Shared because two processes honour the same hold: the Bar renderer keeps
+ * drawing the momentary visual for this long, and main keeps the Bar *window*
+ * alive for the same span before retiring it — the machine settles to idle
+ * silently when it emits a momentary event, so no idle event will do it.
+ */
+export const MOMENTARY_HOLD_MS = Object.freeze({
+  inserted: 900,
+  error: 2_500,
+})
+
+/**
  * One selectable microphone, as the hidden capture renderer sees it.
  *
  * Enumerated in that renderer rather than in the Hub because `getUserMedia`

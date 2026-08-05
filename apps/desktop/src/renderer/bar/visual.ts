@@ -1,4 +1,4 @@
-import type { BarVisibility, DictationEvent } from '@murmur/shared'
+import { MOMENTARY_HOLD_MS, type BarVisibility, type DictationEvent } from '@murmur/shared'
 
 /**
  * The Bar's state → pixels mapping (PLAN §2.1) — pure, so it can be tested.
@@ -34,10 +34,10 @@ export const BAR = {
   maxWidth: 344,
   /** Every state change morphs over this, ease-out (PLAN §2.1). */
   morphMs: 150,
-  /** How long the ✓ pulse holds before the pill settles back to idle. */
-  insertedHoldMs: 900,
-  /** Error auto-dismiss (PLAN §2.1). */
-  errorHoldMs: 2500,
+  /** How long the ✓ pulse holds — shared with main's window retirement. */
+  insertedHoldMs: MOMENTARY_HOLD_MS.inserted,
+  /** Error auto-dismiss (PLAN §2.1) — likewise shared. */
+  errorHoldMs: MOMENTARY_HOLD_MS.error,
   /** Waveform: 24–32 bars, ~2 px wide with a 2 px gap (PLAN §2.1). */
   waveformBars: 28,
   waveformBarWidth: 2,

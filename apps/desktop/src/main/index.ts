@@ -2,6 +2,7 @@ import { app, ipcMain } from 'electron'
 
 import {
   createMainIpc,
+  MOMENTARY_HOLD_MS,
   type DictationEvent,
   type EnginesStatus,
   type Settings,
@@ -241,7 +242,12 @@ async function bootstrap(): Promise<void> {
   })
 
   /** PLAN §2.1: show while dictating (default) · always · hidden. */
+  let barHideTimer: NodeJS.Timeout | null = null
   function applyBarVisibility(current: Settings, event: DictationEvent): void {
+    if (barHideTimer) {
+      clearTimeout(barHideTimer)
+      barHideTimer = null
+    }
     switch (current.barVisibility) {
       case 'always':
         windows.showBar()
@@ -249,10 +255,32 @@ async function bootstrap(): Promise<void> {
       case 'hidden':
         windows.hideBar()
         return
-      case 'showWhileDictating':
-        if (event.state === 'idle') windows.hideBar()
-        else windows.showBar()
+      case 'showWhileDictating': {
+        if (event.state === 'idle') {
+          windows.hideBar()
+          return
+        }
+        windows.showBar()
+        // `inserted` and `error` are the last events of their dictation: the
+        // machine settles to idle *silently* (RESTING_STATE moves; nothing is
+        // emitted), so no idle event will ever hide the window. Retire it
+        // ourselves once the renderer's hold — plus the shrink morph — has
+        // played out. Any newer event cancels this via the clear above.
+        const hold =
+          event.state === 'inserted'
+            ? MOMENTARY_HOLD_MS.inserted
+            : event.state === 'error'
+              ? MOMENTARY_HOLD_MS.error
+              : 0
+        if (hold > 0) {
+          barHideTimer = setTimeout(() => {
+            barHideTimer = null
+            if (settings.get().barVisibility === 'showWhileDictating') windows.hideBar()
+          }, hold + 250)
+          barHideTimer.unref?.()
+        }
         return
+      }
     }
   }
 
