@@ -18,8 +18,17 @@ import {
  * rather than eyeballed. Every number below traces to PLAN §2.1.
  */
 
-const listening: DictationEvent = { state: 'listening', handsFree: false, level: 0.5 }
-const processing: DictationEvent = { state: 'processing', stage: 'transcribing' }
+const listening: DictationEvent = {
+  state: 'listening',
+  handsFree: false,
+  level: 0.5,
+  command: false,
+}
+const processing: DictationEvent = {
+  state: 'processing',
+  stage: 'transcribing',
+  command: false,
+}
 const inserted: DictationEvent = { state: 'inserted', charCount: 27, method: 'paste' }
 const failed: DictationEvent = { state: 'error', code: 'no-speech', message: "Didn't catch that" }
 
@@ -50,9 +59,9 @@ describe('describeBar', () => {
   })
 
   it('names the polishing stage for assistive technology', () => {
-    expect(describeBar({ state: 'processing', stage: 'polishing' }).ariaLabel).toContain(
-      'Polishing',
-    )
+    expect(
+      describeBar({ state: 'processing', stage: 'polishing', command: false }).ariaLabel,
+    ).toContain('Polishing')
   })
 
   it('pulses a check for an insertion', () => {
@@ -137,7 +146,7 @@ describe('BarPresenter', () => {
     // "Inserting…" forever after every successful dictation.
     const presenter = new BarPresenter()
     presenter.receive(listening, 0)
-    presenter.receive({ state: 'processing', stage: 'transcribing' }, 100)
+    presenter.receive({ state: 'processing', stage: 'transcribing', command: false }, 100)
     presenter.receive({ state: 'inserting' }, 200)
     presenter.receive(inserted, 300)
 

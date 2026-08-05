@@ -566,7 +566,11 @@ describe('command mode (PLAN §18.1)', () => {
     expectSettledIdle()
   })
 
-  it('refuses — leaving the selection alone — when no polish model is ready', async () => {
+  it('falls back to plain dictation when no polish model is ready', async () => {
+    // With polishing off or no model, dictating over a selection must stay
+    // plain dictation — the paste replaces the selection exactly the way
+    // typing would. Erroring here would turn an everyday habit (select, then
+    // talk over it) into lost speech.
     harness.deps.selection = () => 'precious selected words'
     Object.assign(harness.polish.status_, { state: 'idle', modelId: null })
 
@@ -575,8 +579,25 @@ describe('command mode (PLAN §18.1)', () => {
     orchestrator.end()
     await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
 
-    // No raw fallback in command mode: pasting the spoken instruction over
-    // the user's selection would be destructive.
+    // Plain dictation with polish unavailable inserts the raw transcript.
+    expect(harness.insertedText).toEqual(['hello world this is a test'])
+    expect(harness.persisted[0]?.polishedText).toBeNull()
+    expectSettledIdle()
+  })
+
+  it('refuses mid-flight — selection untouched — if the model vanishes after start', async () => {
+    // The race backstop in #finishCommand: the engine was ready at
+    // hotkey-down (command mode engaged) but is gone by the time the
+    // transcript arrives. No raw fallback: pasting the spoken instruction
+    // over the user's selection would be destructive.
+    harness.deps.selection = () => 'precious selected words'
+
+    orchestrator.begin()
+    Object.assign(harness.polish.status_, { state: 'idle', modelId: null })
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
     expect(harness.insertedText).toEqual([])
     expect(harness.events.at(-1)).toMatchObject({ state: 'error', code: 'polish-failed' })
     expectSettledIdle()

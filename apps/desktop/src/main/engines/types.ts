@@ -72,6 +72,8 @@ export interface PolishRequest {
 export interface PolishResult {
   text: string
   durationMs: number
+  /** True when the model hit its output cap and the text is incomplete. */
+  truncated?: boolean
 }
 
 export interface PolishEngine {

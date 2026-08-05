@@ -110,9 +110,10 @@ export class LlamaCppPolishEngine implements PolishEngine {
       // transport means a corrupted base URL fails instead of leaking a prompt.
       fetchImpl: (url, init) => loopbackFetch(url, init),
     })
-    const text = unwrapModelOutput(await client.complete(request))
+    const completion = await client.complete(request)
+    const text = unwrapModelOutput(completion.text)
     this.#armIdleTimer()
-    return { text, durationMs: Date.now() - started }
+    return { text, durationMs: Date.now() - started, truncated: completion.truncated }
   }
 
   async unload(): Promise<void> {

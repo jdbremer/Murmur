@@ -205,11 +205,19 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // Read the selection *now*, not at insert time: it is the thing the user
     // was pointing at when they pressed the key, and reading it later would
-    // race their own click-away. Hands-free never enters command mode — an
-    // open-ended latched session over a selection would edit it on every
-    // silence-finalise.
+    // race their own click-away. Two gates before the AX read even happens:
+    // hands-free never enters command mode (a latched session over a selection
+    // would edit it on every silence-finalise), and command mode requires a
+    // *ready* polish engine — with polishing off or no model, dictating over a
+    // selection must stay plain dictation, which pastes over it exactly the
+    // way typing would. Erroring there would turn a everyday habit into lost
+    // speech.
     const handsFree = options.handsFree ?? false
-    const selection = handsFree ? null : (this.#deps.selection?.() ?? null)
+    const polishReady = (() => {
+      const engine = this.#deps.polish()
+      return engine !== null && engine.status().state === 'ready'
+    })()
+    const selection = handsFree || !polishReady ? null : (this.#deps.selection?.() ?? null)
 
     this.#handsFree = handsFree
     this.#finishing = false
@@ -232,7 +240,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     this.#phase = 'listening'
     this.#deps.audio.start(settings.micDeviceId)
-    this.#deps.machine.startListening(this.#handsFree)
+    this.#deps.machine.startListening(this.#handsFree, selection !== null)
     this.#armStage(TIMEOUTS.captureStartMs + AUDIO.maxUtteranceMs, 'listening')
   }
 
@@ -379,7 +387,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     // -- STT ---------------------------------------------------------------
     this.#phase = 'transcribing'
-    this.#deps.machine.startProcessing('transcribing')
+    this.#deps.machine.startProcessing('transcribing', context.mode === 'command')
 
     let transcript: Transcript
     try {
@@ -575,7 +583,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
 
     this.#phase = 'polishing'
-    this.#deps.machine.startProcessing('polishing')
+    this.#deps.machine.startProcessing('polishing', true)
     const polishModelId = context.settings.polishModelId ?? status.modelId
 
     let edited: string
@@ -600,7 +608,15 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
         }),
       )
       polishMs = result.durationMs
+      if (this.#runId !== runId) return
 
+      if (result.truncated) {
+        this.#fail(
+          'polish-failed',
+          'The edit came back incomplete — your selection is untouched. Try a shorter selection.',
+        )
+        return
+      }
       const verdict = checkCommandOutput(result.text)
       if (!verdict.ok) {
         this.#fail('polish-failed', 'The model returned nothing — your selection is untouched.')

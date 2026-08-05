@@ -228,6 +228,7 @@ export function Bar(): React.JSX.Element | null {
           <BarInterior visual={visual} levelRef={levelRef} reducedMotion={reducedMotion} />
         </div>
         {visual.handsFree ? <HandsFreeDot /> : null}
+        {visual.command ? <CommandDot /> : null}
         {showControls ? (
           <Controls
             menuOpen={menuOpen}
@@ -317,6 +318,17 @@ function StaticLevel({
         />
       ))}
     </div>
+  )
+}
+
+/** Command mode: this utterance edits the selection, not types over it. */
+function CommandDot(): React.JSX.Element {
+  return (
+    <span
+      title="Editing your selection — speak the instruction"
+      className="absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
+      style={{ background: '#7aa2ff', boxShadow: '0 0 6px rgba(122,162,255,0.85)' }}
+    />
   )
 }
 

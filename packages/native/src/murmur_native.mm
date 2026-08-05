@@ -542,6 +542,10 @@ Napi::Value GetSelectedText(const Napi::CallbackInfo& info) {
       out.Set("error", Napi::String::New(env, "no system-wide accessibility element"));
       return out;
     }
+    // This runs synchronously at hotkey-down on the JS thread. An unresponsive
+    // target app must cost ~100 ms of latency, not the several seconds of the
+    // default AX messaging timeout.
+    AXUIElementSetMessagingTimeout(system, 0.1f);
 
     CFTypeRef focusedApp = nullptr;
     AXError error =

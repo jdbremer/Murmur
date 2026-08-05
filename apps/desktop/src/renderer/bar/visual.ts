@@ -84,6 +84,8 @@ export interface BarVisual {
   label: string
   /** The latched hands-free indicator dot (PLAN §2.1 "Hands-free"). */
   handsFree: boolean
+  /** True while this utterance is editing a selection (command mode). */
+  command: boolean
   /** What VoiceOver and the window title announce. */
   ariaLabel: string
   /** True while the state is one an assistive tech should be told about. */
@@ -113,6 +115,7 @@ function describeBase(event: DictationEvent): BarVisual {
         border: BAR_BORDER,
         label: '',
         handsFree: false,
+        command: false,
         ariaLabel: 'Murmur is idle. Hold your dictation key to speak.',
         announce: false,
       }
@@ -125,7 +128,12 @@ function describeBase(event: DictationEvent): BarVisual {
         border: BAR_BORDER,
         label: '',
         handsFree: event.handsFree,
-        ariaLabel: event.handsFree ? 'Listening, hands-free mode' : 'Listening',
+        command: event.command,
+        ariaLabel: event.command
+          ? 'Listening — speak how to edit your selection'
+          : event.handsFree
+            ? 'Listening, hands-free mode'
+            : 'Listening',
         announce: true,
       }
     case 'processing':
@@ -137,7 +145,12 @@ function describeBase(event: DictationEvent): BarVisual {
         border: BAR_BORDER,
         label: '',
         handsFree: false,
-        ariaLabel: event.stage === 'polishing' ? 'Polishing your words' : 'Transcribing',
+        command: event.command,
+        ariaLabel: event.command
+          ? 'Editing your selection'
+          : event.stage === 'polishing'
+            ? 'Polishing your words'
+            : 'Transcribing',
         announce: true,
       }
     case 'inserting':
@@ -149,6 +162,7 @@ function describeBase(event: DictationEvent): BarVisual {
         border: BAR_BORDER,
         label: '',
         handsFree: false,
+        command: false,
         ariaLabel: 'Inserting text',
         announce: true,
       }
@@ -161,6 +175,7 @@ function describeBase(event: DictationEvent): BarVisual {
         border: BAR_BORDER,
         label: '',
         handsFree: false,
+        command: false,
         ariaLabel: `Inserted ${event.charCount} characters`,
         announce: true,
       }
@@ -173,6 +188,7 @@ function describeBase(event: DictationEvent): BarVisual {
         border: BAR_ERROR_BORDER,
         label: event.message,
         handsFree: false,
+        command: false,
         ariaLabel: event.message,
         announce: true,
       }

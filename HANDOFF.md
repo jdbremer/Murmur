@@ -35,13 +35,17 @@ spawn args. Whisper's isolation is its loopback bind; llama keeps the token.
 
 ## What is left
 
-### 1. Real `fn`-key hold — the last unproven centimetre
+### 1. Real `fn`-key hold — verify the release fix by hand
 
-The tap starts (`[murmur:hotkey] listening for fn (hold)`) and the pipeline
-behind it is proven via the synthetic edge. What no machine can do is press
-the physical key: hold `fn`, speak, release, in Notes/Slack/Chrome/Terminal.
-Needs Input Monitoring granted to the dev app (mic is already granted;
-Accessibility evidently works — the paste landed).
+The physical key now works (field-tested 2026-08-05) but long holds sometimes
+never stopped. Root cause was delivery loss (tap on Electron's busy main run
+loop + Wispr Flow's active tap in the same chain); fixed with a dedicated tap
+thread plus a 250 ms HID reconciliation watchdog, and the phantom double-tap
+route (arrow-key flagsChanged noise) is closed by key-code matching. What
+remains human: hold `fn`, talk for a solid 30+ seconds, release — it must stop
+within ~250 ms even with Wispr Flow running. Also try: double-tap to latch
+hands-free, single tap to exit; and Command Mode — select text anywhere, hold
+`fn`, say "tighten this up".
 
 ### 2. llama.cpp Metal fails to compile on macOS 27 — pin bump, bench-gated
 

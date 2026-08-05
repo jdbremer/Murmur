@@ -76,10 +76,14 @@ export const DictationEventSchema = z.discriminatedUnion('state', [
     handsFree: z.boolean().default(false),
     /** Normalised 0..1 mic amplitude. */
     level: z.number().min(0).max(1).default(0),
+    /** True when this utterance is editing a selection (PLAN §18.1). */
+    command: z.boolean().default(false),
   }),
   z.object({
     state: z.literal('processing'),
     stage: z.enum(['transcribing', 'polishing']).default('transcribing'),
+    /** True when this utterance is editing a selection (PLAN §18.1). */
+    command: z.boolean().default(false),
   }),
   z.object({ state: z.literal('inserting') }),
   z.object({
