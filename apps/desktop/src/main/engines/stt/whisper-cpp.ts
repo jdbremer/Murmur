@@ -116,10 +116,13 @@ export class WhisperCppEngine implements SttEngine {
       this.#options.appPath,
     )
     if (!binaryPath) {
+      const buildHint =
+        process.platform === 'win32'
+          ? 'Fetch prebuilt binaries with scripts/sidecars/fetch-whisper-win.ps1 (or build with CMake).'
+          : 'Build it with scripts/sidecars/build-whisper.sh.'
       this.#unavailable(
         'binary-missing',
-        `${WHISPER_SERVER_BINARY} is not installed. Looked in: ${searched.join(', ')}. ` +
-          `Build it with scripts/sidecars/build-whisper.sh.`,
+        `${WHISPER_SERVER_BINARY} is not installed. Looked in: ${searched.join(', ')}. ${buildHint}`,
       )
       return
     }
@@ -135,21 +138,30 @@ export class WhisperCppEngine implements SttEngine {
       name: WHISPER_SERVER_BINARY,
       binaryPath,
       healthPath: '/',
-      buildArgs: ({ port, token }) => [
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(port),
-        '--model',
-        join(model.directory, modelFile),
-        '--api-key',
-        token,
-        '--threads',
-        String(this.#options.threads ?? 4),
-        // Keep the server's own conversion off: we already send 16 kHz mono.
-        '--convert',
-        'false',
-      ],
+      buildArgs: ({ port, token }) => {
+        // Base flags common to whisper.cpp server (v1.9.x).
+        const args = [
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(port),
+          '--model',
+          join(model.directory, modelFile),
+          '--threads',
+          String(this.#options.threads ?? 4),
+        ]
+        // Official Windows prebuilds do not accept `--api-key` or
+        // `--convert false` (boolean flag with no value) — unknown args print
+        // help and exit. Loopback bind remains the primary isolation (PLAN §10.3).
+        // macOS builds we ship still take a bearer token.
+        if (process.platform !== 'win32') {
+          args.push('--api-key', token, '--convert', 'false')
+        } else {
+          // Prefer CPU on Windows overnight boxes without CUDA.
+          args.push('--no-gpu')
+        }
+        return args
+      },
     }
 
     this.#sidecar = new SidecarProcess(

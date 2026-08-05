@@ -225,12 +225,18 @@ export const invokeContract = {
    */
   'debug.injectPcm': {
     request: z.object({
-      /** How long the synthetic utterance should last. */
+      /** How long the synthetic utterance should last (ignored when `samples` is set). */
       durationMs: z.number().positive().max(30_000).default(800),
-      /** Peak amplitude 0..1 (energy for VAD / levels). */
+      /** Peak amplitude 0..1 (energy for VAD / levels). Sine path only. */
       amplitude: z.number().min(0).max(1).default(0.35),
       /** Sine frequency in Hz — audible-ish energy, not speech content. */
       frequencyHz: z.number().positive().max(4000).default(220),
+      /**
+       * Optional raw 16 kHz mono Float32 samples (−1..1). When provided, these
+       * are pushed instead of a generated sine — for agent G7 speech-file proof.
+       * Cap keeps IPC bounded (~30 s at 16 kHz).
+       */
+      samples: z.array(z.number()).max(16_000 * 30).optional(),
     }),
     response: z.object({
       frames: z.number().int().nonnegative(),

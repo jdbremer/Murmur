@@ -15,9 +15,10 @@ downloaded at runtime, only model _data_.
 
 ## Building
 
-**macOS only.** Both scripts refuse to run elsewhere rather than emitting a
-binary that cannot be shipped. They need Xcode command line tools, `cmake` and
-`git`.
+### macOS
+
+Scripts refuse to run elsewhere rather than emitting a Mac-only universal
+binary. They need Xcode command line tools, `cmake` and `git`.
 
 ```bash
 scripts/sidecars/build-whisper.sh          # universal arm64 + x86_64
@@ -31,6 +32,19 @@ CODESIGN_ID="Developer ID Application: …" scripts/sidecars/build-llama.sh
 Output lands in `.sidecars/bin/` (git-ignored), together with a `.sha256` file.
 `strip -Sx` runs before signing, so the shipped binaries carry no debug symbols;
 keep the build tree if you need to symbolicate a crash.
+
+### Windows (dev)
+
+Official ggml-org x64 prebuilds include `whisper-server.exe` + DLLs. Fetch into
+`.sidecars/bin/`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/sidecars/fetch-whisper-win.ps1
+```
+
+The app resolves `whisper-server.exe` via `resolveSidecarBinary` (Windows adds
+the `.exe` suffix). Official Windows prebuilds do not take `--api-key`; the app
+binds the sidecar to `127.0.0.1` only and omits that flag on `win32`.
 
 ## Where the app looks
 

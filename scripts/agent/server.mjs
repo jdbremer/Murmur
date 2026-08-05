@@ -21,6 +21,7 @@ import {
   writeFileSync,
   existsSync,
   rmSync,
+  readFileSync,
 } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -313,22 +314,86 @@ async function snapshot() {
   return murmur('debug.snapshot', [])
 }
 
+/**
+ * Decode a mono/stereo 16-bit PCM WAV to Float32 samples at its native rate.
+ * whisper-cpp jfk.wav is 16 kHz mono — matches Murmur capture.
+ */
+function wavToFloat32(filePath) {
+  const buf = readFileSync(filePath)
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
+    throw new Error(`not a WAV file: ${filePath}`)
+  }
+  let offset = 12
+  let channels = 1
+  let sampleRate = 16_000
+  let bitsPerSample = 16
+  let dataOffset = -1
+  let dataSize = 0
+  while (offset + 8 <= buf.length) {
+    const id = buf.toString('ascii', offset, offset + 4)
+    const size = buf.readUInt32LE(offset + 4)
+    const start = offset + 8
+    if (id === 'fmt ') {
+      channels = buf.readUInt16LE(start + 2)
+      sampleRate = buf.readUInt32LE(start + 4)
+      bitsPerSample = buf.readUInt16LE(start + 14)
+    } else if (id === 'data') {
+      dataOffset = start
+      dataSize = size
+      break
+    }
+    offset = start + size + (size % 2)
+  }
+  if (dataOffset < 0) throw new Error(`no data chunk in ${filePath}`)
+  if (bitsPerSample !== 16) throw new Error(`only 16-bit WAV supported (${bitsPerSample})`)
+  const frameCount = Math.floor(dataSize / (2 * channels))
+  const samples = new Array(frameCount)
+  for (let i = 0; i < frameCount; i++) {
+    let sum = 0
+    for (let c = 0; c < channels; c++) {
+      sum += buf.readInt16LE(dataOffset + (i * channels + c) * 2)
+    }
+    samples[i] = sum / channels / 32768
+  }
+  return { samples, sampleRate, channels }
+}
+
 async function utterance(body = {}) {
   const holdMs = body.holdMs ?? 1200
   const pcmMs = body.pcmMs ?? 900
   await hotkey('down')
-  await injectPcm({
-    durationMs: pcmMs,
-    amplitude: body.amplitude ?? 0.4,
-    frequencyHz: body.frequencyHz ?? 220,
-  })
+
+  // Prefer a real speech WAV when provided (G7: recognizable STT text).
+  // Default: whisper.cpp jfk.wav if present under %TEMP% or .agent/samples/.
+  const speechPath =
+    body.speechWav ||
+    process.env.MURMUR_AGENT_SPEECH_WAV ||
+    (existsSync(join(AGENT_DIR, 'samples', 'jfk.wav'))
+      ? join(AGENT_DIR, 'samples', 'jfk.wav')
+      : existsSync(join(process.env.TEMP || '/tmp', 'jfk.wav'))
+        ? join(process.env.TEMP || '/tmp', 'jfk.wav')
+        : null)
+
+  if (speechPath && body.useSine !== true) {
+    const { samples, sampleRate } = wavToFloat32(speechPath)
+    log(`utterance: injecting speech WAV ${speechPath} (${samples.length} samples @ ${sampleRate} Hz)`)
+    // Cap IPC size: first ~12 s is enough for JFK.
+    const capped = samples.length > 16_000 * 12 ? samples.slice(0, 16_000 * 12) : samples
+    await injectPcm({ samples: capped, durationMs: Math.round((capped.length / 16_000) * 1000) })
+  } else {
+    await injectPcm({
+      durationMs: pcmMs,
+      amplitude: body.amplitude ?? 0.4,
+      frequencyHz: body.frequencyHz ?? 220,
+    })
+  }
   // Leave a little tail after PCM before release.
   await new Promise((r) => setTimeout(r, 100))
   await hotkey('up')
-  // Wait for pipeline to settle a bit.
+  // Wait for pipeline to settle a bit (STT on CPU can take several seconds).
   await new Promise((r) => setTimeout(r, holdMs))
   const snap = await snapshot()
-  return { ok: true, holdMs, pcmMs, snapshot: snap.result }
+  return { ok: true, holdMs, pcmMs, speechPath: speechPath || null, snapshot: snap.result }
 }
 
 const server = createServer(async (req, res) => {

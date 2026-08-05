@@ -45,9 +45,10 @@ Verified on a Windows dev box (agent overnight loop — **commits only, never pu
 | G5 Paste | **pass** | `debug.insertText` → Notepad file contains `hello` (SendInput + focus fix) |
 | G5b Word | **pass (canned)** | Recognizable word pasted; real STT word still G7 |
 | G6 Hotkey | **pass** | `WH_KEYBOARD_LL` installed; `startHotkeyListener` → true; Right Ctrl down/up via nut.js |
-| G7–G10 | **open** | whisper.exe, secure field, elevated, stability |
+| G7 STT | **pass** | `whisper-server.exe` + `whisper-tiny-en`; JFK sample → `inserted` (107 chars, paste) |
+| G8–G10 | **open** | secure field, elevated, stability |
 
-**Next gate:** G7 — whisper.cpp `.exe` STT + catalog model so utterance inserts text.
+**Next gate:** G8 — password-class focus refuses dictation with a clear message.
 
 Idle policy: if blocked, walk every Hub screen — “would I like this as a user?” / advances hold→speak→insert.
 
@@ -150,8 +151,8 @@ C  Native scaffold       ✓ G4
 D  Paste                 ✓ G5 / G5b (canned)
 E  Hotkey + chords       ✓ G6 (Right Ctrl + chords in native)
 F  App categories
-G  STT                   ← current (G7 whisper.exe)
-H  Ship / CI             G8–G10
+G  STT                   ✓ G7 (whisper-server.exe + tiny.en)
+H  Ship / CI             ← current (G8–G10)
 ```
 
 ---

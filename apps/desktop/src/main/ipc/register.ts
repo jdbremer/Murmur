@@ -188,11 +188,28 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     ipc.handle('debug.warmMic', () => {
       context.audio.warm(settings.get().micDeviceId)
     })
-    ipc.handle('debug.injectPcm', ({ durationMs, amplitude, frequencyHz }) => {
+    ipc.handle('debug.injectPcm', ({ durationMs, amplitude, frequencyHz, samples }) => {
       const samplesPerFrame = Math.round((AUDIO.sampleRate * AUDIO.frameMs) / 1000)
-      const totalSamples = Math.max(1, Math.round((AUDIO.sampleRate * durationMs) / 1000))
       let produced = 0
       let frames = 0
+
+      // Prefer raw samples when the agent injects a real speech file (G7).
+      if (samples && samples.length > 0) {
+        while (produced < samples.length) {
+          const n = Math.min(samplesPerFrame, samples.length - produced)
+          const frame = new Float32Array(n)
+          for (let i = 0; i < n; i++) {
+            const v = samples[produced + i] ?? 0
+            frame[i] = Math.max(-1, Math.min(1, v))
+          }
+          orchestrator.pushFrame(frame)
+          produced += n
+          frames += 1
+        }
+        return { frames, sampleCount: produced }
+      }
+
+      const totalSamples = Math.max(1, Math.round((AUDIO.sampleRate * durationMs) / 1000))
       let phase = 0
       const twoPiF = (2 * Math.PI * frequencyHz) / AUDIO.sampleRate
 
