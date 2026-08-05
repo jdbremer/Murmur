@@ -31,11 +31,20 @@ import { createLogger, redact, type Logger } from '../logging'
  * into a typed result rather than an exception.
  */
 
-/** Delay before the clipboard is put back (PLAN §3.2.5). */
-export const CLIPBOARD_RESTORE_MS = 150
+/**
+ * Delay before the clipboard is put back (PLAN §3.2.5).
+ * Windows needs a longer settle — Win11 Notepad / packaged apps often read the
+ * pasteboard after the synthetic Ctrl+V returns, so 150 ms races the restore.
+ */
+export const CLIPBOARD_RESTORE_MS = process.platform === 'win32' ? 400 : 150
 
 export type InjectionFailure =
-  'secure-input' | 'unsupported-platform' | 'no-focus' | 'paste-failed' | 'empty-text'
+  | 'secure-input'
+  | 'elevated-target'
+  | 'unsupported-platform'
+  | 'no-focus'
+  | 'paste-failed'
+  | 'empty-text'
 
 export interface InjectionResult extends InsertTextResult {
   reason?: InjectionFailure
@@ -86,7 +95,8 @@ export class TextInjector {
       return {
         ok: false,
         reason: 'unsupported-platform',
-        message: 'Text insertion needs the macOS helper, which is not available on this platform.',
+        message:
+          'Text insertion needs the native helper, which is not available yet on this build.',
       }
     }
     if (native.isSecureInputActive()) {
@@ -94,6 +104,15 @@ export class TextInjector {
         ok: false,
         reason: 'secure-input',
         message: 'Secure field — Murmur will not type here.',
+      }
+    }
+    // Windows UIPI: non-elevated Murmur cannot SendInput into an elevated app.
+    if (typeof native.isForegroundElevated === 'function' && native.isForegroundElevated()) {
+      return {
+        ok: false,
+        reason: 'elevated-target',
+        message:
+          'That app is running as administrator — Murmur cannot type into it. Use a non-admin window, or run Murmur as admin too.',
       }
     }
     return { ok: true }

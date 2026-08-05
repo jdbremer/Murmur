@@ -151,10 +151,13 @@ export class LlamaCppPolishEngine implements PolishEngine {
       this.#options.appPath,
     )
     if (!binaryPath) {
+      const how =
+        process.platform === 'win32'
+          ? `Install with: powershell -File scripts/sidecars/fetch-llama-win.ps1 (or turn Polishing off in Settings — dictation still inserts raw text).`
+          : `Build with scripts/sidecars/build-llama.sh (or turn Polishing off — dictation still inserts raw text).`
       this.#unavailable(
         'binary-missing',
-        `${LLAMA_SERVER_BINARY} is not installed. Looked in: ${searched.join(', ')}. ` +
-          `Build it with scripts/sidecars/build-llama.sh.`,
+        `${LLAMA_SERVER_BINARY} is not installed. Looked in: ${searched.join(', ')}. ${how}`,
       )
       return
     }

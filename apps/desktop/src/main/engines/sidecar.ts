@@ -1,8 +1,8 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { accessSync, constants } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { SIDECAR, TIMEOUTS } from '../config'
 import { createLogger, type Logger } from '../logging'
@@ -111,6 +111,12 @@ export function generateSidecarToken(): string {
 /** True when `path` exists and is executable by this process. */
 export function isExecutable(path: string): boolean {
   try {
+    // Windows has no Unix execute bit that Node can check; existence is enough.
+    // (`.exe` resolution is handled by {@link resolveSidecarBinary}.)
+    if (process.platform === 'win32') {
+      accessSync(path, constants.F_OK)
+      return true
+    }
     accessSync(path, constants.X_OK)
     return true
   } catch {
@@ -129,24 +135,47 @@ export function isExecutable(path: string): boolean {
  * binary is missing — a message that names a path is actionable, one that says
  * "not found" is not.
  */
-export function sidecarSearchPaths(resourcesPath: string, appPath: string): string[] {
+export function sidecarSearchPaths(
+  resourcesPath: string,
+  appPath: string,
+  userDataPath?: string,
+): string[] {
   const paths: string[] = []
   const override = process.env['MURMUR_SIDECAR_DIR']
   if (override) paths.push(override)
   paths.push(join(resourcesPath, 'bin'))
+  // Where the in-app installer can actually write once the app is packaged:
+  // the install directory itself is read-only for a standard user.
+  if (userDataPath) paths.push(join(userDataPath, 'sidecars', 'bin'))
   paths.push(join(appPath, '..', '..', '.sidecars', 'bin'))
   return paths
+}
+
+/**
+ * Candidate file names for a logical sidecar (`whisper-server`, `llama-server`).
+ * Windows ships `*.exe`; macOS / Linux ship extensionless binaries.
+ */
+export function sidecarBinaryNames(name: string): string[] {
+  if (process.platform === 'win32') {
+    if (name.toLowerCase().endsWith('.exe')) return [name]
+    return [`${name}.exe`, name]
+  }
+  return [name]
 }
 
 export function resolveSidecarBinary(
   name: string,
   resourcesPath: string,
   appPath: string,
+  userDataPath?: string,
 ): { path: string | null; searched: string[] } {
-  const searched = sidecarSearchPaths(resourcesPath, appPath)
+  const searched = sidecarSearchPaths(resourcesPath, appPath, userDataPath)
+  const names = sidecarBinaryNames(name)
   for (const directory of searched) {
-    const candidate = join(directory, name)
-    if (isExecutable(candidate)) return { path: candidate, searched }
+    for (const fileName of names) {
+      const candidate = join(directory, fileName)
+      if (isExecutable(candidate)) return { path: candidate, searched }
+    }
   }
   return { path: null, searched }
 }
@@ -225,21 +254,43 @@ export class SidecarProcess {
     const args = this.spec.buildArgs({ port, token })
     // A deliberately minimal environment: no inherited API keys, no proxy
     // variables that could make a "local" server talk to the internet.
+    // Windows needs SystemRoot/TEMP for the CRT and a PATH that can resolve
+    // sibling DLLs shipped next to the .exe.
     const env: NodeJS.ProcessEnv = {
-      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-      HOME: process.env['HOME'] ?? '',
-      TMPDIR: process.env['TMPDIR'] ?? '/tmp',
+      ...(process.platform === 'win32'
+        ? {
+            PATH: process.env['PATH'] ?? '',
+            SystemRoot: process.env['SystemRoot'] ?? 'C:\\Windows',
+            TEMP: process.env['TEMP'] ?? process.env['TMP'] ?? '',
+            TMP: process.env['TMP'] ?? process.env['TEMP'] ?? '',
+            USERPROFILE: process.env['USERPROFILE'] ?? '',
+          }
+        : {
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            HOME: process.env['HOME'] ?? '',
+            TMPDIR: process.env['TMPDIR'] ?? '/tmp',
+          }),
       ...(this.spec.buildEnv?.({ port, token }) ?? {}),
     }
 
     this.#log.info(`starting on ${SIDECAR.host}:${port}`)
 
+    // Run from the binary's directory so Windows loads co-located DLLs
+    // (whisper.dll / ggml*.dll) without requiring PATH surgery.
+    const cwd = this.spec.cwd ?? dirname(this.spec.binaryPath)
+
     const child = spawn(this.spec.binaryPath, args, {
-      cwd: this.spec.cwd,
+      cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      // Own process group, so SIGKILL reaches any workers it forked.
-      detached: true,
+      // Own process group on POSIX so SIGKILL reaches any workers it forked.
+      // Windows has no real process groups for this pattern; keep attached.
+      detached: process.platform !== 'win32',
+      // whisper-server.exe / llama-server.exe are console-subsystem binaries:
+      // spawned from a GUI process with no console, Windows would allocate and
+      // *show* one, which sits on the desktop for the sidecar's whole life and
+      // steals focus the moment it appears — mid-dictation.
+      windowsHide: true,
     })
     this.#child = child
 
@@ -382,10 +433,34 @@ export class SidecarProcess {
   /**
    * Signal the whole process group (negative pid) so forked workers die too;
    * fall back to the pid alone if the group is already gone.
+   *
+   * Windows has no process groups for this pattern and maps every signal to
+   * `TerminateProcess`, so the SIGTERM→SIGKILL escalation carries no meaning
+   * there. What does matter is reaching the *tree*: llama-server spawns
+   * workers, and `child.kill()` alone leaves them holding several GB of model
+   * memory and the port. `taskkill /T` is the portable way to get all of them.
    */
   #signal(child: ChildProcess, signal: NodeJS.Signals): void {
     const { pid } = child
     if (pid === undefined) return
+    if (process.platform === 'win32') {
+      try {
+        // /T = tree, /F = force. Escalation is meaningless on Windows, so the
+        // first ask is already the last one.
+        execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        })
+      } catch {
+        // taskkill missing, access denied, or the process is already gone.
+        try {
+          child.kill(signal)
+        } catch {
+          /* already gone */
+        }
+      }
+      return
+    }
     try {
       process.kill(-pid, signal)
     } catch {

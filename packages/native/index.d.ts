@@ -18,7 +18,8 @@ export interface PermissionsStatus {
 }
 
 export interface HotkeyConfig {
-  key: 'fn' | 'rightCmd' | 'rightOpt' | 'custom'
+  key:
+    'fn' | 'rightCmd' | 'rightOpt' | 'rightCtrl' | 'ctrlSpace' | 'altSpace' | 'capsLock' | 'custom'
   customKeyCode: number | null
   activation: 'hold' | 'toggle'
   doubleTapHandsFree: boolean
@@ -60,6 +61,8 @@ export interface MurmurNative {
    */
   startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): void
   stopHotkeyListener(): void
+  /** Clear a stuck chord latch after a failed dictation begin. */
+  releaseHotkeyLatch(): void
   /** Synthesize ⌘V. The clipboard save/set/restore dance lives in main. */
   sendPasteShortcut(): NativeActionResult
   /** HID-truth: is the configured hotkey physically held right now? */
@@ -70,6 +73,8 @@ export interface MurmurNative {
   getSelectedText(): { ok: boolean; text?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null
   isSecureInputActive(): boolean
+  /** Windows UIPI: frontmost app elevated while Murmur is not. */
+  isForegroundElevated?(): boolean
   readonly permissions: NativePermissions
   platformInfo(): string
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { useSettings } from '../hooks/useSettings'
+import { DictationToast } from './components/Toast'
 import { Onboarding } from './onboarding/Onboarding'
 import { Sidebar, type SectionId } from './Sidebar'
 import { HomeSection } from './sections/HomeSection'
@@ -39,11 +40,12 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div className="flex h-full bg-canvas text-ink">
+    <div className="relative flex h-full bg-canvas text-ink">
       <Sidebar active={section} onSelect={setSection} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-3xl px-10 py-9">{renderSection(section)}</div>
       </main>
+      <DictationToast />
     </div>
   )
 }

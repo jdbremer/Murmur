@@ -82,7 +82,7 @@ export class HotkeyBridge {
     return this.#running
   }
 
-  /** Start (or restart) the listener with `config`. Safe to call repeatedly. */
+  /** Start (or restart) the listener with `config`. Safe to call repeatedly. Never throws. */
   start(config: HotkeyConfig): void {
     this.stop()
     this.#config = config
@@ -93,9 +93,31 @@ export class HotkeyBridge {
       return
     }
 
-    native.startHotkeyListener(config, (event) => this.handle(event))
-    this.#running = true
-    this.#log.info(`listening for ${describeKey(config)}`)
+    // Incomplete custom bindings would throw from the native addon — refuse here
+    // so bootstrap never dies with UnhandledPromiseRejection.
+    if (config.key === 'custom' && (config.customKeyCode === null || config.customKeyCode < 0)) {
+      this.#running = false
+      this.#log.warn('custom hotkey has no customKeyCode — listener not started')
+      return
+    }
+
+    try {
+      // Native returns `false` when the OS hook/tap could not be installed
+      // (e.g. missing Input Monitoring on macOS, or WH_KEYBOARD_LL failure on Windows).
+      const started = native.startHotkeyListener(config, (event) => this.handle(event))
+      if (started === false) {
+        this.#running = false
+        this.#log.warn(
+          `native hotkey listener failed to start for ${describeKey(config)} — use debug.simulateHotkey`,
+        )
+        return
+      }
+      this.#running = true
+      this.#log.info(`listening for ${describeKey(config)}`)
+    } catch (error) {
+      this.#running = false
+      this.#log.warn('native hotkey listener threw:', error)
+    }
   }
 
   stop(): void {
@@ -112,6 +134,27 @@ export class HotkeyBridge {
     this.#lastDownAt = null
     this.#lastPressWasTap = false
     this.#toggled = false
+    this.#latched = false
+  }
+
+  /**
+   * Clear a stuck press, in the native layer *and* here.
+   *
+   * The orchestrator calls this after a cancel or a failure. Clearing only the
+   * native side leaves this bridge believing a hold is still in progress:
+   * `#downAt` stays set, and the guard in `handle('down')` then swallows the
+   * user's next press as auto-repeat. The watchdog recovers a real hold after
+   * two misses, but it is never armed for synthetic edges — so in the dev and
+   * agent paths the hotkey would simply stop responding.
+   */
+  releaseLatch(): void {
+    try {
+      this.#native().releaseHotkeyLatch()
+    } catch (error) {
+      this.#log.warn('releasing the hotkey latch failed:', error)
+    }
+    this.#stopWatchdog()
+    this.#downAt = null
     this.#latched = false
   }
 
@@ -276,6 +319,14 @@ function describeKey(config: HotkeyConfig): string {
       return 'right ⌘'
     case 'rightOpt':
       return 'right ⌥'
+    case 'rightCtrl':
+      return 'Right Ctrl'
+    case 'ctrlSpace':
+      return 'Ctrl+Space'
+    case 'altSpace':
+      return 'Alt+Space'
+    case 'capsLock':
+      return 'Caps Lock'
     case 'custom':
       return `key code ${config.customKeyCode ?? '?'}`
   }

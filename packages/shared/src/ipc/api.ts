@@ -25,6 +25,7 @@ type Msg<K extends IpcMessageChannel> = MessageInput<K>
 export interface MurmurApi {
   readonly app: {
     version(): Promise<Res<'app.version'>>
+    info(): Promise<Res<'app.info'>>
     /** True in unpackaged builds; gates the Simulate widgets. */
     devMode(): Promise<Res<'app.devMode'>>
     quit(): Promise<void>
@@ -89,6 +90,8 @@ export interface MurmurApi {
   readonly engines: {
     status(): Promise<Res<'engines.status'>>
     subscribe(listener: (status: Evt<'engines.changed'>) => void): Unsubscribe
+    /** User-consented download of whisper-server / llama-server (Windows). */
+    installSidecar(request: Req<'engines.installSidecar'>): Promise<Res<'engines.installSidecar'>>
   }
 
   readonly history: {
@@ -122,5 +125,13 @@ export interface MurmurApi {
     simulateDictation(): Promise<void>
     /** Drives the real pipeline with a synthetic hotkey edge. */
     simulateHotkey(request: Req<'debug.simulateHotkey'>): Promise<void>
+    /** Re-open the capture stream (warm) for Dev tools. */
+    warmMic(): Promise<void>
+    /** Push synthetic PCM frames into the dictation loop (agent mic sim). */
+    injectPcm(request?: Req<'debug.injectPcm'>): Promise<Res<'debug.injectPcm'>>
+    /** Machine-readable status for the agent loop. */
+    snapshot(): Promise<Res<'debug.snapshot'>>
+    /** Paste a fixed phrase via the real injector (Notepad G5). */
+    insertText(request?: Req<'debug.insertText'>): Promise<Res<'debug.insertText'>>
   }
 }

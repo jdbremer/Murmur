@@ -96,6 +96,12 @@ export default tseslint.config(
     languageOptions: { sourceType: 'module' },
   },
 
+  // Repo tooling scripts (the agent driver, sidecar fetchers): plain Node ESM.
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node }, sourceType: 'module' },
+  },
+
   // Prettier last: turn off stylistic rules it owns.
   prettier,
 )

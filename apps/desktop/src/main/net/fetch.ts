@@ -1,16 +1,20 @@
 /**
  * The **only** ways Murmur reaches a network (PLAN §10.2, §10.3, §15.3).
  *
- * Two wrappers with opposite guarantees, and nothing else:
+ * Three wrappers with declared guarantees, and nothing else:
  *
  *  - {@link allowlistedFetch} — model downloads. Refuses any host that is not
  *    on the Hugging Face allowlist, and re-checks every redirect hop.
+ *  - {@link sidecarReleaseFetch} — the user-initiated whisper/llama binary
+ *    install. Same redirect discipline, against its own GitHub-releases host
+ *    list, so "we only talk to Hugging Face" stays a true statement about
+ *    *model* traffic rather than quietly covering an executable download.
  *  - {@link loopbackFetch} — the sidecar clients. Refuses any host that is
  *    *not* loopback, so a request that thinks it is going to our local
  *    `whisper-server` or `llama-server` can never end up on the internet.
  *
  * A reviewer can verify the claim: `fetch(` in `src/main` resolves to this
- * file's two wrappers, plus the polish `ChatClient`, which takes its fetch as
+ * file's three wrappers, plus the polish `ChatClient`, which takes its fetch as
  * an explicit constructor argument — {@link loopbackFetch} when it fronts the
  * bundled llama-server, the plain global when the user configured their own
  * endpoint (allowed by PLAN §7.1, and loudly warned about in the engine status
@@ -143,6 +147,81 @@ export async function allowlistedFetch(
 
 function isRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+// ---------------------------------------------------------------------------
+// Sidecar releases (whisper-server / llama-server prebuilds)
+// ---------------------------------------------------------------------------
+
+/**
+ * Hosts the in-app sidecar install may touch. Separate from the model
+ * allowlist on purpose: this fetches an **executable**, not weights, and the
+ * privacy copy users read ("model downloads from Hugging Face") should not
+ * silently expand to cover it. GitHub 302s release assets to its object CDN,
+ * so those hosts are listed explicitly rather than followed blindly.
+ */
+const SIDECAR_HOSTS: readonly string[] = Object.freeze([
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
+])
+
+export function isSidecarReleaseHost(host: string): boolean {
+  return SIDECAR_HOSTS.includes(host.toLowerCase())
+}
+
+/** The sidecar host list, for the Help panel's "what we contact" disclosure. */
+export function sidecarReleaseHosts(): readonly string[] {
+  return [...SIDECAR_HOSTS]
+}
+
+function assertSidecarUrl(url: string): URL {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new BlockedHostError(url, '<unparseable>')
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new BlockedHostError(url, `${parsed.hostname} (${parsed.protocol})`)
+  }
+  if (!isSidecarReleaseHost(parsed.hostname)) {
+    throw new BlockedHostError(url, parsed.hostname)
+  }
+  return parsed
+}
+
+/**
+ * `fetch` for the sidecar prebuilds, with the same manual-redirect discipline
+ * {@link allowlistedFetch} uses: `redirect: 'follow'` would let hop #2 land on
+ * any host at all, which is precisely what a release-asset CDN redirect
+ * looks like to an attacker who controls DNS.
+ *
+ * @throws {BlockedHostError} when the URL — or any redirect target — is not a
+ *   GitHub release host.
+ */
+export async function sidecarReleaseFetch(
+  url: string,
+  options: AllowlistedFetchOptions = {},
+): Promise<Response> {
+  const { fetchImpl, ...init } = options
+  const doFetch: FetchLike = fetchImpl ?? ((u, i) => globalThis.fetch(u, i))
+
+  let current = assertSidecarUrl(url).toString()
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    const response = await doFetch(current, { ...init, redirect: 'manual' })
+    if (!isRedirect(response.status)) return response
+
+    const location = response.headers.get('location')
+    if (!location) return response
+
+    const next = new URL(location, current).toString()
+    assertSidecarUrl(next)
+    current = next
+  }
+
+  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${scrubSecrets(url)}`)
 }
 
 // ---------------------------------------------------------------------------

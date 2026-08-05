@@ -18,7 +18,7 @@ import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDevMode } from '../../hooks/useDevMode'
 import { useDictationState } from '../../hooks/useDictationState'
 import { useSettings } from '../../hooks/useSettings'
-import { isMacPlatform } from '../../lib/platform'
+import { isMacPlatform, isWindowsPlatform } from '../../lib/platform'
 
 /**
  * Settings (PLAN §2.2.5).
@@ -28,10 +28,17 @@ import { isMacPlatform } from '../../lib/platform'
  * every window, and hot-applies it — no restart, no Apply button.
  */
 
-const HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
+const MAC_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
   { value: 'fn', label: 'fn' },
   { value: 'rightCmd', label: 'Right ⌘' },
   { value: 'rightOpt', label: 'Right ⌥' },
+  { value: 'custom', label: 'Custom key' },
+]
+
+/** Windows: no Space-swallowing chords until latch release is rock-solid. */
+const WINDOWS_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
+  { value: 'rightCtrl', label: 'Right Ctrl (recommended)' },
+  { value: 'capsLock', label: 'Caps Lock' },
   { value: 'custom', label: 'Custom key' },
 ]
 
@@ -87,6 +94,16 @@ export function SettingsSection(): React.JSX.Element {
 
   const historyValue =
     settings.historyRetention.mode === 'off' ? 'off' : String(settings.historyRetention.days)
+  const isMac = isMacPlatform()
+  const isWindows = isWindowsPlatform()
+  // Linux keeps the mac list + stored value: the listener never fires there,
+  // so the Select's job is to show what is stored, not to migrate it.
+  const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : MAC_HOTKEYS
+  const hotkeyValue = hotkeyOptions.some((o) => o.value === settings.hotkey.key)
+    ? settings.hotkey.key
+    : isWindows
+      ? 'rightCtrl'
+      : 'fn'
 
   return (
     <Section
@@ -100,17 +117,19 @@ export function SettingsSection(): React.JSX.Element {
         <Row
           label="Key"
           hint={
-            isMacPlatform()
+            isMac
               ? 'fn is the default. The right-hand modifiers exist for external keyboards that have no fn key.'
-              : 'The event tap that watches for this key is macOS-only; on this platform the key is stored but never fires.'
+              : isWindows
+                ? 'Right Ctrl is the Windows default. Space chords are disabled until key-latch is rock-solid.'
+                : 'The key listener is macOS- and Windows-only; on this platform the key is stored but never fires.'
           }
           htmlFor="settings-hotkey"
         >
           <Select
             id="settings-hotkey"
             label="Dictation key"
-            value={settings.hotkey.key}
-            options={HOTKEYS}
+            value={hotkeyValue}
+            options={[...hotkeyOptions]}
             onChange={(key) => void update({ hotkey: { ...settings.hotkey, key } })}
           />
         </Row>
@@ -141,11 +160,20 @@ export function SettingsSection(): React.JSX.Element {
         </Row>
         <Row
           label="Edit selected text by voice"
-          hint="Hold your key with text selected and speak an instruction — the selection is rewritten in place. Needs a polishing model."
+          hint={
+            isMac
+              ? 'Hold your key with text selected and speak an instruction — the selection is rewritten in place. Needs a polishing model.'
+              : // Reading the selection needs an accessibility call the Windows
+                // and Linux backends do not implement yet, so the feature can
+                // never fire there. A toggle that does nothing is worse than an
+                // honest disabled one.
+                'Reading the current selection is macOS-only for now, so this cannot run on this platform yet.'
+          }
         >
           <Toggle
             label="Edit selected text by voice"
-            checked={settings.commandModeEnabled}
+            checked={isMac && settings.commandModeEnabled}
+            disabled={!isMac}
             onChange={(commandModeEnabled) => void update({ commandModeEnabled })}
           />
         </Row>
@@ -282,7 +310,9 @@ function TryIt({ hotkey }: { hotkey: HotkeyKey }): React.JSX.Element {
   const dev = useDevMode()
   const [simulating, setSimulating] = useState(false)
 
-  const label = HOTKEYS.find((option) => option.value === hotkey)?.label ?? 'your key'
+  const label =
+    [...MAC_HOTKEYS, ...WINDOWS_HOTKEYS].find((option) => option.value === hotkey)?.label ??
+    'your key'
   const message =
     event.state === 'listening'
       ? 'Listening — Murmur can hear you.'

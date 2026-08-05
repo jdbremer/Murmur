@@ -1,112 +1,115 @@
-# Handoff — remaining work
+# Handoff — product-wide remaining work
 
-Written 2026-08-05, superseding the 2026-08-04 version. Everything below is
-verified against the tree at this commit: `npm run typecheck`, `npm run lint`,
-`npm test` (497 tests) and `npm run build` are green on an M5 Pro running
-macOS 27, and — the headline — **dictation has now been demonstrated end to
-end on real hardware**: synthetic hotkey edge → live microphone → VAD →
-whisper-server (Metal) → Gemma polish → clipboard-swap paste into TextEdit →
-history row → idle. A 7.0 s utterance: STT 550 ms, polish 1024 ms,
-release-to-inserted ≈ 1.3 s — inside PLAN §7.3's ≤ 1.5 s target with polish
-still on CPU.
+**Scope: the whole app** (macOS + Windows + shared). Platform-specific queues:
 
-Read this alongside [PLAN.md](./PLAN.md) (the product & engineering spec),
-[README.md](./README.md) (layout, conventions), and
-[SESSION-STATE.md](./SESSION-STATE.md) (cross-session state).
+| Doc                                            | Scope                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------ |
+| **[HANDOFF.md](./HANDOFF.md)** (this file)     | Cross-platform product, UX, catalog, security, CI            |
+| **[MAC-HANDOFF.md](./MAC-HANDOFF.md)**         | macOS-only (native module, Metal, notarization, field proof) |
+| **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** | Windows-only (native hook/paste, sidecars, agent loop)       |
+
+Canonical product/engineering spec remains **[PLAN.md](./PLAN.md)**. Layout and
+IPC conventions: **[README.md](./README.md)**.
 
 ---
 
-## Closed since the last handoff
+## Product backlog (app-wide) — **do these next**
 
-| # (old) | Item                      | How it closed                                                                                                                                                                                                                |
-| ------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1       | The Bar's real visuals    | 28-bar 60 fps canvas waveform fed by a ~30 Hz worklet meter (`audio.meter` → `audio.level`), shimmer, ✓ pulse, error hold, Reduce Motion path, click-through window + hover controls, Esc-while-listening via `EscapeCancel` |
-| 2       | Microphone picker         | Device list enumerated in the capture renderer (the only context that can see labels), cached in main, picker in Settings and in the Bar's hover menu                                                                        |
-| 3       | Onboarding                | Full PLAN §2.4 sequence gated on the new `onboardingCompleted` setting; step logic pure + tested; Help rebuilt with live permission/engine panels                                                                            |
-| 4       | Idle mic errors swallowed | `audio.captureStatus` invoke + `audio.captureChanged` broadcast; surfaced in Settings and Help. The orchestrator's idle early-return stands — it was right                                                                   |
-| 5       | `loopbackFetch` fiction   | Now real; whisper + sidecar health go through it, polish `ChatClient` takes its transport as a required ctor arg (loopback for bundled, global for external)                                                                 |
-| 6       | CI                        | `.github/workflows/ci.yml` — full gate on macos-14; sidecars on demand + weekly canary                                                                                                                                       |
-| 7       | Never proven end to end   | Proven — see header. `kill -USR2 <pid>` (dev builds) drives the real pipeline from a shell; `say` provides the speech                                                                                                        |
+### 1. Spoken-language selection → STT
 
-Two sidecar-spawn bugs found by the proof (the exact class HANDOFF predicted):
-whisper.cpp v1.9.2's server has **no `--api-key` flag** (exits at launch;
-crash-loop) and `--convert` is a bare default-off flag — both removed from the
-spawn args. Whisper's isolation is its loopback bind; llama keeps the token.
+**Ask:** Would it help to let the user pick which language they expect to speak,
+and pass that into the model?
 
-## What is left
+**Answer / work:** Yes — especially for Whisper (and later Parakeet). Today
+`settings.language` exists and is used in polish prompts / some STT paths, but
+the UX is easy to miss and first-run does not guide it.
 
-### 1. Real `fn`-key hold — VERIFIED in the field
+**Ship:**
 
-Owner-confirmed 2026-08-05, with Wispr Flow running alongside: hold `fn`,
-speak, release — "it's quicker, it looks good, the app is working." The
-release-loss root cause (tap starved on Electron's main run loop; another
-app's active tap in the chain) is fixed by the dedicated tap thread plus the
-250 ms HID reconciliation watchdog, and the phantom double-tap route
-(arrow-key flagsChanged noise) is closed by key-code matching. Still worth a
-casual poke when convenient: double-tap to latch hands-free and a single tap
-to exit, and Command Mode by hand (select text, hold `fn`, say "tighten this
-up").
+- Clear Settings (and onboarding) control: **language I speak** (and optional
+  “auto / multilingual”).
+- Wire that value into every STT engine call that accepts a language hint
+  (`whisper-server` language / initial prompt; ONNX decode when applicable).
+- Document which catalog models are `en` vs `multi` so the picker can warn when
+  the model cannot honor the choice.
 
-### 2. llama.cpp Metal fails to compile on macOS 27 — pin bump, bench-gated
+### 2. NVIDIA Parakeet in the catalog
 
-`b10276` logs `ggml_metal_library_init_from_source: error compiling source`
-and falls back to CPU. Functional (polish 1.0 s), but Metal should halve it.
-Bump the pin in `scripts/sidecars/build-llama.sh`, rebuild, and run the bench
-before committing (PLAN §16). Whisper's Metal works after one identical
-grumble.
+**Ask:** Why isn’t NVIDIA’s Parakeet listed? It should be performant.
 
-### 3. Donor branch — harvested; retire it
+**Answer (current policy):** PLAN §6.2 wants Parakeet-TDT as the recommended
+default, but NVIDIA ships **`.nemo` checkpoints**, not ONNX. Catalog rules
+require pinned, origin-auditable downloads — community NeMo→ONNX re-uploads
+are not listed as NVIDIA. See **[scripts/models/export-parakeet.md](./scripts/models/export-parakeet.md)**.
 
-`origin/claude/dictation-app-planning-cq047p` was mined for the Bar,
-onboarding, mic picker and Help. Its capture architecture (pre-roll in the
-renderer) was deliberately **not** taken — main's design is committed and
-tested. Its richer Home/Dictionary/Style/Models section variants were also
-left; main's are live and adequate. Nothing else worth taking; delete the
-branch or leave it as history.
+**Ship:**
 
-### 4. Parity buildout, in value order (PLAN M4/M5, §18)
+- Run the first-party NeMo→ONNX export, verify against NVIDIA reference
+  transcripts, host weights with SHA-256 pins.
+- Add a catalog entry (US origin, license labels) and make it the default STT
+  recommendation on capable machines once validated.
+- Until then, keep Whisper family as the honest recommended STT defaults.
 
-1. Streaming partial transcripts in the Bar (M5) behind `transcribeStreaming`.
-2. Command mode (§18.1) — second hotkey, AX-read selection, spoken instruction
-   → local rewrite → replace. Reuses the whole pipeline.
-3. Voice punctuation/commands ("new line", "scratch that") pre-polish.
-4. Snippets, re-polish-from-history, clipboard-only mode, menu-bar quick
-   controls, app icon + unsigned local DMG.
+### 3. Dedicated History tab for transcriptions
 
-### 5. Review leftovers, ranked
+**Ask:** History tab for what was recorded when (transcription), with manual
+delete.
 
-- **Design question for the owner** — command mode triggers on selection
-  presence with the _same_ hotkey (matches the reference product's shipped
-  UX; PLAN §18.1 sketched a second hotkey). The review's one confirmed UX
-  hazard: a leftover selection (double-clicked word, auto-selecting field)
-  turns dictation into an edit of that selection. Mitigations shipped: blue
-  Bar indicator + distinct aria, ready-polish gate, 6k-char cap, Settings
-  toggle, target-app undo restores. If real use still surprises, the fix is a
-  modifier chord (e.g. hold fn+shift) — the plumbing supports it in an hour.
-- Command rows inflate history word-stats (the edited selection counts as
-  words dictated). Cosmetic; fix when stats grow a per-mode breakdown.
-- The external-endpoint consent warning predates command mode — it promises
-  "transcripts" leave the device, but selections now ride along too. One
-  sentence in `endpointWarnings`.
-- Selection liveness is not re-verified at insert time; a user who clicks
-  away mid-edit gets the result at the new caret instead of a refusal.
+**Status:** Home already has FTS history (search, per-row copy/delete, clear
+all). That is easy to miss as “history.”
 
-### 6. Small persistent gotchas
+**Ship:**
 
-- npm may skip Electron's postinstall: `electron-vite dev` then dies with
-  "Electron uninstall". Fix: `node node_modules/electron/install.js`.
-- Launch dev via `npm run dev` (catalog path resolution).
-- `.sidecars/**` is eslint-ignored on purpose — upstream checkouts carry their
-  own configs.
-- Whisper heard "Wormor" for "Murmur" — seed the Dictionary with `Murmur`
-  (and your own names) as the first real entries.
+- Promote to a first-class Hub section: **History** (sidebar entry), not buried
+  as “Home.”
+- Each row: timestamp, app/category if known, raw vs polished text, STT/polish
+  model ids, duration; expand for full transcript.
+- Keep search, single-row delete, clear-all, retention settings linkage.
+- Optional: re-copy / re-insert / re-polish from a row (PLAN M4+).
 
-## Verifying a change
+### 4. Transient “clipboard insurance” UI after dictation
 
-```bash
-npm ci                    # if electron is missing after: node node_modules/electron/install.js
-npm run native:build      # macOS only
-npm run typecheck && npm run lint && npm test && npm run build
-npm run dev               # MURMUR_DEBUG=1 MURMUR_LOG_TRANSCRIPTS=1 for the full trail
-# hands-off dictation: kill -USR2 <electron pid>; say "words"; kill -USR2 <pid>
+**Ask:** Show the finished text for a moment with a **Copy** button, in case
+insert into the focused app fails.
+
+**Ship:**
+
+- On `inserted` **and** on `insert-failed` (and optionally always): a short-lived
+  Hub toast and/or Bar affordance showing the final text + **Copy**.
+- On insert failure, keep the toast until dismissed (not only 3 s).
+- Prefer the same text that would have been pasted (polished if any, else raw).
+- Do not log the text to disk beyond normal history rules.
+
+---
+
+## Privacy / network (app-wide)
+
+- **No offload of speech or transcripts.** Dictation and polish run on-device
+  (or on a user-configured loopback/external endpoint the user opted into).
+- **Outbound network is pull-only and user-initiated:**
+  - Model weights: Hugging Face allowlist (`net/fetch.ts`).
+  - Optional Windows sidecar install: GitHub Releases for `whisper-server` /
+    `llama-server` after an explicit confirm in Models UI.
+- No accounts, analytics, or crash uploads.
+
+---
+
+## Other shared follow-ups
+
+| Item                      | Notes                                                                     |
+| ------------------------- | ------------------------------------------------------------------------- |
+| Onboarding polish         | Mac path more complete; Windows still needs platform-true permission copy |
+| Streaming partials in Bar | PLAN M5                                                                   |
+| CI matrix                 | macOS exists; add Windows leg (`typecheck` / `test` / `native:build`)     |
+| Packaging                 | DMG (Mac) / NSIS (Windows) still release-track                            |
+
+---
+
+## How the handoff docs relate
+
+```
+PLAN.md              product + architecture (durable)
+HANDOFF.md           cross-platform product queue  ← you are here
+MAC-HANDOFF.md       macOS residual / field notes
+WINDOWS-HANDOFF.md   Windows residual / agent gates
 ```

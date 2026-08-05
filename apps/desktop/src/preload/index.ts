@@ -20,6 +20,7 @@ const ipc = createRendererIpc(ipcRenderer)
 const api: MurmurApi = {
   app: {
     version: () => ipc.invoke('app.version'),
+    info: () => ipc.invoke('app.info'),
     devMode: () => ipc.invoke('app.devMode'),
     quit: () => ipc.invoke('app.quit'),
     openHub: () => ipc.invoke('app.openHub'),
@@ -95,11 +96,16 @@ const api: MurmurApi = {
   engines: {
     status: () => ipc.invoke('engines.status'),
     subscribe: (listener) => ipc.on('engines.changed', listener),
+    installSidecar: (request) => ipc.invoke('engines.installSidecar', request),
   },
 
   debug: {
     simulateDictation: () => ipc.invoke('debug.simulateDictation'),
     simulateHotkey: (request) => ipc.invoke('debug.simulateHotkey', request),
+    warmMic: () => ipc.invoke('debug.warmMic'),
+    injectPcm: (request) => ipc.invoke('debug.injectPcm', request ?? {}),
+    snapshot: () => ipc.invoke('debug.snapshot'),
+    insertText: (request) => ipc.invoke('debug.insertText', request ?? {}),
   },
 }
 

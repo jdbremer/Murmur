@@ -78,6 +78,20 @@ describe('sidecar binary resolution', () => {
     }
   })
 
+  it('searches the writable userData dir ahead of the repo checkout', () => {
+    // A packaged app cannot write next to its own binary, so the in-app
+    // installer lands in userData — resolution has to look there.
+    const paths = sidecarSearchPaths('/Resources', '/app', '/userData')
+    expect(paths).toContain(join('/userData', 'sidecars', 'bin'))
+    expect(paths.indexOf(join('/userData', 'sidecars', 'bin'))).toBeLessThan(
+      paths.findIndex((path) => path.includes('.sidecars')),
+    )
+  })
+
+  it('omits the userData dir when none is supplied', () => {
+    expect(sidecarSearchPaths('/Resources', '/app').some((p) => p.includes('userData'))).toBe(false)
+  })
+
   it('finds an executable binary', () => {
     const binDirectory = join(directory, 'bin')
     mkdirSync(binDirectory, { recursive: true })
@@ -90,6 +104,9 @@ describe('sidecar binary resolution', () => {
   })
 
   it('ignores a non-executable file of the right name', () => {
+    // Windows has no execute bit Node can check — existence alone is enough.
+    if (process.platform === 'win32') return
+
     const binDirectory = join(directory, 'bin')
     mkdirSync(binDirectory, { recursive: true })
     const path = join(binDirectory, 'whisper-server')
@@ -104,6 +121,25 @@ describe('sidecar binary resolution', () => {
     const result = resolveSidecarBinary('llama-server', '/nowhere', '/app')
     expect(result.path).toBeNull()
     expect(result.searched.length).toBeGreaterThan(0)
+  })
+
+  it('resolves whisper-server.exe on Windows-style layouts', () => {
+    const binDirectory = join(directory, 'bin')
+    mkdirSync(binDirectory, { recursive: true })
+    const path = join(binDirectory, 'whisper-server.exe')
+    writeFileSync(path, 'MZ fake pe')
+    process.env['MURMUR_SIDECAR_DIR'] = binDirectory
+    try {
+      const result = resolveSidecarBinary('whisper-server', directory, '/app')
+      if (process.platform === 'win32') {
+        expect(result.path).toBe(path)
+      } else {
+        // Non-Windows still prefers extensionless; .exe is not searched.
+        expect(result.path).toBeNull()
+      }
+    } finally {
+      delete process.env['MURMUR_SIDECAR_DIR']
+    }
   })
 })
 

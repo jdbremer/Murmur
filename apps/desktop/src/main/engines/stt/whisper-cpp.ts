@@ -116,10 +116,13 @@ export class WhisperCppEngine implements SttEngine {
       this.#options.appPath,
     )
     if (!binaryPath) {
+      const buildHint =
+        process.platform === 'win32'
+          ? 'Fetch prebuilt binaries with scripts/sidecars/fetch-whisper-win.ps1 (or build with CMake).'
+          : 'Build it with scripts/sidecars/build-whisper.sh.'
       this.#unavailable(
         'binary-missing',
-        `${WHISPER_SERVER_BINARY} is not installed. Looked in: ${searched.join(', ')}. ` +
-          `Build it with scripts/sidecars/build-whisper.sh.`,
+        `${WHISPER_SERVER_BINARY} is not installed. Looked in: ${searched.join(', ')}. ${buildHint}`,
       )
       return
     }
@@ -135,24 +138,28 @@ export class WhisperCppEngine implements SttEngine {
       name: WHISPER_SERVER_BINARY,
       binaryPath,
       healthPath: '/',
-      // whisper.cpp's server (v1.9.2) has **no** auth flag — verified against
-      // the binary's own usage output; passing `--api-key` makes it exit at
-      // startup. Its isolation is the loopback bind plus an OS-chosen port
-      // (PLAN §10.3's bearer token applies to llama-server, which does support
-      // one). The client still sends its Bearer header; the server ignores it,
-      // and if upstream ever grows auth the flag gets added back here.
-      // `--convert` is likewise omitted: it is a bare flag that already
-      // defaults to off, and we send 16 kHz mono WAV that needs no conversion.
-      buildArgs: ({ port }) => [
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(port),
-        '--model',
-        join(model.directory, modelFile),
-        '--threads',
-        String(this.#options.threads ?? 4),
-      ],
+      // whisper.cpp v1.9.x: no --api-key (exits at launch); isolation is loopback.
+      // --convert defaults off. Windows prebuilds: prefer CPU.
+      buildArgs: ({ port }) => {
+        const args = [
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(port),
+          '--model',
+          join(model.directory, modelFile),
+          '--threads',
+          String(this.#options.threads ?? 4),
+        ]
+        // The Windows prebuild the in-app installer fetches is the CPU-only
+        // asset, and asking it for GPU work fails at startup. Anyone who put a
+        // CUDA/Vulkan build there themselves should get what they built, so
+        // this is an opt-out rather than a hard-coded ceiling.
+        if (process.platform === 'win32' && process.env['MURMUR_WHISPER_GPU'] !== '1') {
+          args.push('--no-gpu')
+        }
+        return args
+      },
     }
 
     this.#sidecar = new SidecarProcess(

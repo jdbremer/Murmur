@@ -108,6 +108,27 @@ export const DebugHotkeyRequestSchema = z.object({
 })
 export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 
+/**
+ * Compact runtime snapshot for Help / Dev tools (platform, native module,
+ * last mic status). Safe to expose in unpackaged builds; contains no audio.
+ */
+export const AppInfoSchema = z.object({
+  version: z.string().min(1),
+  /** Node-style platform string, e.g. `darwin`, `win32`, `linux`. */
+  platform: z.string().min(1),
+  arch: z.string().min(1),
+  /** True when running unpackaged (`electron-vite dev` / local out/). */
+  isDev: z.boolean(),
+  /**
+   * True only when `MURMUR_DEV_TOOLS=1`. The Help Developer panel is **not**
+   * shown in normal dev or production — agent IPC still works in unpackaged builds.
+   */
+  showDevTools: z.boolean().default(false),
+  /** One-line `@murmur/native` description (active vs stub). */
+  native: z.string().min(1),
+})
+export type AppInfo = z.infer<typeof AppInfoSchema>
+
 // ---------------------------------------------------------------------------
 // renderer → main, request/response
 // ---------------------------------------------------------------------------
@@ -115,6 +136,8 @@ export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 export const invokeContract = {
   // --- app ---------------------------------------------------------------
   'app.version': { request: z.void(), response: z.string().min(1) },
+  /** Platform + native status for Help / Windows-mode UI branching. */
+  'app.info': { request: z.void(), response: AppInfoSchema },
   /**
    * True in unpackaged builds. UI that fronts a dev-only channel (the three
    * Simulate widgets) renders only when this is true — a button whose backing
@@ -180,6 +203,22 @@ export const invokeContract = {
   // --- engines (PLAN §6.1, §7.1) -----------------------------------------
   /** Current STT + polish engine lifecycle, for the Hub's Models/Help panels. */
   'engines.status': { request: z.void(), response: EnginesStatusSchema },
+  /**
+   * Download and install a sidecar binary (Windows prebuild) after user consent.
+   * Used when polish/STT needs whisper-server / llama-server and it is missing.
+   */
+  'engines.installSidecar': {
+    request: z.object({
+      which: z.enum(['llama-server', 'whisper-server']),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      which: z.enum(['llama-server', 'whisper-server']),
+      path: z.string().nullable(),
+      error: z.string().nullable(),
+      detail: z.string(),
+    }),
+  },
 
   // --- history (PLAN §2.2.1) ---------------------------------------------
   'history.query': { request: HistoryQuerySchema, response: HistoryPageSchema },
@@ -218,6 +257,66 @@ export const invokeContract = {
    * the production code path; it just replaces the trigger.
    */
   'debug.simulateHotkey': { request: DebugHotkeyRequestSchema, response: z.void() },
+  /**
+   * Re-issue `audio.command` warm so Dev tools can re-open the mic after a
+   * permission denial or device change without restarting the app.
+   */
+  'debug.warmMic': { request: z.void(), response: z.void() },
+  /**
+   * Agent / Dev: push synthetic 16 kHz mono PCM into the orchestrator as if the
+   * capture worklet had produced it. Used for unattended mic simulation without
+   * a real microphone (WINDOWS-HANDOFF agent loop).
+   */
+  'debug.injectPcm': {
+    request: z.object({
+      /** How long the synthetic utterance should last (ignored when `samples` is set). */
+      durationMs: z.number().positive().max(30_000).default(800),
+      /** Peak amplitude 0..1 (energy for VAD / levels). Sine path only. */
+      amplitude: z.number().min(0).max(1).default(0.35),
+      /** Sine frequency in Hz — audible-ish energy, not speech content. */
+      frequencyHz: z.number().positive().max(4000).default(220),
+      /**
+       * Optional raw 16 kHz mono Float32 samples (−1..1). When provided, these
+       * are pushed instead of a generated sine — for agent G7 speech-file proof.
+       * Cap keeps IPC bounded (~30 s at 16 kHz).
+       */
+      samples: z
+        .array(z.number())
+        .max(16_000 * 30)
+        .optional(),
+    }),
+    response: z.object({
+      frames: z.number().int().nonnegative(),
+      sampleCount: z.number().int().nonnegative(),
+    }),
+  },
+  /**
+   * Agent: one JSON snapshot of platform, native, engines, dictation, last
+   * capture status — machine-readable without a screenshot.
+   */
+  'debug.snapshot': {
+    request: z.void(),
+    response: z.object({
+      app: AppInfoSchema,
+      dictation: DictationEventSchema,
+      engines: EnginesStatusSchema,
+      capture: AudioCaptureStatusSchema.nullable(),
+    }),
+  },
+  /**
+   * Agent / Dev: run the real TextInjector path with a fixed phrase (G5 paste
+   * proof). Focus the target app first; does not run STT.
+   */
+  'debug.insertText': {
+    request: z.object({
+      text: z.string().min(1).max(10_000).default('hello'),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      method: z.enum(['paste', 'accessibility', 'none']),
+      error: z.string().optional(),
+    }),
+  },
 } as const satisfies Record<string, IpcInvokeDefinition>
 
 export type InvokeContract = typeof invokeContract

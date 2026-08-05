@@ -66,10 +66,34 @@ export const EngineStatusSchema = z.object({
 })
 export type EngineStatus = z.infer<typeof EngineStatusSchema>
 
+/** Whether a loopback sidecar binary is on disk (not whether it is running). */
+/**
+ * Whether a sidecar binary is present — deliberately *not* where it is.
+ *
+ * An absolute path contains the OS username, and this object reaches the
+ * renderer and `debug.snapshot`, which is what a developer pastes into a bug
+ * report. Nothing in the UI needs the path, and an engine that cannot find its
+ * binary already reports every directory it searched in its own `detail`.
+ */
+export const SidecarBinaryStatusSchema = z.object({
+  installed: z.boolean(),
+})
+export type SidecarBinaryStatus = z.infer<typeof SidecarBinaryStatusSchema>
+
 /** Both slots at once — what `engines.status` returns and broadcasts. */
 export const EnginesStatusSchema = z.object({
   stt: EngineStatusSchema,
   polish: EngineStatusSchema,
+  /**
+   * Sidecar binaries the UI can offer to install. Present so Models can hide
+   * "Recommended" on polish when llama-server is missing, and show an Install button.
+   */
+  sidecars: z
+    .object({
+      whisper: SidecarBinaryStatusSchema,
+      llama: SidecarBinaryStatusSchema,
+    })
+    .optional(),
 })
 export type EnginesStatus = z.infer<typeof EnginesStatusSchema>
 

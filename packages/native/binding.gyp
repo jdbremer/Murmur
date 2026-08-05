@@ -3,7 +3,7 @@
     {
       "target_name": "murmur_native",
       "sources": [],
-      "include_dirs": ["<!@(node -p \"require('node-addon-api').include_dir\")"],
+      "include_dirs": ["<!@(node -p \"require('node-addon-api').include\")"],
       "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS", "NAPI_VERSION=9"],
       "conditions": [
         [
@@ -27,6 +27,25 @@
                 "$(SDKROOT)/System/Library/Frameworks/Foundation.framework"
               ]
             }
+          }
+        ],
+        [
+          "OS==\"win\"",
+          {
+            "sources": ["src/win/murmur_native_win.cpp"],
+            "msvs_settings": {
+              "VCCLCompilerTool": {
+                "ExceptionHandling": 0,
+                "AdditionalOptions": ["/std:c++20"]
+              }
+            },
+            "libraries": [
+              "user32.lib",
+              "shell32.lib",
+              "ole32.lib",
+              "oleaut32.lib",
+              "uuid.lib"
+            ]
           }
         ]
       ]

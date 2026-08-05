@@ -1,8 +1,11 @@
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { app, ipcMain } from 'electron'
 
 import {
   createMainIpc,
   MOMENTARY_HOLD_MS,
+  sanitizeHotkeyForPlatform,
   type DictationEvent,
   type EnginesStatus,
   type Settings,
@@ -46,6 +49,11 @@ import { WindowManager } from './windows/manager'
 
 const log = createLogger('app')
 const isDev = !app.isPackaged
+// Unpackaged only, deliberately: the agent profile auto-approves the
+// microphone and relocates userData to a fixed, world-readable temp path.
+// A packaged build must never honour an environment variable that turns those
+// on — a login item or `launchctl setenv` would be enough to arm it.
+const isAgent = isDev && process.env['MURMUR_AGENT'] === '1'
 
 // The workspace package is called `@murmur/desktop`, which Electron would
 // otherwise use for the user-data directory. Name it before anything reads
@@ -53,8 +61,22 @@ const isDev = !app.isPackaged
 // `~/Library/Application Support/Murmur` (PLAN §9).
 app.setName('Murmur')
 
+// Agent loop: isolate userData so unattended runs never fight a human session,
+// and optionally feed Chromium a fake media device / WAV as the "mic".
+// Switches must be set before ready (Chromium command line).
+if (isAgent) {
+  app.setPath('userData', join(tmpdir(), 'murmur-agent-userdata'))
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
+  const fakeAudio = process.env['MURMUR_AGENT_FAKE_AUDIO']
+  if (fakeAudio) {
+    app.commandLine.appendSwitch('use-fake-device-for-media-stream')
+    app.commandLine.appendSwitch('use-file-for-fake-audio-capture', fakeAudio)
+  }
+}
+
 // Single instance: a second launch focuses the running app's Hub instead of
 // starting a rival tray icon, event tap and set of sidecars.
+// Agent runs use a separate userData but still take the lock within that profile.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -80,6 +102,21 @@ async function bootstrap(): Promise<void> {
 
   const userDataPath = app.getPath('userData')
   const settings = SettingsStore.inUserData(userDataPath)
+  // Heal hotkey config so native never throws at boot (custom without a code,
+  // or a Mac-only preset on Windows). Schema still accepts those shapes.
+  {
+    const current = settings.get()
+    const healed = sanitizeHotkeyForPlatform(current.hotkey, process.platform)
+    if (
+      healed.key !== current.hotkey.key ||
+      healed.customKeyCode !== current.hotkey.customKeyCode
+    ) {
+      settings.set({ hotkey: healed })
+      log.info(
+        `hotkey healed: ${current.hotkey.key}/${current.hotkey.customKeyCode} → ${healed.key}`,
+      )
+    }
+  }
   const catalog = loadCatalog(app.getAppPath(), process.resourcesPath)
 
   log.info(`${app.getName()} ${app.getVersion()} on ${process.platform}`)
@@ -109,6 +146,7 @@ async function bootstrap(): Promise<void> {
     models,
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
+    userDataPath: app.getPath('userData'),
     hostDirectory: __dirname,
     dictionary: () => dictionary.enabled().map((entry) => entry.term),
   })
@@ -170,10 +208,13 @@ async function bootstrap(): Promise<void> {
     persist: (record) => {
       dictations.insert(record)
     },
-    // No `onLevel`: the Bar's waveform is fed by the capture renderer's ~30 Hz
-    // `audio.meter` messages (relayed as `audio.level` in the IPC registry).
-    // Deriving it from the ~100 ms PCM frames instead would meter at 10 Hz and
-    // make the bars step rather than dance (PLAN §2.1).
+    // No `onLevel` from PCM frames: the Bar is fed by the capture renderer's
+    // ~30 Hz `audio.meter` → `audio.level` relay (PLAN §2.1).
+    // Through the bridge, not straight to native: the bridge has to forget the
+    // in-progress press too, or it swallows the user's next one.
+    releaseHotkeyLatch: () => {
+      hotkeys.releaseLatch()
+    },
   })
 
   const hotkeys = new HotkeyBridge({
@@ -198,6 +239,8 @@ async function bootstrap(): Promise<void> {
     engines,
     models,
     hotkeys,
+    audio,
+    injector,
     dictations,
     dictionary,
     style,
@@ -309,7 +352,12 @@ async function bootstrap(): Promise<void> {
     const previous = lastSettings
     lastSettings = next
 
-    if (!paused && hotkeyChanged(previous, next)) hotkeys.rebind(next.hotkey)
+    // Sanitize here too, not just at boot: a settings.json hand-edited (or
+    // written by a sync client) while the app is running would otherwise bind
+    // a key this platform's backend cannot install, until the next launch.
+    if (!paused && hotkeyChanged(previous, next)) {
+      hotkeys.rebind(sanitizeHotkeyForPlatform(next.hotkey, process.platform))
+    }
     if (previous.micDeviceId !== next.micDeviceId) audio.setDevice(next.micDeviceId)
     if (previous.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next)
     if (
@@ -350,6 +398,8 @@ async function bootstrap(): Promise<void> {
   applyBarVisibility(settings.get(), machine.getState())
   applyLaunchAtLogin(settings.get())
   hotkeys.start(settings.get().hotkey)
+  // Clear any stuck Space latch from a previous crash / bad chord session.
+  hotkeys.releaseLatch()
   await engines.apply(settings.get())
 
   // Warm the mic so the first dictation does not pay `getUserMedia`'s

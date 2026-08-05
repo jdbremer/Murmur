@@ -30,14 +30,24 @@ export const BAR_MARGIN_BOTTOM = 10
 const isMac = process.platform === 'darwin'
 
 /**
- * Bottom-centre of the primary display, measured against `bounds` rather than
- * `workArea`: the pill floats *above* the Dock, it does not dodge it.
+ * Bottom-centre of the display under the cursor, measured against `bounds`
+ * rather than `workArea`: the pill floats *above* the Dock, it does not dodge
+ * it.
  *
- * Stage 2 follows the display containing the focused window, and honours the
- * optional pin-to-one-display setting.
+ * Cursor rather than primary because a pill on the primary display is simply
+ * not visible to someone working on their second monitor. On a single-display
+ * machine the two are the same display, so this is a no-op there — the change
+ * is only observable with more than one monitor attached.
+ *
+ * The cursor is a proxy for "where the user is", and an imperfect one: a
+ * cursor parked on another screen puts the pill there. Following the focused
+ * *window* would be exact, but the focused window belongs to another
+ * application and Electron cannot see its bounds — that needs a native call
+ * this build does not have yet.
  */
 export function barBounds(): Rectangle {
-  const { bounds } = screen.getPrimaryDisplay()
+  const point = screen.getCursorScreenPoint()
+  const { bounds } = screen.getDisplayNearestPoint(point)
   return {
     x: Math.round(bounds.x + (bounds.width - BAR_WIDTH) / 2),
     y: Math.round(bounds.y + bounds.height - BAR_HEIGHT - BAR_MARGIN_BOTTOM),
@@ -75,19 +85,22 @@ export function createBarWindow(): BrowserWindow {
     },
   })
 
-  // Above the Dock and above full-screen apps.
-  window.setAlwaysOnTop(true, 'screen-saver')
-
   // Click-through by default: the window covers a strip of the screen the user
   // is dictating into, and none of it may swallow a click. `forward: true` keeps
   // mouse *moves* flowing to the renderer, which flips this back off while the
   // pointer is over the capsule (`bar.pointerRegion`, PLAN §2.1).
   window.setIgnoreMouseEvents(true, { forward: true })
 
+  // Windows: `screen-saver` level is unreliable for frameless transparent
+  // windows; `pop-up-menu` keeps the pill above ordinary apps. macOS keeps the
+  // stronger full-screen level.
   if (isMac) {
+    window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     // A non-activating panel: clicking the pill must not raise Murmur.
     window.setWindowButtonVisibility(false)
+  } else {
+    window.setAlwaysOnTop(true, 'pop-up-menu')
   }
 
   void loadRenderer(window, 'bar')

@@ -320,10 +320,13 @@ export function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean
   onChange: (checked: boolean) => void
   label: string
+  /** For settings this build cannot honour — the Row hint says why. */
+  disabled?: boolean
 }): React.JSX.Element {
   return (
     <button
@@ -331,10 +334,12 @@ export function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
         'h-[22px] w-[38px] rounded-full border transition-colors',
         checked ? 'border-accent bg-accent' : 'border-line bg-canvas',
+        disabled ? 'cursor-not-allowed opacity-40' : '',
       ].join(' ')}
     >
       <span

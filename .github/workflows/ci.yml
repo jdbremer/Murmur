@@ -60,6 +60,49 @@ jobs:
       - name: Build
         run: npm run build
 
+  # The port gate: Windows compiles the win32 native module (the check that
+  # catches an MSVC break the Mac job never sees) and Linux proves the
+  # README's promise that the app installs and tests green with no native
+  # addon at all. Style gates (lint, format) stay on the Mac job — they do
+  # not vary by OS.
+  gate-ports:
+    name: typecheck · test · build (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      # The repo is LF; stop the Windows runner's autocrlf from rewriting it.
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # npm treats @murmur/native as optional, so a broken compile during
+      # `npm ci` is silently skipped — this explicit build is what fails loud.
+      - name: Build the native module (Windows)
+        if: runner.os == 'Windows'
+        run: npm run native:build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
   sidecars:
     name: sidecar binaries (on demand + weekly)
     runs-on: macos-14

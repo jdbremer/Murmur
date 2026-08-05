@@ -9,6 +9,7 @@ import {
 
 import { createLogger, type Logger } from '../logging'
 import type { ModelManager } from '../models/manager'
+import { allSidecarPresence } from './install-sidecar'
 import { LlamaCppPolishEngine } from './polish/llama-cpp'
 import { ExternalPolishEngine } from './polish/external'
 import { OnnxRuntimeEngine } from './stt/onnx-runtime'
@@ -40,6 +41,8 @@ export interface EngineCoordinatorOptions {
   models: ModelManager
   resourcesPath: string
   appPath: string
+  /** Writable install root — where the in-app sidecar installer can land. */
+  userDataPath?: string
   /** Directory holding the built main bundles, for the ONNX utility process. */
   hostDirectory: string
   dictionary(): readonly string[]
@@ -58,6 +61,14 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
   #unsubscribePolish: (() => void) | null = null
   /** Serialises `apply()` calls so two settings changes cannot interleave. */
   #applying: Promise<void> = Promise.resolve()
+  /**
+   * `status()` is called on Hub mount, by every `engines.changed` subscriber
+   * and by `debug.snapshot`; probing the filesystem each time put up to six
+   * synchronous `accessSync` calls on the main thread — a stall long enough to
+   * freeze the Bar when `MURMUR_SIDECAR_DIR` points at a slow or network path.
+   * Invalidated whenever engines are re-applied or a sidecar is installed.
+   */
+  #sidecarCache: ReturnType<typeof allSidecarPresence> | null = null
 
   constructor(options: EngineCoordinatorOptions) {
     super()
@@ -65,8 +76,25 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
     this.#log = options.log ?? createLogger('engines')
   }
 
+  /** Drop the cached sidecar probe — call after anything that installs one. */
+  invalidateSidecarCache(): void {
+    this.#sidecarCache = null
+  }
+
   status(): EnginesStatus {
-    return { stt: this.#sttStatus, polish: this.#polishStatus }
+    const sidecars = (this.#sidecarCache ??= allSidecarPresence(
+      this.#options.resourcesPath,
+      this.#options.appPath,
+      this.#options.userDataPath,
+    ))
+    return {
+      stt: this.#sttStatus,
+      polish: this.#polishStatus,
+      sidecars: {
+        whisper: { installed: sidecars.whisper.installed },
+        llama: { installed: sidecars.llama.installed },
+      },
+    }
   }
 
   /** The STT engine, if one is loaded. The orchestrator asks per utterance. */
@@ -90,6 +118,8 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
   }
 
   async #applyNow(settings: Settings): Promise<void> {
+    // A re-apply is the one moment a binary may have appeared since the probe.
+    this.#sidecarCache = null
     await this.#applyStt(settings)
     await this.#applyPolish(settings)
   }

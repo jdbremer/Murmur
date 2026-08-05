@@ -34,3 +34,6 @@ packages/native/prebuilds/
 # logs
 *.log
 npm-debug.log*
+
+# agent control loop (screenshots, session, local server meta)
+.agent/

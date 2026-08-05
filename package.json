@@ -21,15 +21,19 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "native:build": "npm --prefix packages/native run build"
+    "native:build": "npm --prefix packages/native run build",
+    "agent:server": "node scripts/agent/server.mjs",
+    "agent": "node scripts/agent/cli.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@nut-tree-fork/nut-js": "4.2.6",
     "@types/node": "^24.13.3",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.9.0",
+    "playwright-core": "1.62.1",
     "prettier": "^3.9.6",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.66.0"

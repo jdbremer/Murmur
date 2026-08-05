@@ -10,7 +10,11 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 ## Status
 
-**Working, on real hardware.** Hold `fn`, speak, release — polished text lands in the frontmost app. Verified end to end on an M5 Pro (macOS 27): a 7-second utterance transcribes in ~550 ms (Whisper large-v3-turbo, Metal), polishes in ~1 s (Gemma 3 4B), and is inserted about 1.3 s after release — inside PLAN §7.3's target. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)**; remaining work is tracked in **[HANDOFF.md](./HANDOFF.md)**.
+**Working on macOS (field-proven).** Hold `fn`, speak, release — polished text lands in the frontmost app. Windows port is in progress with native hook, paste, whisper/llama sidecars, and Models install UX. The full plan lives in **[PLAN.md](./PLAN.md)**. Remaining work:
+
+- **[HANDOFF.md](./HANDOFF.md)** — product-wide backlog
+- **[MAC-HANDOFF.md](./MAC-HANDOFF.md)** — macOS residual work
+- **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** — Windows residual work
 
 What works today:
 
@@ -20,7 +24,7 @@ What works today:
 - **The Hub**: first-run onboarding (permissions → starter models → tutorial), Models with the enforced US-only catalog, History with FTS5 search and stats, Dictionary, per-app-category Style, Settings (hotkey, mic picker, language, retention), Help with live permission/engine/capture status.
 - **CI**: the full gate on macOS arm64 per push/PR; sidecar builds on demand and weekly.
 
-Still to come, in order: llama.cpp pin bump so polishing gets Metal on macOS 27 (runs on CPU today), streaming partial transcripts in the Bar (M5), voice punctuation commands, snippets, packaging (M6). See [HANDOFF.md](./HANDOFF.md).
+Still to come: app-wide items in [HANDOFF.md](./HANDOFF.md) (spoken language UX, Parakeet catalog, History tab, insert-copy fallback); llama Metal pin on macOS 27; Windows packaging. See also [MAC-HANDOFF.md](./MAC-HANDOFF.md) and [WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md).
 
 ## Development
 
@@ -33,16 +37,38 @@ npm test             # vitest
 npm run lint         # eslint (flat config) — `npm run format` for prettier
 ```
 
+### Building a Mac app (DMG)
+
+```bash
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:mac --workspace @murmur/desktop
+```
+
+Writes `apps/desktop/release/Murmur-<version>-arm64.dmg` (and an x64 one).
+Open it and drag Murmur to Applications.
+
+That env var skips code signing, which is what makes this runnable without a
+Developer ID. The result is fine on the machine that built it and **not**
+distributable: Gatekeeper blocks an unsigned app that arrives from anywhere
+else, and because macOS keys Accessibility and Input Monitoring grants to the
+code signature, an ad-hoc signed build can lose its permissions on every
+rebuild. Drop the variable once a Developer ID is configured — `hardenedRuntime`,
+the entitlements and notarisation are already declared in
+`apps/desktop/electron-builder.yml`.
+
+Sidecars are not bundled, so a fresh install transcribes nothing until
+`whisper-server` / `llama-server` are on disk (`scripts/sidecars/build-*.sh`)
+and a model is downloaded from the Hub.
+
 ### Layout
 
-| Path                | What lives there                                                                        |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `apps/desktop`      | The Electron app: `src/main`, `src/preload`, `src/renderer/{hub,bar,audio}`             |
-| `packages/shared`   | `@murmur/shared` — domain types, zod schemas, catalog policy, the typed IPC contract    |
-| `packages/native`   | `@murmur/native` — the macOS-only N-API addon (hotkey tap, text insertion, permissions) |
-| `resources/catalog` | `models.json`, validated against the origin policy every time it loads                  |
-| `scripts/sidecars`  | Build universal `whisper-server` / `llama-server` binaries — macOS only                 |
-| `scripts/models`    | The first-party Parakeet NeMo→ONNX export we will run before listing it                 |
+| Path                | What lives there                                                                                      |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `apps/desktop`      | The Electron app: `src/main`, `src/preload`, `src/renderer/{hub,bar,audio}`                           |
+| `packages/shared`   | `@murmur/shared` — domain types, zod schemas, catalog policy, the typed IPC contract                  |
+| `packages/native`   | `@murmur/native` — the macOS + Windows N-API addon (hotkey, text insertion, permissions)              |
+| `resources/catalog` | `models.json`, validated against the origin policy every time it loads                                |
+| `scripts/sidecars`  | `whisper-server` / `llama-server` binaries — `.sh` builds macOS universal, `.ps1` fetches Windows x64 |
+| `scripts/models`    | The first-party Parakeet NeMo→ONNX export we will run before listing it                               |
 
 Inside `apps/desktop/src/main`:
 
@@ -81,9 +107,9 @@ touching the app: signal, `say` a sentence, signal again.
 
 ### macOS vs. other platforms
 
-Murmur ships on macOS first; Windows and Linux ports are planned post-1.0 (PLAN.md §4.1). Everything platform-specific — the `fn`-key event tap, clipboard-swap text insertion, secure-input detection, the permission prompts — is isolated in `@murmur/native`, which for now is compiled only on macOS (`"os": ["darwin"]`) and referenced as an _optional_ dependency.
+Murmur ships on macOS first; the Windows port is underway (PLAN.md §4.1, [WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)) and Linux is planned post-1.0. Everything platform-specific — the `fn`-key event tap / Right-Ctrl low-level hook, clipboard-swap text insertion, secure-input detection, the permission prompts — is isolated in `@murmur/native`, which compiles on macOS and Windows (`"os": ["darwin", "win32"]`) and is referenced as an _optional_ dependency.
 
-You can still develop on Linux or Windows today. `npm install` skips the native package there, and the app loads a typed no-op stub in its place, so `npm run dev` boots and the UI, IPC and state machine all work. Dictation itself does not: the stub reports `available: false`, every permission reads `unavailable`, and text insertion refuses. macOS-only Electron calls (the Bar's `visibleOnFullScreen`, the Hub's inset title bar) are guarded, not assumed.
+You can still develop on Linux today (or anywhere the addon is unavailable). `npm install` skips the native package there, and the app loads a typed no-op stub in its place, so `npm run dev` boots and the UI, IPC and state machine all work. Dictation itself does not: the stub reports `available: false`, every permission reads `unavailable`, and text insertion refuses. macOS-only Electron calls (the Bar's `visibleOnFullScreen`, the Hub's inset title bar) are guarded, not assumed.
 
 To build the addon on a Mac:
 
