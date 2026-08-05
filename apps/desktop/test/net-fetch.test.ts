@@ -8,8 +8,11 @@ import {
   isAllowedHost,
   isLoopbackHost,
   isPrivateHost,
+  isSidecarReleaseHost,
   loopbackFetch,
   NonLoopbackHostError,
+  sidecarReleaseFetch,
+  sidecarReleaseHosts,
 } from '../src/main/net/fetch'
 
 /**
@@ -54,6 +57,55 @@ describe('isAllowedHost', () => {
   it('publishes the list for the Help panel', () => {
     expect(allowedHosts()).toContain('huggingface.co')
     expect(allowedHosts().some((host) => host.startsWith('*'))).toBe(true)
+  })
+})
+
+describe('sidecar release hosts', () => {
+  /**
+   * The sidecar install fetches an *executable*, so it gets its own list rather
+   * than widening the model allowlist — "we only talk to Hugging Face" has to
+   * keep meaning what the Help panel says it means.
+   */
+  it('allows GitHub releases and their asset CDN, nothing else', () => {
+    expect(isSidecarReleaseHost('github.com')).toBe(true)
+    expect(isSidecarReleaseHost('objects.githubusercontent.com')).toBe(true)
+    expect(isSidecarReleaseHost('GitHub.com')).toBe(true)
+    expect(isSidecarReleaseHost('evil.example')).toBe(false)
+    // Must not inherit the model allowlist, or the separation is decorative.
+    expect(isSidecarReleaseHost('huggingface.co')).toBe(false)
+    // And the model allowlist must not inherit these.
+    expect(isAllowedHost('github.com')).toBe(false)
+    expect(sidecarReleaseHosts()).toContain('github.com')
+  })
+
+  it('re-validates every redirect hop instead of following blindly', async () => {
+    // A release asset always redirects; `redirect: 'follow'` would let hop #2
+    // land anywhere at all, which is the whole point of doing this manually.
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(302, 'https://evil.example/payload.zip'))
+
+    await expect(
+      sidecarReleaseFetch('https://github.com/o/r/releases/download/v1/x.zip', { fetchImpl }),
+    ).rejects.toThrow(BlockedHostError)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('follows a redirect that stays on an allowed asset host', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response(302, 'https://objects.githubusercontent.com/x.zip'))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }))
+
+    const result = await sidecarReleaseFetch('https://github.com/o/r/releases/download/v1/x.zip', {
+      fetchImpl,
+    })
+    expect(result.status).toBe(200)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses plain http', async () => {
+    await expect(sidecarReleaseFetch('http://github.com/x.zip')).rejects.toThrow(BlockedHostError)
   })
 })
 

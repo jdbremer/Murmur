@@ -7,15 +7,29 @@
  * machine-readable state — without a human at the keyboard.
  *
  *   node scripts/agent/server.mjs          # listens on 127.0.0.1:17321
- *   curl http://127.0.0.1:17321/health
- *   curl -X POST http://127.0.0.1:17321/start
- *   curl -X POST http://127.0.0.1:17321/screenshot -d "{\"name\":\"hub\"}"
+ *   curl -H "x-murmur-agent-token: $(jq -r .token .agent/server.json)" \
+ *        http://127.0.0.1:17321/health
  *
  * State + screenshots land in .agent/ (gitignored).
+ *
+ * ## Why this is authenticated
+ *
+ * Binding to loopback keeps other machines out; it does **not** keep the
+ * developer's own browser out. Every route here is high-authority —
+ * `/evaluate` runs arbitrary JS in a renderer holding the full `window.murmur`
+ * IPC surface, and `/desktop/type` injects real keystrokes into whatever window
+ * has focus. Without a token, any web page open in any browser could POST here
+ * with `content-type: text/plain` (no CORS preflight, so the request is sent
+ * and the side effect lands even though the reply is unreadable).
+ *
+ * So: a per-run token in `.agent/server.json` (gitignored, mode 0600) is
+ * required on every request, and requests carrying a browser `Origin` or
+ * `Referer` are refused outright. `cli.mjs` reads the file.
  */
 
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,6 +55,31 @@ const HOST = '127.0.0.1'
 const CDP_PORT = Number(process.env.MURMUR_CDP_PORT || 9222)
 
 mkdirSync(SHOT_DIR, { recursive: true })
+
+const TOKEN = process.env.MURMUR_AGENT_TOKEN || randomBytes(24).toString('hex')
+const META_PATH = join(AGENT_DIR, 'server.json')
+
+/** Constant-time compare that tolerates length mismatch without throwing. */
+function tokenMatches(candidate) {
+  if (typeof candidate !== 'string') return false
+  const a = Buffer.from(candidate)
+  const b = Buffer.from(TOKEN)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
+/**
+ * Reject anything that smells like a browser fetch. A real CLI/agent client
+ * never sends Origin or Referer; a page doing drive-by CSRF always does.
+ */
+function authorize(req) {
+  if (req.headers.origin || req.headers.referer) return 'browser-origin'
+  const host = String(req.headers.host || '')
+  if (host !== `${HOST}:${PORT}` && host !== `localhost:${PORT}`) return 'bad-host'
+  const header = req.headers['x-murmur-agent-token']
+  const supplied = Array.isArray(header) ? header[0] : header
+  return tokenMatches(supplied) ? null : 'bad-token'
+}
 
 /** @type {import('playwright').ElectronApplication | null} */
 let electronApp = null
@@ -394,6 +433,14 @@ async function utterance(body = {}) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${HOST}:${PORT}`)
   const path = url.pathname
+  const denied = authorize(req)
+  if (denied) {
+    return json(res, 403, {
+      ok: false,
+      error: denied,
+      detail: 'Send the token from .agent/server.json as x-murmur-agent-token.',
+    })
+  }
   try {
     if (req.method === 'GET' && path === '/health') {
       return json(res, 200, {
@@ -536,13 +583,22 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   log(`listening on http://${HOST}:${PORT}`)
   writeFileSync(
-    join(AGENT_DIR, 'server.json'),
+    META_PATH,
     JSON.stringify(
-      { host: HOST, port: PORT, pid: process.pid, startedAt: new Date().toISOString() },
+      {
+        host: HOST,
+        port: PORT,
+        pid: process.pid,
+        token: TOKEN,
+        startedAt: new Date().toISOString(),
+      },
       null,
       2,
     ),
+    // Owner-only: this file is the credential for every route above.
+    { mode: 0o600 },
   )
+  log(`token written to ${META_PATH}`)
 })
 
 async function shutdown() {

@@ -11,12 +11,35 @@
  *   node scripts/agent/cli.mjs stop
  */
 
-const BASE = process.env.MURMUR_AGENT_URL || 'http://127.0.0.1:17321'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const META_PATH = join(__dirname, '..', '..', '.agent', 'server.json')
+
+/** The running server writes its port and token here; env wins for remote use. */
+function serverMeta() {
+  try {
+    return JSON.parse(readFileSync(META_PATH, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+const meta = serverMeta()
+const BASE =
+  process.env.MURMUR_AGENT_URL ||
+  (meta.host && meta.port ? `http://${meta.host}:${meta.port}` : 'http://127.0.0.1:17321')
+const TOKEN = process.env.MURMUR_AGENT_TOKEN || meta.token || ''
 
 async function req(method, path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
+    headers: {
+      ...(body ? { 'content-type': 'application/json' } : {}),
+      ...(TOKEN ? { 'x-murmur-agent-token': TOKEN } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()

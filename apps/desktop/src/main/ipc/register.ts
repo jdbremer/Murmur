@@ -143,9 +143,10 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   ipc.handle('engines.status', () => engines.status())
   ipc.handle('engines.installSidecar', async ({ which }) => {
     // Consent is gathered in the renderer (Models UI). Main only downloads.
-    const result = await installSidecarBinary(which, app.getAppPath())
+    const result = await installSidecarBinary(which, app.getAppPath(), app.getPath('userData'))
     if (result.ok) {
       // Reload engines so polish/STT pick up the new binary without restart.
+      engines.invalidateSidecarCache()
       await engines.apply(settings.get())
     }
     return result

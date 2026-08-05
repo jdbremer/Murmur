@@ -78,6 +78,20 @@ describe('sidecar binary resolution', () => {
     }
   })
 
+  it('searches the writable userData dir ahead of the repo checkout', () => {
+    // A packaged app cannot write next to its own binary, so the in-app
+    // installer lands in userData — resolution has to look there.
+    const paths = sidecarSearchPaths('/Resources', '/app', '/userData')
+    expect(paths).toContain(join('/userData', 'sidecars', 'bin'))
+    expect(paths.indexOf(join('/userData', 'sidecars', 'bin'))).toBeLessThan(
+      paths.findIndex((path) => path.includes('.sidecars')),
+    )
+  })
+
+  it('omits the userData dir when none is supplied', () => {
+    expect(sidecarSearchPaths('/Resources', '/app').some((p) => p.includes('userData'))).toBe(false)
+  })
+
   it('finds an executable binary', () => {
     const binDirectory = join(directory, 'bin')
     mkdirSync(binDirectory, { recursive: true })

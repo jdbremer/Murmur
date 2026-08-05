@@ -135,11 +135,18 @@ export function isExecutable(path: string): boolean {
  * binary is missing — a message that names a path is actionable, one that says
  * "not found" is not.
  */
-export function sidecarSearchPaths(resourcesPath: string, appPath: string): string[] {
+export function sidecarSearchPaths(
+  resourcesPath: string,
+  appPath: string,
+  userDataPath?: string,
+): string[] {
   const paths: string[] = []
   const override = process.env['MURMUR_SIDECAR_DIR']
   if (override) paths.push(override)
   paths.push(join(resourcesPath, 'bin'))
+  // Where the in-app installer can actually write once the app is packaged:
+  // the install directory itself is read-only for a standard user.
+  if (userDataPath) paths.push(join(userDataPath, 'sidecars', 'bin'))
   paths.push(join(appPath, '..', '..', '.sidecars', 'bin'))
   return paths
 }
@@ -160,8 +167,9 @@ export function resolveSidecarBinary(
   name: string,
   resourcesPath: string,
   appPath: string,
+  userDataPath?: string,
 ): { path: string | null; searched: string[] } {
-  const searched = sidecarSearchPaths(resourcesPath, appPath)
+  const searched = sidecarSearchPaths(resourcesPath, appPath, userDataPath)
   const names = sidecarBinaryNames(name)
   for (const directory of searched) {
     for (const fileName of names) {
@@ -278,6 +286,11 @@ export class SidecarProcess {
       // Own process group on POSIX so SIGKILL reaches any workers it forked.
       // Windows has no real process groups for this pattern; keep attached.
       detached: process.platform !== 'win32',
+      // whisper-server.exe / llama-server.exe are console-subsystem binaries:
+      // spawned from a GUI process with no console, Windows would allocate and
+      // *show* one, which sits on the desktop for the sidecar's whole life and
+      // steals focus the moment it appears — mid-dictation.
+      windowsHide: true,
     })
     this.#child = child
 

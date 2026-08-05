@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
 } from 'node:fs'
@@ -15,6 +16,7 @@ import { Readable } from 'node:stream'
 import { type ReadableStream as WebReadableStream } from 'node:stream/web'
 
 import { createLogger } from '../logging'
+import { sidecarReleaseFetch } from '../net/fetch'
 import { resolveSidecarBinary } from './sidecar'
 
 const execFileAsync = promisify(execFile)
@@ -29,12 +31,24 @@ export interface SidecarPresence {
 }
 
 /**
+ * A release tag goes straight into the download URL, so anything that could
+ * escape the pinned repo path (`../../other-org/other-repo/...`) must not
+ * survive. Env overrides exist for pin experiments, not for redirection.
+ */
+function safeTag(value: string | undefined, fallback: string): string {
+  if (value === undefined) return fallback
+  if (/^[A-Za-z0-9._-]+$/.test(value) && !value.includes('..')) return value
+  log.warn(`ignoring malformed release tag "${value}" — using ${fallback}`)
+  return fallback
+}
+
+/**
  * Official release pins (PLAN §16). Overridable via env for experiments.
  * llama tag is a build number; whisper is a semver tag.
  */
 const PINS = {
   'whisper-server': {
-    tag: process.env['WHISPER_TAG'] ?? 'v1.9.2',
+    tag: safeTag(process.env['WHISPER_TAG'], 'v1.9.2'),
     // ggml-org/whisper.cpp releases
     url: (tag: string) =>
       `https://github.com/ggml-org/whisper.cpp/releases/download/${tag}/whisper-bin-x64.zip`,
@@ -52,23 +66,33 @@ export function sidecarPresence(
   which: SidecarKind,
   resourcesPath: string,
   appPath: string,
+  userDataPath?: string,
 ): SidecarPresence {
-  const { path, searched } = resolveSidecarBinary(which, resourcesPath, appPath)
+  const { path, searched } = resolveSidecarBinary(which, resourcesPath, appPath, userDataPath)
   return { installed: path !== null, path, searched }
 }
 
 export function allSidecarPresence(
   resourcesPath: string,
   appPath: string,
+  userDataPath?: string,
 ): { whisper: SidecarPresence; llama: SidecarPresence } {
   return {
-    whisper: sidecarPresence('whisper-server', resourcesPath, appPath),
-    llama: sidecarPresence('llama-server', resourcesPath, appPath),
+    whisper: sidecarPresence('whisper-server', resourcesPath, appPath, userDataPath),
+    llama: sidecarPresence('llama-server', resourcesPath, appPath, userDataPath),
   }
 }
 
-/** Dev install dir: repo `.sidecars/bin`. Packaged apps use resources/bin via extraResources later. */
-export function defaultSidecarInstallDir(appPath: string): string {
+/**
+ * Where an install may write.
+ *
+ * Unpackaged: the repo's `.sidecars/bin`, so a dev build shares one copy with
+ * the build scripts. Packaged: under userData — the app's own install
+ * directory is `C:\Program Files\...` or `/Applications/...`, which a standard
+ * user cannot write, and an EPERM there surfaces as a raw errno in the UI.
+ */
+export function defaultSidecarInstallDir(appPath: string, userDataPath?: string): string {
+  if (userDataPath) return join(userDataPath, 'sidecars', 'bin')
   // electron-vite: appPath is apps/desktop → repo is ../..
   return join(appPath, '..', '..', '.sidecars', 'bin')
 }
@@ -82,12 +106,35 @@ export interface InstallSidecarResult {
 }
 
 /**
- * Download an official Windows prebuild and unpack into `.sidecars/bin`.
+ * One install per sidecar at a time. Two overlapping downloads write the same
+ * zip path with interleaved bytes, and the corrupt archive then poisons the
+ * cache for every later attempt.
+ */
+const inFlight = new Map<SidecarKind, Promise<InstallSidecarResult>>()
+
+/**
+ * Download an official Windows prebuild and unpack into the install dir.
  * Only runs on win32; other platforms return a clear error (use build-*.sh).
  */
-export async function installSidecarBinary(
+export function installSidecarBinary(
   which: SidecarKind,
   appPath: string,
+  userDataPath?: string,
+): Promise<InstallSidecarResult> {
+  const existing = inFlight.get(which)
+  if (existing) return existing
+
+  const run = installSidecarBinaryUncoordinated(which, appPath, userDataPath).finally(() => {
+    inFlight.delete(which)
+  })
+  inFlight.set(which, run)
+  return run
+}
+
+async function installSidecarBinaryUncoordinated(
+  which: SidecarKind,
+  appPath: string,
+  userDataPath?: string,
 ): Promise<InstallSidecarResult> {
   if (process.platform !== 'win32') {
     return {
@@ -96,14 +143,16 @@ export async function installSidecarBinary(
       path: null,
       error: 'unsupported-platform',
       detail:
-        'In-app sidecar install is Windows-only for now. Use scripts/sidecars/build-*.sh on macOS.',
+        'In-app sidecar install is Windows-only for now. Use scripts/sidecars/build-*.sh on macOS or Linux.',
     }
   }
 
   const pin = PINS[which]
   const url = pin.url(pin.tag)
-  const outDir = defaultSidecarInstallDir(appPath)
-  const cacheDir = join(appPath, '..', '..', '.sidecars', 'cache')
+  const outDir = defaultSidecarInstallDir(appPath, userDataPath)
+  const cacheDir = userDataPath
+    ? join(userDataPath, 'sidecars', 'cache')
+    : join(appPath, '..', '..', '.sidecars', 'cache')
   mkdirSync(outDir, { recursive: true })
   mkdirSync(cacheDir, { recursive: true })
 
@@ -157,6 +206,10 @@ export async function installSidecarBinary(
       }
     }
 
+    // The extracted tree is a full second copy of the release; the binaries
+    // are installed now, so there is no reason to leave it on disk.
+    rmSync(extractDir, { recursive: true, force: true })
+
     log.info(`installed ${destExe}`)
     return {
       ok: true,
@@ -178,14 +231,35 @@ export async function installSidecarBinary(
   }
 }
 
+/**
+ * Download to a `.part` file and rename only on success.
+ *
+ * A truncated zip left at the final path would be indistinguishable from a
+ * good one on the next run — the cache check would hand Expand-Archive a
+ * broken archive forever, and the only cure would be finding the cache dir by
+ * hand.
+ */
 async function downloadFile(url: string, dest: string): Promise<void> {
-  const response = await fetch(url, { redirect: 'follow' })
+  const partial = `${dest}.part`
+  const response = await sidecarReleaseFetch(url)
   if (!response.ok || !response.body) {
     throw new Error(`Download failed (${response.status}) for ${url}`)
   }
-  // Node 18+ fetch body is a web stream; convert for pipeline.
-  const nodeStream = Readable.fromWeb(response.body as WebReadableStream)
-  await pipeline(nodeStream, createWriteStream(dest))
+  try {
+    // Node 18+ fetch body is a web stream; convert for pipeline.
+    const nodeStream = Readable.fromWeb(response.body as WebReadableStream)
+    await pipeline(nodeStream, createWriteStream(partial))
+
+    // Trust the server's own length over a half-written file.
+    const expected = Number(response.headers.get('content-length') ?? 0)
+    if (expected > 0 && statSync(partial).size !== expected) {
+      throw new Error(`Download truncated: got ${statSync(partial).size} of ${expected} bytes`)
+    }
+    renameSync(partial, dest)
+  } catch (error) {
+    rmSync(partial, { force: true })
+    throw error
+  }
 }
 
 function findFile(root: string, names: readonly string[]): { path: string; dir: string } | null {

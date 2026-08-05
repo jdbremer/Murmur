@@ -49,7 +49,27 @@ npm run agent -- snapshot
 npm run agent -- stop
 ```
 
-Artifacts: `.agent/screenshots/` · `.agent/session.json` (gitignored)
+Artifacts: `.agent/screenshots/` · `.agent/session.json` · `.agent/server.json` (gitignored)
+
+## Auth
+
+Every route needs the per-run token the server writes to `.agent/server.json`
+(mode 0600), sent as `x-murmur-agent-token`. `cli.mjs` reads it for you.
+Requests carrying an `Origin` or `Referer` header are refused outright.
+
+Loopback binding is not access control here: `/evaluate` runs arbitrary JS in a
+renderer that holds the whole `window.murmur` IPC surface, and `/desktop/type`
+injects real keystrokes into whatever window has focus. Any page in any browser
+the developer has open can POST to `127.0.0.1` without a CORS preflight, so the
+token — not the bind address — is what keeps a visited web page from driving the
+app and the keyboard.
+
+```bash
+curl -H "x-murmur-agent-token: $(jq -r .token .agent/server.json)" \
+     http://127.0.0.1:17321/health
+```
+
+Set `MURMUR_AGENT_TOKEN` to pin a known value (CI, remote driving).
 
 ## Tool map (agent-facing)
 

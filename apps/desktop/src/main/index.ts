@@ -49,7 +49,11 @@ import { WindowManager } from './windows/manager'
 
 const log = createLogger('app')
 const isDev = !app.isPackaged
-const isAgent = process.env['MURMUR_AGENT'] === '1'
+// Unpackaged only, deliberately: the agent profile auto-approves the
+// microphone and relocates userData to a fixed, world-readable temp path.
+// A packaged build must never honour an environment variable that turns those
+// on — a login item or `launchctl setenv` would be enough to arm it.
+const isAgent = isDev && process.env['MURMUR_AGENT'] === '1'
 
 // The workspace package is called `@murmur/desktop`, which Electron would
 // otherwise use for the user-data directory. Name it before anything reads
@@ -142,6 +146,7 @@ async function bootstrap(): Promise<void> {
     models,
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
+    userDataPath: app.getPath('userData'),
     hostDirectory: __dirname,
     dictionary: () => dictionary.enabled().map((entry) => entry.term),
   })

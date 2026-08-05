@@ -25,6 +25,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -196,20 +197,32 @@ bool IsPasswordClassHwnd(HWND hwnd) {
   char className[128] = {};
   GetClassNameA(hwnd, className, static_cast<int>(sizeof(className)));
 
+  // Some hosts use a dedicated class name without ES_PASSWORD on the outer HWND.
+  if (strstr(className, "PasswordBox") != nullptr) return true;  // WPF
+
+  // ES_PASSWORD (0x0020) is only meaningful for Edit controls — the low style
+  // bits are class-specific, and 0x0020 collides with BS_LEFTTEXT,
+  // LVS_SORTDESCENDING, CBS_OWNERDRAWVARIABLE and LBS_NOREDRAW. Testing it on
+  // any focused window would refuse to type into ordinary checkboxes and lists.
+  const bool isEditClass = _stricmp(className, "Edit") == 0 ||
+                           _strnicmp(className, "RichEdit", 8) == 0 ||
+                           _stricmp(className, "TEdit") == 0;
+  if (!isEditClass) return false;
+
   const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
   // Win32 / WinForms TextBox.UseSystemPasswordChar / many password dialogs.
   if ((style & ES_PASSWORD) != 0) return true;
 
-  // Some hosts use a dedicated class name without ES_PASSWORD on the outer HWND.
-  if (_stricmp(className, "PasswordBox") == 0) return true;          // WPF
-  if (strstr(className, "PasswordBox") != nullptr) return true;
-
-  // EM_GETPASSWORDCHAR: non-zero means the edit is masking input.
-  // Works for Edit/RichEdit across processes when the message is allowed.
-  const LRESULT passwordChar = SendMessageW(hwnd, EM_GETPASSWORDCHAR, 0, 0);
-  if (passwordChar != 0) return true;
-
-  return false;
+  // EM_GETPASSWORDCHAR: non-zero means the edit is masking input. This crosses
+  // a process boundary and runs on the Electron main thread at every dictation
+  // begin, so it must time out: a plain SendMessageW to a hung foreground app
+  // would freeze the tray, the Bar and all IPC for as long as that app is wedged.
+  DWORD_PTR passwordChar = 0;
+  if (SendMessageTimeoutW(hwnd, EM_GETPASSWORDCHAR, 0, 0,
+                          SMTO_ABORTIFHUNG | SMTO_BLOCK, 50, &passwordChar) == 0) {
+    return false;  // no answer in 50 ms — treat as "not proven secure"
+  }
+  return passwordChar != 0;
 }
 
 Napi::Value IsSecureInputActive(const Napi::CallbackInfo& info) {
@@ -255,17 +268,16 @@ Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
 
   if (imageName.empty()) return env.Null();
 
-  // Window title as friendly name (best-effort).
-  wchar_t titleW[512] = {};
-  GetWindowTextW(hwnd, titleW, 512);
-  char title[512] = {};
-  WideCharToMultiByte(CP_UTF8, 0, titleW, -1, title, 512, nullptr, nullptr);
-
+  // Deliberately NOT the window title. Titles carry document names, URLs and
+  // email subjects; the mac side says so in as many words ("No window titles,
+  // no screen content — this is the whole of what Murmur learns about the
+  // target app"), and onboarding promises users "the bundle id, nothing else".
+  // The process image name is all the category map needs.
   Napi::Object result = Napi::Object::New(env);
   // Reuse bundleId field as process image name (orchestrator category map will
   // grow Windows process patterns separately).
   result.Set("bundleId", Napi::String::New(env, imageName));
-  result.Set("name", Napi::String::New(env, title[0] ? title : imageName.c_str()));
+  result.Set("name", Napi::String::New(env, imageName));
   return result;
 }
 
@@ -585,6 +597,16 @@ void TearDownHook() {
   }
 }
 
+// Runs when the environment is torn down (app quit, or a reload in dev). The
+// hook thread must not outlive the callback it posts into: without this, an
+// exit path that skips stopHotkeyListener leaves the thread alive calling into
+// a thread-safe function N-API is finalizing — the same use-after-free the mac
+// tap teardown was fixed for.
+void ModuleCleanup(void* /*arg*/) {
+  TearDownHook();
+  ReleaseCallback();
+}
+
 HotkeyKind ParseWinKind(const std::string& key) {
   if (key == "rightCtrl") return HotkeyKind::RightCtrl;
   if (key == "ctrlSpace") return HotkeyKind::CtrlSpace;
@@ -664,9 +686,15 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
 
 Napi::Value ReleaseHotkeyLatch(const Napi::CallbackInfo& info) {
   const bool wasDown = gHotkeyDown.exchange(false);
-  // If Space is still physically down (or the OS still thinks it is), force a
-  // KEYUP into the input stream so the key cannot stick in other apps.
-  if (wasDown || (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0) {
+  // Only a Space chord can leave a *swallowed* Space down in the input stream,
+  // and only if we were actually latched. Injecting on the strength of
+  // GetAsyncKeyState alone would synthesize a key the user is physically
+  // holding — this is called on every cancel, every failure and at boot, so on
+  // the Right Ctrl default it would cut short someone's real spacebar press.
+  // The contract (native/interface.ts) is explicit: no synthesized user keys.
+  const bool spaceChord =
+      gConfig.kind == HotkeyKind::CtrlSpace || gConfig.kind == HotkeyKind::AltSpace;
+  if (wasDown && spaceChord && (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0) {
     InjectKeyUp(VK_SPACE);
   }
   return info.Env().Undefined();
@@ -779,6 +807,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   permissions.Set("openSettings", Napi::Function::New(env, PermissionsOpenSettings));
   exports.Set("permissions", permissions);
 
+  napi_add_env_cleanup_hook(env, ModuleCleanup, nullptr);
   return exports;
 }
 
