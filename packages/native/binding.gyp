@@ -39,7 +39,13 @@
                 "AdditionalOptions": ["/std:c++20"]
               }
             },
-            "libraries": ["user32.lib", "shell32.lib"]
+            "libraries": [
+              "user32.lib",
+              "shell32.lib",
+              "ole32.lib",
+              "oleaut32.lib",
+              "uuid.lib"
+            ]
           }
         ]
       ]

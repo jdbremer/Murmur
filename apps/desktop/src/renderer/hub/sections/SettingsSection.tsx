@@ -160,11 +160,20 @@ export function SettingsSection(): React.JSX.Element {
         </Row>
         <Row
           label="Edit selected text by voice"
-          hint="Hold your key with text selected and speak an instruction — the selection is rewritten in place. Needs a polishing model."
+          hint={
+            isMac
+              ? 'Hold your key with text selected and speak an instruction — the selection is rewritten in place. Needs a polishing model.'
+              : // Reading the selection needs an accessibility call the Windows
+                // and Linux backends do not implement yet, so the feature can
+                // never fire there. A toggle that does nothing is worse than an
+                // honest disabled one.
+                'Reading the current selection is macOS-only for now, so this cannot run on this platform yet.'
+          }
         >
           <Toggle
             label="Edit selected text by voice"
-            checked={settings.commandModeEnabled}
+            checked={isMac && settings.commandModeEnabled}
+            disabled={!isMac}
             onChange={(commandModeEnabled) => void update({ commandModeEnabled })}
           />
         </Row>

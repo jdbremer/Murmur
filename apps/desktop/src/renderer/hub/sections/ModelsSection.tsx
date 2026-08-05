@@ -514,18 +514,21 @@ function SidecarInstallCard({
   const [note, setNote] = useState<string | null>(null)
 
   const install = async (): Promise<void> => {
+    // Ask *before* going busy: setting it first put the button in its
+    // "Installing…" state behind the modal, so the confirm appeared over a UI
+    // claiming work had already started.
+    const ok = window.confirm(
+      which === 'llama-server'
+        ? 'Install llama-server so polishing models (Gemma, etc.) can run locally?\n\nMurmur will download an official Windows build from ggml-org/llama.cpp (a few hundred MB). Nothing leaves your machine except this download.'
+        : 'Install whisper-server so speech-to-text models can run locally?\n\nMurmur will download an official Windows build from ggml-org/whisper.cpp.',
+    )
+    if (!ok) return
+
     setBusy(true)
-    setNote(null)
+    // Several hundred megabytes with no progress channel: without this the
+    // button just sits there, indistinguishable from a hang.
+    setNote('Downloading… this can take a few minutes.')
     try {
-      const ok = window.confirm(
-        which === 'llama-server'
-          ? 'Install llama-server so polishing models (Gemma, etc.) can run locally?\n\nMurmur will download an official Windows build from ggml-org/llama.cpp (a few hundred MB). Nothing leaves your machine except this download.'
-          : 'Install whisper-server so speech-to-text models can run locally?\n\nMurmur will download an official Windows build from ggml-org/whisper.cpp.',
-      )
-      if (!ok) {
-        setBusy(false)
-        return
-      }
       const result = await window.murmur.engines.installSidecar({ which })
       if (result.ok) {
         setNote(result.detail)

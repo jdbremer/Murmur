@@ -13,6 +13,7 @@ import type {
   DictionaryRepository,
   StyleRepository,
 } from '../store/repositories'
+import type { TextInjector } from '../dictation/injector'
 import type { WindowManager } from '../windows/manager'
 import type { CaptureController } from '../audio/controller'
 import type { AudioCaptureStatus, AudioDeviceList } from '@murmur/shared'
@@ -49,13 +50,7 @@ export interface IpcContext {
   /** Mic stream controller — Dev tools re-warm through this. */
   audio: CaptureController
   /** Real paste path — exposed to Dev/agent for G5 insert proof. */
-  injector: {
-    insert: (text: string) => {
-      ok: boolean
-      method: 'paste' | 'accessibility' | 'none'
-      error?: string
-    }
-  }
+  injector: Pick<TextInjector, 'insert'>
   dictations: DictationsRepository
   dictionary: DictionaryRepository
   style: StyleRepository

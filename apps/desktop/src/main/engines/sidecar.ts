@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:net'
 import { accessSync, constants } from 'node:fs'
@@ -433,16 +433,31 @@ export class SidecarProcess {
   /**
    * Signal the whole process group (negative pid) so forked workers die too;
    * fall back to the pid alone if the group is already gone.
-   * On Windows, process-group signals are not portable — kill the child only.
+   *
+   * Windows has no process groups for this pattern and maps every signal to
+   * `TerminateProcess`, so the SIGTERM→SIGKILL escalation carries no meaning
+   * there. What does matter is reaching the *tree*: llama-server spawns
+   * workers, and `child.kill()` alone leaves them holding several GB of model
+   * memory and the port. `taskkill /T` is the portable way to get all of them.
    */
   #signal(child: ChildProcess, signal: NodeJS.Signals): void {
     const { pid } = child
     if (pid === undefined) return
     if (process.platform === 'win32') {
       try {
-        child.kill(signal)
+        // /T = tree, /F = force. Escalation is meaningless on Windows, so the
+        // first ask is already the last one.
+        execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        })
       } catch {
-        /* already gone */
+        // taskkill missing, access denied, or the process is already gone.
+        try {
+          child.kill(signal)
+        } catch {
+          /* already gone */
+        }
       }
       return
     }

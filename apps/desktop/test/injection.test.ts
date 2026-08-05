@@ -235,7 +235,7 @@ describe('HotkeyBridge (PLAN §2.1, §4)', () => {
     const intents: string[] = []
     const now = { current: 1_000 }
     const native = fakeNative({
-      startHotkeyListener: () => undefined,
+      startHotkeyListener: () => true,
       stopHotkeyListener: () => undefined,
     })
 
@@ -360,7 +360,12 @@ describe('HotkeyBridge (PLAN §2.1, §4)', () => {
 
   it('rebinds only when the config actually changed', () => {
     const starts: number[] = []
-    const native = fakeNative({ startHotkeyListener: () => starts.push(1) })
+    const native = fakeNative({
+      startHotkeyListener: () => {
+        starts.push(1)
+        return true
+      },
+    })
     const bridge = new HotkeyBridge({
       native: () => native,
       intents: { begin: () => undefined, end: () => undefined, toggleHandsFree: () => undefined },

@@ -151,7 +151,13 @@ export class WhisperCppEngine implements SttEngine {
           '--threads',
           String(this.#options.threads ?? 4),
         ]
-        if (process.platform === 'win32') args.push('--no-gpu')
+        // The Windows prebuild the in-app installer fetches is the CPU-only
+        // asset, and asking it for GPU work fails at startup. Anyone who put a
+        // CUDA/Vulkan build there themselves should get what they built, so
+        // this is an opt-out rather than a hard-coded ceiling.
+        if (process.platform === 'win32' && process.env['MURMUR_WHISPER_GPU'] !== '1') {
+          args.push('--no-gpu')
+        }
         return args
       },
     }

@@ -31,6 +31,9 @@ export function osBackend() {
 }
 
 function ps(script) {
+  if (process.platform !== 'win32') {
+    throw new Error(`PowerShell OS control is Windows-only (running on ${process.platform})`)
+  }
   const result = spawnSync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
@@ -281,7 +284,16 @@ function toSendKeysChord(keys) {
  * whose title often contains the command string ("… Notepad …").
  */
 export async function focusWindow(titleSubstring) {
-  const needle = String(titleSubstring || 'Murmur').replace(/'/g, "''")
+  // This value reaches a PowerShell script that carries inline C#. Doubling
+  // `'` is the correct escape for a single-quoted PowerShell string and is
+  // sufficient on its own, but the input arrives over HTTP, so bound it too:
+  // strip control characters (a newline would end the statement) and cap the
+  // length. Belt and braces on the one string that crosses into a shell.
+  const needle = String(titleSubstring || 'Murmur')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[ -]/g, '')
+    .slice(0, 200)
+    .replace(/'/g, "''")
   const script = `
 Add-Type @"
 using System;

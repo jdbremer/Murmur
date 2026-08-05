@@ -82,6 +82,30 @@ describe('SettingsSchema', () => {
     expect(sanitizeHotkeyForPlatform(chord, 'win32').key).toBe(WINDOWS_DEFAULT_HOTKEY_KEY)
   })
 
+  it('heals Windows-only keys on macOS, so a synced config is not a dead hotkey', () => {
+    // settings.json is portable by design, so it travels between machines.
+    // A key macOS cannot bind produces no hook and no error: the app looks
+    // configured and simply never dictates.
+    for (const key of ['rightCtrl', 'ctrlSpace', 'altSpace', 'capsLock'] as const) {
+      const windowsKey = SettingsSchema.parse({ hotkey: { key } }).hotkey
+      expect(sanitizeHotkeyForPlatform(windowsKey, 'darwin').key).toBe('fn')
+      // Linux binds nothing either way; the stored key should still be honest.
+      expect(sanitizeHotkeyForPlatform(windowsKey, 'linux').key).toBe('fn')
+    }
+  })
+
+  it('leaves a hotkey the platform can bind untouched', () => {
+    const mac = SettingsSchema.parse({ hotkey: { key: 'rightCmd' } }).hotkey
+    expect(sanitizeHotkeyForPlatform(mac, 'darwin')).toEqual(mac)
+
+    const windows = SettingsSchema.parse({ hotkey: { key: 'rightCtrl' } }).hotkey
+    expect(sanitizeHotkeyForPlatform(windows, 'win32')).toEqual(windows)
+
+    const custom = SettingsSchema.parse({ hotkey: { key: 'custom', customKeyCode: 63 } }).hotkey
+    expect(sanitizeHotkeyForPlatform(custom, 'darwin')).toEqual(custom)
+    expect(sanitizeHotkeyForPlatform(custom, 'win32')).toEqual(custom)
+  })
+
   it('rejects out-of-domain values', () => {
     expect(SettingsSchema.safeParse({ polishingLevel: 'sparkle' }).success).toBe(false)
     expect(SettingsSchema.safeParse({ hotkey: { key: 'leftPinky' } }).success).toBe(false)

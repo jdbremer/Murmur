@@ -20,6 +20,8 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <objbase.h>
+#include <uiautomation.h>
 
 #include <napi.h>
 
@@ -31,6 +33,9 @@
 
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "uuid.lib")
 
 namespace {
 
@@ -89,6 +94,23 @@ bool ForegroundElevated() {
 HWND ResolveFocusedHwnd();
 bool IsPasswordClassHwnd(HWND hwnd);
 
+/**
+ * Stamped into `dwExtraInfo` on every key this addon synthesizes, so the hook
+ * can tell our own input apart from the user's.
+ *
+ * Without it the paste is self-defeating: a Custom hotkey bound to `V` (or to
+ * Ctrl) matches the very keystroke `sendPasteShortcut` injects, so the hook
+ * swallows its own Ctrl+V — the text never lands — and the synthetic edge
+ * starts a fresh dictation mid-insert. `LLKHF_INJECTED` alone is too broad: it
+ * would also drop the agent's nut.js-driven keys, which the Windows gates use
+ * to prove the hotkey path works.
+ */
+constexpr ULONG_PTR kMurmurInjectedTag = 0x4D524D52;  // 'MRMR'
+
+bool IsOwnInjectedEvent(const KBDLLHOOKSTRUCT* kb) {
+  return kb != nullptr && kb->dwExtraInfo == kMurmurInjectedTag;
+}
+
 Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
@@ -121,6 +143,28 @@ Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
   // Small settle so the target is ready to receive keystrokes.
   Sleep(30);
 
+  // SendInput merges with real keyboard state, so a modifier the user happens
+  // to be holding joins our chord: Ctrl+Alt+V opens Paste Special in Office and
+  // Ctrl+Shift+V is paste-without-formatting elsewhere — neither inserts the
+  // transcript. Insertion lands a second or two after release, with hands back
+  // on the keyboard, so this is ordinary rather than exotic. macOS avoids it by
+  // building the event on a private CGEventSource with flags set to exactly ⌘;
+  // Windows has no such isolation, so lift the strays and put them back.
+  const WORD kStrayModifiers[] = {VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN};
+  WORD held[4] = {};
+  int heldCount = 0;
+  for (WORD vk : kStrayModifiers) {
+    if ((GetAsyncKeyState(vk) & 0x8000) != 0) {
+      INPUT up = {};
+      up.type = INPUT_KEYBOARD;
+      up.ki.wVk = vk;
+      up.ki.dwFlags = KEYEVENTF_KEYUP;
+      up.ki.dwExtraInfo = kMurmurInjectedTag;
+      SendInput(1, &up, sizeof(INPUT));
+      held[heldCount++] = vk;
+    }
+  }
+
   INPUT inputs[4] = {};
   // Ctrl down, V down, V up, Ctrl up — virtual-key form works across layouts.
   inputs[0].type = INPUT_KEYBOARD;
@@ -133,8 +177,19 @@ Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
   inputs[3].type = INPUT_KEYBOARD;
   inputs[3].ki.wVk = VK_CONTROL;
   inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+  for (INPUT& input : inputs) input.ki.dwExtraInfo = kMurmurInjectedTag;
 
   const UINT sent = SendInput(4, inputs, sizeof(INPUT));
+
+  // Restore whatever we lifted, so a user still holding Shift keeps holding it.
+  for (int i = 0; i < heldCount; i += 1) {
+    INPUT down = {};
+    down.type = INPUT_KEYBOARD;
+    down.ki.wVk = held[i];
+    down.ki.dwExtraInfo = kMurmurInjectedTag;
+    SendInput(1, &down, sizeof(INPUT));
+  }
+
   if (attached) AttachThreadInput(thisThread, fgThread, FALSE);
 
   if (sent != 4) {
@@ -187,10 +242,86 @@ HWND ResolveFocusedHwnd() {
   return focus;
 }
 
+// ---------------------------------------------------------------------------
+// UI Automation: the only way to see a browser's password field
+// ---------------------------------------------------------------------------
+//
+// macOS gets this for free — IsSecureEventInputEnabled() is a system-wide
+// truth that covers every password field on the machine. Windows has no such
+// call, and the classic checks below see nothing inside Chromium, Electron or
+// UWP: a web password input lives in a render widget whose HWND has no
+// ES_PASSWORD style and answers no EM_GETPASSWORDCHAR. Without UIA, "Murmur
+// will not type here" would be a promise the Windows build cannot keep for the
+// place users most need it — a browser login form.
+
+IUIAutomation* gUia = nullptr;
+bool gUiaTried = false;
+
+IUIAutomation* GetUia() {
+  if (gUia != nullptr) return gUia;
+  if (gUiaTried) return nullptr;  // creation already failed once; do not retry
+  gUiaTried = true;
+
+  // Electron's main thread is already in an apartment; RPC_E_CHANGED_MODE just
+  // means someone got there first, which is fine — we only need COM usable.
+  const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  if (FAILED(init) && init != RPC_E_CHANGED_MODE) return nullptr;
+
+  IUIAutomation* uia = nullptr;
+  if (FAILED(CoCreateInstance(CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(&uia))) ||
+      uia == nullptr) {
+    return nullptr;
+  }
+
+  // UIA calls cross into the target process. Bound them: this runs on the
+  // Electron main thread at every dictation begin, and an unbounded wait on a
+  // busy browser would stall the tray, the Bar and all IPC.
+  IUIAutomation2* uia2 = nullptr;
+  if (SUCCEEDED(uia->QueryInterface(IID_PPV_ARGS(&uia2))) && uia2 != nullptr) {
+    uia2->put_ConnectionTimeout(200);
+    uia2->put_TransactionTimeout(200);
+    uia2->Release();
+  }
+
+  gUia = uia;
+  return gUia;
+}
+
+void ReleaseUia() {
+  if (gUia != nullptr) {
+    gUia->Release();
+    gUia = nullptr;
+  }
+}
+
+bool IsPasswordViaUia(HWND hwnd) {
+  IUIAutomation* uia = GetUia();
+  if (uia == nullptr) return false;
+
+  // The *focused element* is what will receive the paste. Going by HWND alone
+  // would only ever reach the browser's outer render widget, which is never
+  // itself the password field.
+  IUIAutomationElement* element = nullptr;
+  if (FAILED(uia->GetFocusedElement(&element)) || element == nullptr) {
+    if (hwnd == nullptr) return false;
+    if (FAILED(uia->ElementFromHandle(hwnd, &element)) || element == nullptr) return false;
+  }
+
+  VARIANT value;
+  VariantInit(&value);
+  bool isPassword = false;
+  if (SUCCEEDED(element->GetCurrentPropertyValue(UIA_IsPasswordPropertyId, &value))) {
+    if (value.vt == VT_BOOL) isPassword = value.boolVal == VARIANT_TRUE;
+  }
+  VariantClear(&value);
+  element->Release();
+  return isPassword;
+}
+
 // True when the focused control is a password-class edit (G8).
-// Best-effort: classic Win32 ES_PASSWORD and common password class names.
-// Modern Chromium/UWP password fields need UIA later; we still refuse when we
-// can detect the classic case so we never paste into a known password box.
+// Classic Win32 first because it is cheap and in-process; UIA covers the
+// browser/UWP cases the classic checks structurally cannot see.
 bool IsPasswordClassHwnd(HWND hwnd) {
   if (hwnd == nullptr || !IsWindow(hwnd)) return false;
 
@@ -227,7 +358,11 @@ bool IsPasswordClassHwnd(HWND hwnd) {
 
 Napi::Value IsSecureInputActive(const Napi::CallbackInfo& info) {
   HWND focus = ResolveFocusedHwnd();
-  return Napi::Boolean::New(info.Env(), IsPasswordClassHwnd(focus));
+  // Either signal is enough to refuse. Refusing when the field is not secure
+  // costs the user one dictation; typing into a password box that we failed to
+  // recognise puts their password in the clipboard and on screen.
+  if (IsPasswordClassHwnd(focus)) return Napi::Boolean::New(info.Env(), true);
+  return Napi::Boolean::New(info.Env(), IsPasswordViaUia(focus));
 }
 
 // G9: true when UIPI would block paste into the frontmost window.
@@ -260,9 +395,18 @@ Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
     for (const wchar_t* p = pathBuf; *p; ++p) {
       if (*p == L'\\' || *p == L'/') base = p + 1;
     }
-    char narrow[MAX_PATH] = {};
-    WideCharToMultiByte(CP_UTF8, 0, base, -1, narrow, MAX_PATH, nullptr, nullptr);
-    imageName = narrow;
+    // Size first, then convert. A fixed MAX_PATH byte buffer is not enough for
+    // a non-ASCII executable name (UTF-8 needs up to 3 bytes per BMP char), and
+    // on overflow WideCharToMultiByte writes nothing and returns 0 — which
+    // would report "no frontmost app" for a perfectly ordinary window.
+    const int needed = WideCharToMultiByte(CP_UTF8, 0, base, -1, nullptr, 0, nullptr, nullptr);
+    if (needed > 0) {
+      std::string narrow(static_cast<size_t>(needed), '\0');
+      if (WideCharToMultiByte(CP_UTF8, 0, base, -1, narrow.data(), needed, nullptr, nullptr) > 0) {
+        narrow.resize(static_cast<size_t>(needed) - 1);  // drop the NUL
+        imageName = std::move(narrow);
+      }
+    }
   }
   CloseHandle(process);
 
@@ -308,6 +452,10 @@ struct WinHotkeyConfig {
 // Two presses inside this window are a double-tap (mirrors HOTKEY.doubleTapMs).
 constexpr double kDoubleTapSeconds = 0.35;
 
+// A press this short is a tap; longer is a hold. Generous enough for a
+// deliberate double-tap, short enough that no dictation hold qualifies.
+constexpr double kTapMaxSeconds = 0.30;
+
 struct HotkeyEventPayload {
   int type;  // 0 = down, 1 = up, 2 = doubleTap
   double timestamp;
@@ -320,6 +468,10 @@ std::atomic<bool> gAltHeld{false};
 
 WinHotkeyConfig gConfig{};
 double gLastDownAt = 0.0;
+// When the current press began, so the up edge can classify it as tap or hold.
+double gDownAt = 0.0;
+// True when the previous press was a quick tap (down→up under kTapMaxSeconds).
+bool gLastPressWasTap = false;
 
 HHOOK gHook = nullptr;
 HANDLE gHookThread = nullptr;
@@ -360,14 +512,21 @@ void HandleEdge(bool down) {
   if (down) {
     if (gHotkeyDown.exchange(true)) return;  // auto-repeat; already down
 
-    const bool isDoubleTap = gConfig.doubleTapHandsFree && gLastDownAt > 0.0 &&
-                             (now - gLastDownAt) <= kDoubleTapSeconds;
+    // A double-tap is tap-then-tap. Requiring the *previous* press to have
+    // ended as a quick tap is what stops a long dictation hold, released and
+    // immediately followed by a new press, from latching hands-free — the
+    // "dictation never stops" symptom (mirrors the mac tap).
+    const bool isDoubleTap = gConfig.doubleTapHandsFree && gLastPressWasTap &&
+                             gLastDownAt > 0.0 && (now - gLastDownAt) <= kDoubleTapSeconds;
     gLastDownAt = now;
+    gDownAt = now;
+    gLastPressWasTap = false;  // decided on the up edge
     EmitHotkeyEvent(isDoubleTap ? 2 : 0, now);
     return;
   }
 
   if (!gHotkeyDown.exchange(false)) return;  // spurious up
+  gLastPressWasTap = gDownAt > 0.0 && (now - gDownAt) <= kTapMaxSeconds;
   EmitHotkeyEvent(1, now);
 }
 
@@ -419,8 +578,9 @@ void InjectKeyUp(WORD vk) {
   input.type = INPUT_KEYBOARD;
   input.ki.wVk = vk;
   input.ki.dwFlags = KEYEVENTF_KEYUP;
-  // Mark as injected so our own LL hook can ignore it if needed.
-  input.ki.dwExtraInfo = 0;
+  // Tagged so our own hook skips it — otherwise releasing a swallowed chord
+  // key re-enters ProcessHotkeyEvent and can toggle the latch straight back.
+  input.ki.dwExtraInfo = kMurmurInjectedTag;
   SendInput(1, &input, sizeof(INPUT));
 }
 
@@ -521,9 +681,10 @@ bool ProcessHotkeyEvent(const KBDLLHOOKSTRUCT* kb) {
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
   if (nCode == HC_ACTION && gListening.load() && lParam != 0) {
     const KBDLLHOOKSTRUCT* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
-    // Only key messages — ignore injected synthetic input from ourselves if flagged
-    // (optional: still process injected so agent-driven keys work for G6 proof).
-    if (ProcessHotkeyEvent(kb)) {
+    // Our own synthetic keys must never be read as hotkey edges — see
+    // kMurmurInjectedTag. Other injected input (the agent's nut.js keys) is
+    // deliberately still processed, which is what the Windows hotkey gate proves.
+    if (!IsOwnInjectedEvent(kb) && ProcessHotkeyEvent(kb)) {
       return 1;  // swallow this key only
     }
   }
@@ -567,22 +728,49 @@ void ReleaseCallback() {
   }
 }
 
-void TearDownHook() {
+/**
+ * Stop the hook thread.
+ *
+ * @returns true when the thread is *known* to have exited, meaning the
+ *   thread-safe function is now unreferenced and safe to release. False means
+ *   the thread may still be running: the caller must leak the callback rather
+ *   than free something the hook proc can still reach.
+ */
+bool TearDownHook() {
   gListening.store(false);
   gHotkeyDown.store(false);
   gCtrlHeld.store(false);
   gAltHeld.store(false);
   gLastDownAt = 0.0;
+  gDownAt = 0.0;
+  gLastPressWasTap = false;
 
+  bool joined = true;
   if (gHookThreadId != 0) {
-    PostThreadMessageW(gHookThreadId, WM_QUIT, 0, 0);
+    if (PostThreadMessageW(gHookThreadId, WM_QUIT, 0, 0) == 0) {
+      // The thread never built its message queue, so WM_QUIT has nowhere to
+      // land and GetMessage will never return. Nothing left but to stop
+      // touching it — gListening is already false, so it emits nothing.
+      joined = false;
+    }
   }
   if (gHookThread != nullptr) {
-    WaitForSingleObject(gHookThread, 3000);
+    if (joined && WaitForSingleObject(gHookThread, 3000) != WAIT_OBJECT_0) {
+      joined = false;
+    }
     CloseHandle(gHookThread);
     gHookThread = nullptr;
   }
   gHookThreadId = 0;
+
+  // Only safe to unhook and release the callback once the thread is *known*
+  // stopped: doing it while the thread is still live races the hook proc on
+  // gHook and gCallback, which is precisely the use-after-free shape the mac
+  // tap teardown was fixed for. A leaked hook beats a crash.
+  if (!joined) {
+    gHookInstallOk.store(false);
+    return false;
+  }
 
   // If the thread never ran Unhook (crash path), try once more.
   if (gHook != nullptr) {
@@ -603,8 +791,8 @@ void TearDownHook() {
 // a thread-safe function N-API is finalizing — the same use-after-free the mac
 // tap teardown was fixed for.
 void ModuleCleanup(void* /*arg*/) {
-  TearDownHook();
-  ReleaseCallback();
+  if (TearDownHook()) ReleaseCallback();
+  ReleaseUia();
 }
 
 HotkeyKind ParseWinKind(const std::string& key) {
@@ -626,8 +814,7 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
   }
 
   // Restart is normal (settings rebind).
-  TearDownHook();
-  ReleaseCallback();
+  if (TearDownHook()) ReleaseCallback();
 
   Napi::Object config = info[0].As<Napi::Object>();
   WinHotkeyConfig parsed;
@@ -675,8 +862,7 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
   }
 
   if (!gHookInstallOk.load()) {
-    TearDownHook();
-    ReleaseCallback();
+    if (TearDownHook()) ReleaseCallback();
     return Napi::Boolean::New(env, false);
   }
 
@@ -733,8 +919,7 @@ Napi::Value HotkeyPhysicallyDown(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value StopHotkeyListener(const Napi::CallbackInfo& info) {
-  TearDownHook();
-  ReleaseCallback();
+  if (TearDownHook()) ReleaseCallback();
   return info.Env().Undefined();
 }
 

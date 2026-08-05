@@ -91,8 +91,8 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
       stt: this.#sttStatus,
       polish: this.#polishStatus,
       sidecars: {
-        whisper: { installed: sidecars.whisper.installed, path: sidecars.whisper.path },
-        llama: { installed: sidecars.llama.installed, path: sidecars.llama.path },
+        whisper: { installed: sidecars.whisper.installed },
+        llama: { installed: sidecars.llama.installed },
       },
     }
   }

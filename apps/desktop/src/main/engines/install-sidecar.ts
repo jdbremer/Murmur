@@ -1,16 +1,21 @@
 import {
+  closeSync,
   copyFileSync,
+  createReadStream,
   createWriteStream,
   existsSync,
   mkdirSync,
+  openSync,
   readdirSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
 import { Readable } from 'node:stream'
 import { type ReadableStream as WebReadableStream } from 'node:stream/web'
@@ -45,6 +50,18 @@ function safeTag(value: string | undefined, fallback: string): string {
 /**
  * Official release pins (PLAN §16). Overridable via env for experiments.
  * llama tag is a build number; whisper is a semver tag.
+ *
+ * `sha256` is the archive digest this build trusts. PLAN §290 requires every
+ * download to be checksum-verified, and the model downloader already is — this
+ * path is the exception because ggml-org publishes no digest alongside its
+ * release assets, so there is nothing to pin *to* without a maintainer
+ * recording one by hand. The mechanism is here and enforced when a digest is
+ * present; when it is absent the computed digest is logged and returned, so
+ * pinning a release is a one-line change rather than a rewrite.
+ *
+ * Until a digest is pinned, the trust chain is: TLS to a host on the sidecar
+ * allowlist, a fixed repo path no env override can escape, and the structural
+ * checks in `installSidecarBinary` (PE magic, DLL name allowlist).
  */
 const PINS = {
   'whisper-server': {
@@ -53,14 +70,54 @@ const PINS = {
     url: (tag: string) =>
       `https://github.com/ggml-org/whisper.cpp/releases/download/${tag}/whisper-bin-x64.zip`,
     exeNames: ['whisper-server.exe', 'whisper-server'],
+    sha256: null as string | null,
   },
   'llama-server': {
-    tag: process.env['LLAMA_TAG'] ?? 'b10276',
+    tag: safeTag(process.env['LLAMA_TAG'], 'b10276'),
     url: (tag: string) =>
       `https://github.com/ggml-org/llama.cpp/releases/download/${tag}/llama-${tag}-bin-win-cpu-x64.zip`,
     exeNames: ['llama-server.exe', 'server.exe', 'llama-server'],
+    sha256: null as string | null,
   },
 } as const
+
+/**
+ * DLLs these releases legitimately ship beside the server binary.
+ *
+ * The sidecar runs with `cwd` set to its own directory, so that directory is
+ * on the DLL search path: copying *every* `.dll` out of an archive would let a
+ * tampered release drop anything it liked next to a binary we then execute.
+ * Matching on the known families keeps the compute backends working while
+ * refusing a `version.dll` or `dwrite.dll` hijack.
+ */
+const DLL_PREFIXES = ['ggml', 'whisper', 'llama', 'msvcp', 'vcruntime', 'concrt', 'sdl2', 'omp']
+
+function isExpectedSidecarDll(name: string): boolean {
+  const lower = name.toLowerCase()
+  if (!lower.endsWith('.dll')) return false
+  return DLL_PREFIXES.some((prefix) => lower.startsWith(prefix))
+}
+
+/** Windows executables and DLLs start with `MZ`. Cheap structural sanity check. */
+function isPortableExecutable(path: string): boolean {
+  let handle: number | null = null
+  try {
+    handle = openSync(path, 'r')
+    const magic = Buffer.alloc(2)
+    if (readSync(handle, magic, 0, 2, 0) !== 2) return false
+    return magic[0] === 0x4d && magic[1] === 0x5a
+  } catch {
+    return false
+  } finally {
+    if (handle !== null) closeSync(handle)
+  }
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  await pipeline(createReadStream(path), hash)
+  return hash.digest('hex')
+}
 
 export function sidecarPresence(
   which: SidecarKind,
@@ -167,6 +224,24 @@ async function installSidecarBinaryUncoordinated(
       log.info(`using cached ${zipPath}`)
     }
 
+    // Verify before unpacking: an archive that fails its pin must never reach
+    // Expand-Archive, let alone the directory a binary is executed from.
+    const digest = await sha256File(zipPath)
+    if (pin.sha256 !== null && digest !== pin.sha256) {
+      rmSync(zipPath, { force: true })
+      return {
+        ok: false,
+        which,
+        path: null,
+        error: 'checksum-mismatch',
+        detail: `Refusing ${which}: expected sha256 ${pin.sha256}, got ${digest}.`,
+      }
+    }
+    if (pin.sha256 === null) {
+      // Recorded so a maintainer can pin this exact release in PINS above.
+      log.warn(`${which} ${pin.tag} is not pinned — sha256 ${digest}`)
+    }
+
     if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true })
     mkdirSync(extractDir, { recursive: true })
 
@@ -193,17 +268,48 @@ async function installSidecarBinaryUncoordinated(
       }
     }
 
+    // Everything we copy must have come from inside the extraction directory.
+    // A zip entry with `..` in its path, or a symlink, would otherwise let the
+    // archive nominate a file of its choosing to be installed and executed.
+    const extractRoot = resolve(extractDir) + sep
+    if (!resolve(exe.path).startsWith(extractRoot)) {
+      return {
+        ok: false,
+        which,
+        path: null,
+        error: 'extract-escaped',
+        detail: 'The release archive tried to place a file outside the extraction directory.',
+      }
+    }
+
+    if (!isPortableExecutable(exe.path)) {
+      return {
+        ok: false,
+        which,
+        path: null,
+        error: 'not-executable',
+        detail: `${which}: the file found in the archive is not a Windows executable.`,
+      }
+    }
+
     const destExe = join(
       outDir,
       which === 'llama-server' ? 'llama-server.exe' : 'whisper-server.exe',
     )
     copyFileSync(exe.path, destExe)
 
-    // Copy sibling DLLs from the same directory as the exe.
+    // Sibling DLLs, restricted to the families these releases actually ship.
+    // The sidecar's own directory is on its DLL search path, so an unfiltered
+    // copy is a planting primitive rather than a convenience.
     for (const file of readdirSync(exe.dir)) {
-      if (file.toLowerCase().endsWith('.dll')) {
-        copyFileSync(join(exe.dir, file), join(outDir, file))
+      if (!isExpectedSidecarDll(file)) continue
+      const source = join(exe.dir, file)
+      if (!resolve(source).startsWith(extractRoot)) continue
+      if (!isPortableExecutable(source)) {
+        log.warn(`skipping ${file}: not a PE image`)
+        continue
       }
+      copyFileSync(source, join(outDir, file))
     }
 
     // The extracted tree is a full second copy of the release; the binaries

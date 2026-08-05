@@ -58,8 +58,16 @@ export function isMacOnlyHotkeyKey(key: HotkeyKey): boolean {
   return key === 'fn' || key === 'rightCmd' || key === 'rightOpt'
 }
 
+/** True when `key` is a Windows-only preset that macOS cannot install. */
+export function isWindowsOnlyHotkeyKey(key: HotkeyKey): boolean {
+  return key === 'rightCtrl' || key === 'ctrlSpace' || key === 'altSpace' || key === 'capsLock'
+}
+
 /** Shipped Windows default hotkey (DEFINITION-OF-DONE overnight lock). */
 export const WINDOWS_DEFAULT_HOTKEY_KEY: HotkeyKey = 'rightCtrl'
+
+/** Shipped macOS default hotkey (PLAN §2.1). */
+export const MAC_DEFAULT_HOTKEY_KEY: HotkeyKey = 'fn'
 
 /** `hold` = push-to-talk; `toggle` = press once to start, again to stop. */
 export const HotkeyActivationSchema = z.enum(['hold', 'toggle'])
@@ -89,20 +97,35 @@ export function isSpaceChordHotkey(key: HotkeyKey): boolean {
  * Heal a hotkey config so the native module never throws at boot.
  * Pass `process.platform` from the main process (shared stays Node-free).
  *
+ * `settings.json` is deliberately portable across OSes, which means a config
+ * can arrive on a machine whose native backend cannot install it — synced
+ * between a work Windows box and a personal Mac, or carried by Migration
+ * Assistant. Healing has to run in *both* directions: a key the platform
+ * cannot bind produces no hook and no error, so the app looks configured and
+ * silently never dictates.
+ *
  * On Windows we also migrate Ctrl+Space / Alt+Space → Right Ctrl: swallowing
  * Space system-wide is too risky until the hook is rock-solid.
  */
 export function sanitizeHotkeyForPlatform(hotkey: HotkeyConfig, platform: string): HotkeyConfig {
+  const isWindows = platform === 'win32'
+  const platformDefault = isWindows ? WINDOWS_DEFAULT_HOTKEY_KEY : MAC_DEFAULT_HOTKEY_KEY
+
   if (isIncompleteCustomHotkey(hotkey)) {
-    return {
-      ...hotkey,
-      key: platform === 'win32' ? WINDOWS_DEFAULT_HOTKEY_KEY : 'fn',
-      customKeyCode: null,
-    }
+    return { ...hotkey, key: platformDefault, customKeyCode: null }
   }
-  if (platform === 'win32' && (isMacOnlyHotkeyKey(hotkey.key) || isSpaceChordHotkey(hotkey.key))) {
+  if (isWindows && (isMacOnlyHotkeyKey(hotkey.key) || isSpaceChordHotkey(hotkey.key))) {
     return { ...hotkey, key: WINDOWS_DEFAULT_HOTKEY_KEY, customKeyCode: null }
   }
+  // Non-Windows: a Windows-only preset can never fire here. Note this also
+  // covers Linux, where nothing fires either way — healing to `fn` at least
+  // leaves the stored key honest about what this build would bind.
+  if (!isWindows && isWindowsOnlyHotkeyKey(hotkey.key)) {
+    return { ...hotkey, key: MAC_DEFAULT_HOTKEY_KEY, customKeyCode: null }
+  }
+  // A custom key code is a per-OS value: macOS stores a CGKeyCode, Windows a
+  // Win32 VK. The same number means a different physical key on the other
+  // platform, so a synced `custom` binding is not portable.
   return hotkey
 }
 

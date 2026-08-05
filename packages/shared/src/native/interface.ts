@@ -63,8 +63,15 @@ export interface NativePermissions {
 export interface MurmurNative {
   /** `false` means this is the stub: every call below is a safe no-op. */
   readonly available: boolean
-  /** Begin listening for the configured hotkey. Listen-only (PLAN §10.5). */
-  startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): void
+  /**
+   * Begin listening for the configured hotkey. Listen-only (PLAN §10.5).
+   *
+   * `false` means the OS refused to install the hook — Input Monitoring not
+   * granted on macOS, `SetWindowsHookEx` failing on Windows, or a preset this
+   * platform's backend cannot bind. It is a status, not an exception: a throw
+   * here would land in Electron bootstrap.
+   */
+  startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): boolean
   stopHotkeyListener(): void
   /**
    * Clear a stuck chord latch (e.g. after a failed begin while Space is still
@@ -119,7 +126,9 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
   return {
     available: false,
     startHotkeyListener() {
-      /* no-op: no event tap without the native module */
+      // No event tap without the native module — and say so, rather than
+      // letting the caller believe a listener is running.
+      return false
     },
     stopHotkeyListener() {
       /* no-op */

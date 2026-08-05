@@ -57,18 +57,25 @@ export class WindowManager {
 
   /**
    * Show the pill without stealing focus from the target app.
-   * Repositions every show so multi-monitor cursor moves stay correct.
+   *
+   * Repositioned only while hidden: moving it mid-dictation would make it hop
+   * displays under the user's cursor while they are speaking.
    */
   showBar(): void {
     const window = this.bar()
-    repositionBar(window)
-    // Windows sometimes no-ops showInactive on a never-shown transparent window.
     if (!window.isVisible()) {
+      repositionBar(window)
       window.showInactive()
+      // Windows sometimes no-ops showInactive on a never-shown transparent
+      // window. Retry on the next tick rather than falling back to
+      // show()+blur(): show() activates the pill, and blur() only releases it
+      // again — Windows then raises whatever is next in z-order, which is not
+      // the app the user is dictating into. That both misdirects the paste and
+      // corrupts the frontmost-app capture the orchestrator just took.
       if (!window.isVisible() && process.platform === 'win32') {
-        window.show()
-        // Immediately yield focus back if anything grabbed it.
-        window.blur()
+        setImmediate(() => {
+          if (!window.isDestroyed() && !window.isVisible()) window.showInactive()
+        })
       }
     } else {
       window.moveTop()

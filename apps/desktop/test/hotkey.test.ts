@@ -39,7 +39,7 @@ let bridge: HotkeyBridge
 function makeNative(): MurmurNative {
   return {
     available: true,
-    startHotkeyListener: () => undefined,
+    startHotkeyListener: () => true,
     stopHotkeyListener: () => undefined,
     releaseHotkeyLatch: () => undefined,
     hotkeyPhysicallyDown: () => physicallyDown.current,
@@ -61,7 +61,10 @@ function makeNative(): MurmurNative {
   }
 }
 
-function makeBridge(hotkeyConfig: HotkeyConfig = config()): HotkeyBridge {
+function makeBridge(
+  hotkeyConfig: HotkeyConfig = config(),
+  native: () => MurmurNative = makeNative,
+): HotkeyBridge {
   const intents: HotkeyIntents = {
     begin: () => {
       recorded.begins += 1
@@ -85,7 +88,7 @@ function makeBridge(hotkeyConfig: HotkeyConfig = config()): HotkeyBridge {
     },
   }
   const built = new HotkeyBridge({
-    native: makeNative,
+    native,
     intents,
     log: silentLog,
   })
@@ -129,6 +132,55 @@ describe('hold activation', () => {
     press('down') // auto-repeat / delivery noise
     expect(recorded.begins).toBe(1)
     expect(recorded.toggles).toBe(0)
+  })
+})
+
+describe('releaseLatch', () => {
+  /**
+   * The orchestrator calls this after a cancel or a failure. Clearing the
+   * native latch alone would leave the bridge believing the press is still in
+   * progress, and the repeated-down guard above would then swallow the user's
+   * next press — a dictation that silently never starts again.
+   */
+  it('forgets the in-progress press, so the next down still begins', () => {
+    physicallyDown.current = true
+    press('down')
+    expect(recorded.begins).toBe(1)
+
+    // Mid-hold failure: orchestrator cancels and clears the latch. The
+    // trailing physical `up` never arrives (it was swallowed or lost).
+    bridge.releaseLatch()
+    physicallyDown.current = false
+
+    vi.advanceTimersByTime(50)
+    physicallyDown.current = true
+    press('down')
+    expect(recorded.begins).toBe(2)
+  })
+
+  it('tells the native layer too', () => {
+    let released = 0
+    const counting = makeBridge(config(), () => ({
+      ...makeNative(),
+      releaseHotkeyLatch: () => {
+        released += 1
+      },
+    }))
+    counting.releaseLatch()
+    expect(released).toBe(1)
+    counting.stop()
+  })
+
+  it('survives a native module that throws', () => {
+    // Older native builds predate releaseHotkeyLatch entirely.
+    const throwing = makeBridge(config(), () => ({
+      ...makeNative(),
+      releaseHotkeyLatch: () => {
+        throw new Error('older native build')
+      },
+    }))
+    expect(() => throwing.releaseLatch()).not.toThrow()
+    throwing.stop()
   })
 })
 

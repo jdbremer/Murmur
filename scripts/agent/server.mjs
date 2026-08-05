@@ -81,9 +81,9 @@ function authorize(req) {
   return tokenMatches(supplied) ? null : 'bad-token'
 }
 
-/** @type {import('playwright').ElectronApplication | null} */
+/** @type {import('playwright-core').ElectronApplication | null} */
 let electronApp = null
-/** @type {import('playwright').Page | null} */
+/** @type {import('playwright-core').Page | null} */
 let hubPage = null
 let starting = false
 let lastError = null
@@ -111,9 +111,16 @@ async function readBody(req) {
 }
 
 function electronExecutable() {
+  // Required from Node (rather than from inside Electron) the package exports
+  // the path to the binary as a string. Anything else means the install is
+  // broken, and saying so here beats a confusing Playwright launch error.
   const electron = require(join(REPO, 'node_modules', 'electron'))
-  // electron package exports the path string when required from Node.
-  return typeof electron === 'string' ? electron : electron
+  if (typeof electron !== 'string') {
+    throw new Error(
+      'node_modules/electron did not export a binary path — run `npm install` at the repo root.',
+    )
+  }
+  return electron
 }
 
 async function ensureBuilt() {
@@ -182,7 +189,11 @@ async function startApp() {
     await ensureBuilt()
 
     // Playwright's Electron support lives on the private export.
-    const { _electron } = require(join(REPO, 'node_modules', 'playwright'))
+    // playwright-core, not playwright: the agent drives Electron through
+    // `_electron` and never launches a bundled browser, so the full package's
+    // several-hundred-MB browser download is pure cost for every contributor
+    // and every CI run. `_electron` is a private export, hence the exact pin.
+    const { _electron } = require(join(REPO, 'node_modules', 'playwright-core'))
     const executablePath = electronExecutable()
     log('launching', executablePath)
 

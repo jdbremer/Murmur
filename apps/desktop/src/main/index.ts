@@ -210,12 +210,10 @@ async function bootstrap(): Promise<void> {
     },
     // No `onLevel` from PCM frames: the Bar is fed by the capture renderer's
     // ~30 Hz `audio.meter` → `audio.level` relay (PLAN §2.1).
+    // Through the bridge, not straight to native: the bridge has to forget the
+    // in-progress press too, or it swallows the user's next one.
     releaseHotkeyLatch: () => {
-      try {
-        native().releaseHotkeyLatch()
-      } catch {
-        /* older native builds */
-      }
+      hotkeys.releaseLatch()
     },
   })
 
@@ -354,7 +352,12 @@ async function bootstrap(): Promise<void> {
     const previous = lastSettings
     lastSettings = next
 
-    if (!paused && hotkeyChanged(previous, next)) hotkeys.rebind(next.hotkey)
+    // Sanitize here too, not just at boot: a settings.json hand-edited (or
+    // written by a sync client) while the app is running would otherwise bind
+    // a key this platform's backend cannot install, until the next launch.
+    if (!paused && hotkeyChanged(previous, next)) {
+      hotkeys.rebind(sanitizeHotkeyForPlatform(next.hotkey, process.platform))
+    }
     if (previous.micDeviceId !== next.micDeviceId) audio.setDevice(next.micDeviceId)
     if (previous.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next)
     if (
@@ -396,11 +399,7 @@ async function bootstrap(): Promise<void> {
   applyLaunchAtLogin(settings.get())
   hotkeys.start(settings.get().hotkey)
   // Clear any stuck Space latch from a previous crash / bad chord session.
-  try {
-    native().releaseHotkeyLatch()
-  } catch {
-    /* ignore */
-  }
+  hotkeys.releaseLatch()
   await engines.apply(settings.get())
 
   // Warm the mic so the first dictation does not pay `getUserMedia`'s

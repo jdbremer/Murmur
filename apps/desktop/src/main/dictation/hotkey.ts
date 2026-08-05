@@ -102,10 +102,9 @@ export class HotkeyBridge {
     }
 
     try {
-      // Native may return `false` when the OS hook/tap could not be installed
+      // Native returns `false` when the OS hook/tap could not be installed
       // (e.g. missing Input Monitoring on macOS, or WH_KEYBOARD_LL failure on Windows).
-      const started = native.startHotkeyListener(config, (event) => this.handle(event)) as
-        boolean | void
+      const started = native.startHotkeyListener(config, (event) => this.handle(event))
       if (started === false) {
         this.#running = false
         this.#log.warn(
@@ -135,6 +134,27 @@ export class HotkeyBridge {
     this.#lastDownAt = null
     this.#lastPressWasTap = false
     this.#toggled = false
+    this.#latched = false
+  }
+
+  /**
+   * Clear a stuck press, in the native layer *and* here.
+   *
+   * The orchestrator calls this after a cancel or a failure. Clearing only the
+   * native side leaves this bridge believing a hold is still in progress:
+   * `#downAt` stays set, and the guard in `handle('down')` then swallows the
+   * user's next press as auto-repeat. The watchdog recovers a real hold after
+   * two misses, but it is never armed for synthetic edges — so in the dev and
+   * agent paths the hotkey would simply stop responding.
+   */
+  releaseLatch(): void {
+    try {
+      this.#native().releaseHotkeyLatch()
+    } catch (error) {
+      this.#log.warn('releasing the hotkey latch failed:', error)
+    }
+    this.#stopWatchdog()
+    this.#downAt = null
     this.#latched = false
   }
 

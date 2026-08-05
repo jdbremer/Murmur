@@ -67,9 +67,16 @@ export const EngineStatusSchema = z.object({
 export type EngineStatus = z.infer<typeof EngineStatusSchema>
 
 /** Whether a loopback sidecar binary is on disk (not whether it is running). */
+/**
+ * Whether a sidecar binary is present — deliberately *not* where it is.
+ *
+ * An absolute path contains the OS username, and this object reaches the
+ * renderer and `debug.snapshot`, which is what a developer pastes into a bug
+ * report. Nothing in the UI needs the path, and an engine that cannot find its
+ * binary already reports every directory it searched in its own `detail`.
+ */
 export const SidecarBinaryStatusSchema = z.object({
   installed: z.boolean(),
-  path: z.string().nullable().default(null),
 })
 export type SidecarBinaryStatus = z.infer<typeof SidecarBinaryStatusSchema>
 

@@ -30,16 +30,20 @@ export const BAR_MARGIN_BOTTOM = 10
 const isMac = process.platform === 'darwin'
 
 /**
- * Bottom-centre of the primary display, measured against `bounds` rather than
- * `workArea`: the pill floats *above* the Dock, it does not dodge it.
+ * Bottom-centre of the display under the cursor, measured against `bounds`
+ * rather than `workArea`: the pill floats *above* the Dock, it does not dodge
+ * it.
  *
- * Stage 2 follows the display containing the focused window, and honours the
- * optional pin-to-one-display setting.
- */
-/**
- * Bottom-centre of the display under the cursor (multi-monitor safe).
- * Primary-only bounds put the pill off-screen when the primary is not the
- * display the user is looking at.
+ * Cursor rather than primary because a pill on the primary display is simply
+ * not visible to someone working on their second monitor. On a single-display
+ * machine the two are the same display, so this is a no-op there — the change
+ * is only observable with more than one monitor attached.
+ *
+ * The cursor is a proxy for "where the user is", and an imperfect one: a
+ * cursor parked on another screen puts the pill there. Following the focused
+ * *window* would be exact, but the focused window belongs to another
+ * application and Electron cannot see its bounds — that needs a native call
+ * this build does not have yet.
  */
 export function barBounds(): Rectangle {
   const point = screen.getCursorScreenPoint()
