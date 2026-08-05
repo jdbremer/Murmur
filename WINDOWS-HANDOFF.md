@@ -13,13 +13,12 @@ macOS: [MAC-HANDOFF.md](./MAC-HANDOFF.md). Spec: [PLAN.md](./PLAN.md).
 Session-only AI notes stay **out of the repo** (local agent state, scratch
 plans). Anything durable for the product lands here or in a small code change.
 
-**Autonomous loop:** hybrid computer-use via `scripts/agent/` (Playwright in-app
+**Autonomous loop:** hybrid computer-use via `scripts/agent/` — Playwright
+in-app, nut.js/Win32 OS control, and injectPcm for the mic. Humans optional.
 
-- nut.js/Win32 OS control + injectPcm mic). Humans optional.
-
-* Control API: [scripts/agent/README.md](./scripts/agent/README.md)
-* Acceptance gates: [scripts/agent/DEFINITION-OF-DONE.md](./scripts/agent/DEFINITION-OF-DONE.md)
-* Overnight prompt: [scripts/agent/OVERNIGHT-PROMPT.md](./scripts/agent/OVERNIGHT-PROMPT.md)
+- Control API: [scripts/agent/README.md](./scripts/agent/README.md)
+- Acceptance gates: [scripts/agent/DEFINITION-OF-DONE.md](./scripts/agent/DEFINITION-OF-DONE.md)
+- Overnight prompt: [scripts/agent/OVERNIGHT-PROMPT.md](./scripts/agent/OVERNIGHT-PROMPT.md)
 
 ```bash
 npm run agent:server          # keep running
