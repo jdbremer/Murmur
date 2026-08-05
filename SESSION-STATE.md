@@ -1,13 +1,14 @@
 # SESSION STATE — Murmur
 
 Updated: 2026-08-05T02:05-05:00 | Focus: fn-release delivery fix + Command Mode, live-QC'd; review workflow running before push
-Claimed by: Preston's autonomous session (pushing the release-fix + command-mode commits; clear when pushed)
+Claimed by: (none — all commits pushed to origin/main)
 
 ## DONE (this session)
 
 - `5d26686` — **the fn release bug**: field report "long dictations never stop" root-caused to delivery loss — tap lived on Electron's busy main run loop (OS disables slow taps mid-hold) and Wispr Flow's active tap shares the chain. Fixed threefold: dedicated tap thread, HID-state reconciliation watchdog (250 ms; synthetic edges exempt), fn matched by key code so arrow-key flagsChanged noise can't phantom-double-tap. Double-tap is tap-then-tap now; quick tap exits hands-free; stale hands-free flag cleared. New bridge suite replays the field failure (hotkey.test.ts).
 - `e1418a3` — **Command Mode (PLAN §18.1)**: hold the key with text selected → the utterance is an edit instruction, selection rewritten in place by the local model. AX getSelectedText in native; no-fallback failure discipline (never paste the instruction over a selection); Settings toggle; on by default. Live-QC'd: "rewrite this as one short pirate sentence" rewrote the ⌘A'd TextEdit selection.
 - Live regression: plain dictation through the rebuilt native module (519 ms STT). 518 tests green.
+- `2c9f2f5` + `fdf1a27` + the teardown fix — adversarial review round 2 (10 agents): all 7 verdicts REAL, all fixed. Highlights: a probe-proven use-after-free in the tap teardown (retained run loop + no RemoveSource-after-join + entry-observer readiness), the stale-native-binary watchdog tell, polish-off fallback to plain dictation, truncation refusal, AX read timebox, visible command indicator. Teardown live-QC'd: dictate → SIGTERM → clean exit. 520 tests.
 
 - Stage 1 `14a7b32` — real Bar: 60 fps canvas waveform, 30 Hz worklet meter (`audio.meter`), shimmer/✓/error states, click-through + hover controls, `EscapeCancel`, device-list IPC. 43 donor tests ported + 10 new meter tests.
 - Stage 2 `028631a` — Settings mic picker + language + history retention + live "Try it" tester.

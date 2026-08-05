@@ -73,7 +73,25 @@ branch or leave it as history.
 4. Snippets, re-polish-from-history, clipboard-only mode, menu-bar quick
    controls, app icon + unsigned local DMG.
 
-### 5. Small persistent gotchas
+### 5. Review leftovers, ranked
+
+- **Design question for the owner** — command mode triggers on selection
+  presence with the _same_ hotkey (matches the reference product's shipped
+  UX; PLAN §18.1 sketched a second hotkey). The review's one confirmed UX
+  hazard: a leftover selection (double-clicked word, auto-selecting field)
+  turns dictation into an edit of that selection. Mitigations shipped: blue
+  Bar indicator + distinct aria, ready-polish gate, 6k-char cap, Settings
+  toggle, target-app undo restores. If real use still surprises, the fix is a
+  modifier chord (e.g. hold fn+shift) — the plumbing supports it in an hour.
+- Command rows inflate history word-stats (the edited selection counts as
+  words dictated). Cosmetic; fix when stats grow a per-mode breakdown.
+- The external-endpoint consent warning predates command mode — it promises
+  "transcripts" leave the device, but selections now ride along too. One
+  sentence in `endpointWarnings`.
+- Selection liveness is not re-verified at insert time; a user who clicks
+  away mid-edit gets the result at the new caret instead of a refusal.
+
+### 6. Small persistent gotchas
 
 - npm may skip Electron's postinstall: `electron-vite dev` then dies with
   "Electron uninstall". Fix: `node node_modules/electron/install.js`.

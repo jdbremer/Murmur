@@ -256,16 +256,22 @@ void TearDownTap() {
   gHotkeyDown.store(false);
 
   // Stop the tap thread's loop first: the source must not be torn out from
-  // under a loop that is still running it.
+  // under a loop that is still running it. Wait for the entry observer's
+  // readiness signal so the stop cannot land before the loop starts (a lost
+  // stop is a join that never returns).
   if (gTapThread.joinable()) {
+    for (int i = 0; i < 2000 && !gTapThreadReady.load(); i += 1) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     if (gRunLoop != nullptr) CFRunLoopStop(gRunLoop);
     gTapThread.join();
   }
 
   if (gRunLoopSource != nullptr) {
-    if (gRunLoop != nullptr) {
-      CFRunLoopRemoveSource(gRunLoop, gRunLoopSource, kCFRunLoopCommonModes);
-    }
+    // Deliberately NOT CFRunLoopRemoveSource: the dead thread's loop purged
+    // its own sources in its finalizer, and removing from it here was a
+    // proven use-after-free (crash reproduced under both the system allocator
+    // and libgmalloc). Releasing our reference is all that remains to do.
     CFRelease(gRunLoopSource);
     gRunLoopSource = nullptr;
   }
@@ -276,7 +282,11 @@ void TearDownTap() {
     gEventTap = nullptr;
   }
 
-  gRunLoop = nullptr;
+  if (gRunLoop != nullptr) {
+    CFRelease(gRunLoop);  // pairs with the CFRetain on the tap thread
+    gRunLoop = nullptr;
+  }
+  gTapThreadReady.store(false);
   gLastDownAt = 0.0;
   gDownAt = 0.0;
   gLastPressWasTap = false;
@@ -388,10 +398,21 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
 
   gTapThreadReady.store(false);
   gTapThread = std::thread([] {
-    gRunLoop = CFRunLoopGetCurrent();
+    // Retained: a secondary thread's CFRunLoop is deallocated during thread
+    // exit, and teardown needs a pointer that outlives the thread to stop the
+    // loop safely. Released in TearDownTap after the join.
+    gRunLoop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
     CFRunLoopAddSource(gRunLoop, gRunLoopSource, kCFRunLoopCommonModes);
     CGEventTapEnable(gEventTap, true);
-    gTapThreadReady.store(true);
+    // Readiness is signalled from *inside* the running loop. A flag set here,
+    // before CFRunLoopRun, would let a fast teardown issue CFRunLoopStop
+    // against a loop that has not started — a stop that lands on nothing and
+    // a join() that never returns.
+    CFRunLoopObserverRef entry = CFRunLoopObserverCreateWithHandler(
+        kCFAllocatorDefault, kCFRunLoopEntry, /* repeats */ false, 0,
+        ^(CFRunLoopObserverRef, CFRunLoopActivity) { gTapThreadReady.store(true); });
+    CFRunLoopAddObserver(gRunLoop, entry, kCFRunLoopCommonModes);
+    CFRelease(entry);
     CFRunLoopRun();
   });
   // Bounded wait for the loop to be live, so a stop immediately after start
