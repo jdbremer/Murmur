@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   AudioCaptureStatusSchema,
   AudioCommandSchema,
+  AudioDeviceListSchema,
   AudioFrameSchema,
   AudioLevelEventSchema,
   DictationEventSchema,
@@ -127,6 +128,14 @@ export const invokeContract = {
   'dictation.startHandsFree': { request: z.void(), response: z.void() },
   'dictation.stopHandsFree': { request: z.void(), response: z.void() },
 
+  // --- audio devices (PLAN §2.2.5 mic picker) ----------------------------
+  /**
+   * The microphones main last heard about from the capture renderer. An invoke
+   * rather than a bare event so a picker that opens between `devicechange`
+   * notifications still has a list to render.
+   */
+  'audio.listDevices': { request: z.void(), response: AudioDeviceListSchema },
+
   // --- models (PLAN §8) --------------------------------------------------
   'models.list': { request: z.void(), response: ModelsListSchema },
   'models.downloadStart': {
@@ -215,6 +224,8 @@ export const eventContract = {
    * the renderer only obeys (PLAN §5: warm the stream, capture on hotkey-down).
    */
   'audio.command': AudioCommandSchema,
+  /** The microphone list changed (device plugged in, AirPods connected). */
+  'audio.devicesChanged': AudioDeviceListSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract
@@ -228,6 +239,24 @@ export const messageContract = {
   /** 16 kHz mono Float32 PCM chunks from the hidden capture renderer (PLAN §5). */
   'audio.frame': AudioFrameSchema,
   'audio.status': AudioCaptureStatusSchema,
+  /**
+   * Mic amplitude from the capture renderer at ~30 Hz, which main relays to the
+   * Bar as `audio.level`. It rides its own channel rather than being derived
+   * from `audio.frame` because frames are ~100 ms apart: a 10 Hz envelope makes
+   * the waveform look like it is stepping, and PLAN §2.1 wants it dancing.
+   */
+  'audio.meter': AudioLevelEventSchema,
+  /**
+   * The Bar renderer telling main whether the pointer is over the pill.
+   *
+   * The Bar window is click-through (`setIgnoreMouseEvents(true, forward)`) so
+   * it never blocks the app underneath; mouse *moves* still arrive, and the
+   * renderer flips the window back to interactive for as long as the pointer is
+   * inside the capsule (PLAN §2.1 "click-through everywhere except the pill").
+   */
+  'bar.pointerRegion': z.object({ interactive: z.boolean() }),
+  /** The capture renderer's view of the available microphones. */
+  'audio.devices': AudioDeviceListSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type MessageContract = typeof messageContract

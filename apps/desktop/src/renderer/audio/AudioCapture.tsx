@@ -1,46 +1,100 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+
+import { MicrophoneCapture } from './capture'
+import type { CaptureError } from './errors'
 
 /**
  * The hidden capture page (PLAN §3.1, §5).
  *
  * This window is never shown; it exists because `getUserMedia` lives in a
- * renderer. The main-process half is finished — the orchestrator drives capture
- * over the `audio.command` event and consumes `audio.frame` — so what remains
- * for the renderer stage is:
+ * renderer. It owns no policy of its own — main decides when the microphone
+ * opens and closes, over `audio.command` — so everything here is wiring:
  *
- *  1. subscribe with `window.murmur.audio.onCommand`; the payload is
- *     `{ action: 'warm' | 'start' | 'stop' | 'release', deviceId: string | null }`.
- *     `warm` opens the stream but drops frames, `start` begins streaming,
- *     `stop` pauses without closing, `release` closes it;
- *  2. run an `AudioWorklet` that downsamples to 16 kHz mono Float32 and emit
- *     ~100 ms frames via `sendFrame({ pcm, sampleCount, sampleRate: 16000, ts })`
- *     — `pcm` is the raw `ArrayBuffer`, and main copies it on arrival;
- *  3. report lifecycle with `reportStatus`; an `error` status is turned into a
- *     `mic-unavailable` dictation error by the orchestrator.
+ *  1. subscribe to `audio.command` (`warm` / `start` / `stop` / `release`) and
+ *     hand it to {@link MicrophoneCapture};
+ *  2. forward ~100 ms frames of 16 kHz mono Float32 PCM on `audio.frame`, and
+ *     the ~30 Hz level meter on `audio.meter`;
+ *  3. report lifecycle on `audio.status` — an `error` there becomes the Bar's
+ *     `mic-unavailable` state, so the message is written for the user;
+ *  4. keep the microphone list current on `audio.devices`, which is what the
+ *     Bar's and Settings' mic pickers render.
  *
  * It deliberately does **not** call `getUserMedia` on load: asking for the
  * microphone before the user has been told why would be the wrong first
  * impression, and the permission flow belongs to onboarding.
+ *
+ * The visible markup below is a developer convenience — unhide the window and
+ * it says what the microphone is doing.
  */
 export function AudioCapture(): React.JSX.Element {
+  const [state, setState] = useState<'idle' | 'live' | 'error'>('idle')
+  const [detail, setDetail] = useState<string>('Waiting for a command from the main process.')
+
   useEffect(() => {
-    // Tell main the page is alive but idle, so the status channel is exercised
-    // end to end from the very first build.
-    window.murmur?.audio.reportStatus({ status: 'idle' })
+    const bridge = window.murmur
+    if (!bridge) return
+
+    const capture = new MicrophoneCapture({
+      workletUrl: new URL('./pcm-worklet.js', import.meta.url).href,
+      callbacks: {
+        onFrame: (frame) => bridge.audio.sendFrame({ ...frame, sampleRate: 16_000 }),
+        onLevel: (level) => bridge.audio.reportLevel(level),
+        onDevices: (devices) => bridge.audio.reportDevices({ devices }),
+        onReady: ({ deviceId, sampleRate }) => {
+          bridge.audio.reportStatus({ status: 'ready', deviceId, sampleRate })
+          setState('live')
+          setDetail(`${deviceId ?? 'system default input'} · ${sampleRate} Hz`)
+        },
+        onIdle: () => {
+          bridge.audio.reportStatus({ status: 'idle' })
+          setState('idle')
+          setDetail('Microphone released.')
+        },
+        onError: (error: CaptureError) => {
+          bridge.audio.reportStatus({ status: 'error', message: error.message })
+          setState('error')
+          setDetail(`${error.code}: ${error.message}`)
+        },
+      },
+    })
+    const unsubscribe = bridge.audio.onCommand((command) => {
+      void capture.apply(command)
+    })
+
+    // Device hot-plug: AirPods connecting, a dock being attached. The list is
+    // pushed to main, which serves it to every picker.
+    const onDeviceChange = (): void => void capture.refreshDevices()
+    navigator.mediaDevices?.addEventListener?.('devicechange', onDeviceChange)
+    void capture.refreshDevices()
+
+    bridge.audio.reportStatus({ status: 'idle' })
+
+    return () => {
+      unsubscribe()
+      navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange)
+      capture.dispose()
+    }
   }, [])
 
   return (
     <main className="flex h-full flex-col justify-center gap-2 p-6">
       <h1 className="text-sm font-semibold text-ink">Audio capture</h1>
       <p className="text-[13px] leading-relaxed text-ink-muted">
-        Hidden renderer that will own the microphone:{' '}
-        <code className="font-mono">getUserMedia</code> plus an{' '}
-        <code className="font-mono">AudioWorklet</code> downsampling to 16 kHz mono Float32,
-        streamed to the main process as ~100 ms frames.
+        Hidden renderer that owns the microphone: <code className="font-mono">getUserMedia</code>{' '}
+        plus an <code className="font-mono">AudioWorklet</code>, resampled to 16 kHz mono Float32
+        and streamed to the main process as ~100 ms frames.
       </p>
-      <p className="text-[12px] text-ink-faint">
-        Not capturing yet — the main process drives this page over{' '}
-        <code className="font-mono">audio.command</code>.
+      <p
+        className={[
+          'text-[12px]',
+          state === 'error'
+            ? 'text-warning'
+            : state === 'live'
+              ? 'text-positive'
+              : 'text-ink-faint',
+        ].join(' ')}
+      >
+        {state} — {detail}
       </p>
     </main>
   )
