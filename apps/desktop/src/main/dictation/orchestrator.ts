@@ -183,6 +183,11 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       this.#fail('secure-input', precheck.message)
       return
     }
+    if (!precheck.ok && precheck.reason === 'elevated-target') {
+      // Surface as insert-failed with the UIPI next-action message (G9).
+      this.#fail('insert-failed', precheck.message)
+      return
+    }
 
     const stt = this.#deps.stt()
     if (!stt) {

@@ -217,6 +217,15 @@ Napi::Value IsSecureInputActive(const Napi::CallbackInfo& info) {
   return Napi::Boolean::New(info.Env(), IsPasswordClassHwnd(focus));
 }
 
+// G9: true when UIPI would block paste into the frontmost window.
+Napi::Value IsForegroundElevated(const Napi::CallbackInfo& info) {
+  if (ProcessElevated()) {
+    // We are elevated ourselves — UIPI does not block us.
+    return Napi::Boolean::New(info.Env(), false);
+  }
+  return Napi::Boolean::New(info.Env(), ForegroundElevated());
+}
+
 Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   HWND hwnd = GetForegroundWindow();
@@ -690,6 +699,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("sendPasteShortcut", Napi::Function::New(env, SendPasteShortcut));
   exports.Set("insertTextViaAccessibility", Napi::Function::New(env, InsertTextViaAccessibility));
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));
+  exports.Set("isForegroundElevated", Napi::Function::New(env, IsForegroundElevated));
   exports.Set("getFrontmostApp", Napi::Function::New(env, GetFrontmostApp));
 
   Napi::Object permissions = Napi::Object::New(env);

@@ -72,6 +72,8 @@ export interface MurmurNative {
   insertTextViaAccessibility(text: string): NativeActionResult
   getFrontmostApp(): FrontmostApp | null
   isSecureInputActive(): boolean
+  /** Windows UIPI: frontmost app elevated while Murmur is not. */
+  isForegroundElevated?(): boolean
   readonly permissions: NativePermissions
   platformInfo(): string
 }

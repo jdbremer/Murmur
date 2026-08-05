@@ -58,6 +58,19 @@ describe('TextInjector.precheck', () => {
     expect(result.ok === false && result.message).toContain('Secure field')
   })
 
+  it('refuses when the frontmost app is elevated (Windows UIPI / G9)', () => {
+    const injector = new TextInjector({
+      native: () =>
+        fakeNative({
+          isForegroundElevated: () => true,
+        }),
+      log,
+    })
+    const result = injector.precheck()
+    expect(result).toMatchObject({ ok: false, reason: 'elevated-target' })
+    expect(result.ok === false && result.message).toMatch(/administrator/i)
+  })
+
   it('passes when everything is in order', () => {
     const injector = new TextInjector({ native: () => fakeNative(), log })
     expect(injector.precheck()).toEqual({ ok: true })

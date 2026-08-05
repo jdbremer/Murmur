@@ -34,6 +34,9 @@ function createStub(reason) {
     isSecureInputActive() {
       return false
     },
+    isForegroundElevated() {
+      return false
+    },
     permissions: {
       check() {
         return {
@@ -69,6 +72,7 @@ function fromBinding(binding) {
     insertTextViaAccessibility: adopt(binding, stub, 'insertTextViaAccessibility'),
     getFrontmostApp: adopt(binding, stub, 'getFrontmostApp'),
     isSecureInputActive: adopt(binding, stub, 'isSecureInputActive'),
+    isForegroundElevated: adopt(binding, stub, 'isForegroundElevated'),
     permissions: {
       check: adopt(bindingPermissions, stub.permissions, 'check'),
       request: adopt(bindingPermissions, stub.permissions, 'request'),

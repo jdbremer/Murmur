@@ -39,7 +39,12 @@ import { createLogger, redact, type Logger } from '../logging'
 export const CLIPBOARD_RESTORE_MS = process.platform === 'win32' ? 400 : 150
 
 export type InjectionFailure =
-  'secure-input' | 'unsupported-platform' | 'no-focus' | 'paste-failed' | 'empty-text'
+  | 'secure-input'
+  | 'elevated-target'
+  | 'unsupported-platform'
+  | 'no-focus'
+  | 'paste-failed'
+  | 'empty-text'
 
 export interface InjectionResult extends InsertTextResult {
   reason?: InjectionFailure
@@ -98,6 +103,15 @@ export class TextInjector {
         ok: false,
         reason: 'secure-input',
         message: 'Secure field — Murmur will not type here.',
+      }
+    }
+    // Windows UIPI: non-elevated Murmur cannot SendInput into an elevated app.
+    if (typeof native.isForegroundElevated === 'function' && native.isForegroundElevated()) {
+      return {
+        ok: false,
+        reason: 'elevated-target',
+        message:
+          'That app is running as administrator — Murmur cannot type into it. Use a non-admin window, or run Murmur as admin too.',
       }
     }
     return { ok: true }

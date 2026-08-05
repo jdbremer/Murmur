@@ -74,6 +74,11 @@ export interface MurmurNative {
   getFrontmostApp(): FrontmostApp | null
   /** True when a password field owns input; Murmur must refuse to type. */
   isSecureInputActive(): boolean
+  /**
+   * True when the frontmost app runs elevated and this process does not
+   * (Windows UIPI). Optional on stubs/macOS — treat missing as `false`.
+   */
+  isForegroundElevated?(): boolean
   readonly permissions: NativePermissions
   /** Free-form build/runtime description, e.g. `"stub"` or `"darwin arm64"`. */
   platformInfo(): string
@@ -103,6 +108,9 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
       return null
     },
     isSecureInputActive() {
+      return false
+    },
+    isForegroundElevated() {
       return false
     },
     permissions: {

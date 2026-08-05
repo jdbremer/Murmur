@@ -47,11 +47,12 @@ Verified on a Windows dev box (agent overnight loop — **commits only, never pu
 | G6 Hotkey | **pass** | `WH_KEYBOARD_LL` installed; `startHotkeyListener` → true; Right Ctrl down/up via nut.js |
 | G7 STT | **pass** | `whisper-server.exe` + `whisper-tiny-en`; JFK sample → `inserted` (107 chars, paste) |
 | G8 Secure field | **pass** | Password TextBox focus → `secure-input` / “Secure field — Murmur will not type here.” |
-| G9–G10 | **open** | elevated (optional), stability 20× |
+| G9 Elevated | **pass** | Early refuse via `isForegroundElevated` + clear admin/UIPI message (unit + native API; live elevated Notepad needs UAC) |
+| G10 Stability | **pass** | 20× short JFK utterance: 20 inserted, 0 stuck, 0 crash (~600 ms each) |
 
-**Next gate:** G9 elevated Notepad UIPI message (optional) or G10 20× utterance stability.
+**Next gate:** none — **G0–G10 green** on this machine. Human review before any push.
 
-Idle policy: if blocked, walk every Hub screen — “would I like this as a user?” / advances hold→speak→insert.
+Idle policy: if blocked, walk every Hub section — “would I like this as a user?” / advances hold→speak→insert.
 
 ---
 
@@ -153,7 +154,7 @@ D  Paste                 ✓ G5 / G5b (canned)
 E  Hotkey + chords       ✓ G6 (Right Ctrl + chords in native)
 F  App categories
 G  STT                   ✓ G7 (whisper-server.exe + tiny.en)
-H  Ship / CI             ✓ G8 secure field; next G9–G10
+H  Ship / CI             ✓ G8–G10 (secure / elevated refuse / 20× stable)
 ```
 
 ---
