@@ -20,6 +20,7 @@ import type { AudioCaptureStatus, AudioDeviceList } from '@murmur/shared'
 import { AUDIO } from '../config'
 import { framePcm } from '../audio/buffer'
 import { describeNative, native } from '../native'
+import { checkPermissions, requestPermission } from '../permissions'
 import { simulateDictation } from '../dictation/simulator'
 import { installSidecarBinary } from '../engines/install-sidecar'
 import { setBarInteractive } from '../windows/bar'
@@ -170,11 +171,8 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   ipc.handle('style.set', (patch) => context.style.set(patch))
 
   // -- permissions ---------------------------------------------------------
-  ipc.handle('permissions.status', () => native().permissions.check())
-  ipc.handle('permissions.request', async ({ kind }) => {
-    await native().permissions.request(kind)
-    return native().permissions.check()
-  })
+  ipc.handle('permissions.status', () => checkPermissions())
+  ipc.handle('permissions.request', ({ kind }) => requestPermission(kind))
   ipc.handle('permissions.openSystemSettings', ({ kind }) => {
     native().permissions.openSettings(kind)
   })
