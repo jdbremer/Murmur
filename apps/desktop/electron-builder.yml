@@ -1,0 +1,70 @@
+# Packaging skeleton (PLAN §11, §15).
+#
+# Exercised in CI on macOS runners, not here — signing identities, notarisation
+# credentials and the universal sidecar binaries all arrive with the release
+# pipeline. What is fixed now is the shape: a signed, hardened, notarised DMG
+# with the microphone entitlement, distributed directly rather than via the
+# App Store (the event tap and Accessibility APIs are sandbox-incompatible).
+
+appId: com.murmur.app
+productName: Murmur
+copyright: Copyright © 2026 Murmur
+
+directories:
+  buildResources: buildResources
+  output: release
+
+files:
+  - out/**
+  - package.json
+  # npm workspaces hoist to the repo root, so the production dependency walk
+  # needs verifying on a macOS runner before the first real DMG.
+  - node_modules/**
+  - '!**/*.map'
+
+# The model catalog ships as data next to the app so it can be refreshed
+# without a rebuild (PLAN §8). Model weights are never bundled — they are
+# downloaded by the user, checksum-verified, into Application Support.
+extraResources:
+  - from: ../../resources/catalog
+    to: catalog
+    filter: ['**/*.json']
+
+asar: true
+# The compiled N-API addon must stay outside the archive to be dlopen-able.
+asarUnpack:
+  - '**/*.node'
+  - node_modules/@murmur/native/**
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # macOS 13 Ventura+ (PLAN §16.1).
+  minimumSystemVersion: '13.0'
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: buildResources/entitlements.mac.plist
+  entitlementsInherit: buildResources/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: >-
+      Murmur listens only while you hold your dictation key. Audio is transcribed
+      on this Mac and never leaves it.
+    # Menu-bar app: no Dock icon by default (PLAN §2.3).
+    LSUIElement: true
+
+dmg:
+  title: ${productName}
+  contents:
+    - x: 140
+      y: 200
+      type: file
+    - x: 400
+      y: 200
+      type: link
+      path: /Applications
+
+# Off by default for corporate installs; opt-in arrives with the release
+# milestone (PLAN §15, M6).
+publish: null

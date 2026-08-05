@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-08-05T00:00:00.000Z",
+  "notes": "Generated and verified against live Hugging Face metadata. Every URL is pinned to a repository revision and every sha256 is the file's real digest (LFS oid, or computed locally for small non-LFS files). Parakeet-TDT is deliberately absent: NVIDIA publishes .nemo checkpoints, not ONNX, and Murmur's provenance policy does not list community conversions. See scripts/models/export-parakeet.md for the first-party export we will run and host.",
+  "originPolicy": ["US"],
+  "models": [
+    {
+      "id": "whisper-large-v3-turbo-q5_0",
+      "kind": "stt",
+      "engine": "whisper-cpp",
+      "displayName": "Whisper large-v3-turbo (q5_0)",
+      "org": "OpenAI",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 574041195,
+      "ramTierGb": 16,
+      "languages": ["multi"],
+      "quant": "q5_0",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-large-v3-turbo-q5_0.bin",
+          "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+          "bytes": 574041195,
+          "filename": "ggml-large-v3-turbo-q5_0.bin"
+        }
+      ],
+      "recommended": true,
+      "notes": "OpenAI's Whisper large-v3-turbo, quantised to q5_0 and distributed as GGML by the whisper.cpp project's own model repo (ggerganov/whisper.cpp). Multilingual quality bar; recommended on 16 GB+ machines (PLAN \u00a76.2)."
+    },
+    {
+      "id": "whisper-small-en",
+      "kind": "stt",
+      "engine": "whisper-cpp",
+      "displayName": "Whisper small.en",
+      "org": "OpenAI",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 487614201,
+      "ramTierGb": 8,
+      "languages": ["en"],
+      "quant": "fp16",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.en.bin",
+          "sha256": "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+          "bytes": 487614201,
+          "filename": "ggml-small.en.bin"
+        }
+      ],
+      "recommended": true,
+      "notes": "English-only Whisper small. The 8 GB-tier default and the M1 bring-up model (PLAN \u00a76.2). GGML conversion from the whisper.cpp model repo."
+    },
+    {
+      "id": "whisper-tiny-en",
+      "kind": "stt",
+      "engine": "whisper-cpp",
+      "displayName": "Whisper tiny.en",
+      "org": "OpenAI",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 77704715,
+      "ramTierGb": 4,
+      "languages": ["en"],
+      "quant": "fp16",
+      "files": [
+        {
+          "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en.bin",
+          "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+          "bytes": 77704715,
+          "filename": "ggml-tiny.en.bin"
+        }
+      ],
+      "notes": "Smallest Whisper. Intel-Mac / low-RAM fallback (PLAN \u00a714 tier C)."
+    },
+    {
+      "id": "distil-whisper-large-v3.5",
+      "kind": "stt",
+      "engine": "whisper-cpp",
+      "displayName": "Distil-Whisper large-v3.5",
+      "org": "Hugging Face",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 1519521155,
+      "ramTierGb": 8,
+      "languages": ["en"],
+      "quant": "fp16",
+      "files": [
+        {
+          "url": "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/960ecb5c2ecfba3ebb9ebe485c1032ec266cf436/ggml-model.bin",
+          "sha256": "ec2498919b498c5f6b00041adb45650124b3cd9f26f545fffa8f5d11c28dcf26",
+          "bytes": 1519521155,
+          "filename": "ggml-model.bin"
+        }
+      ],
+      "notes": "First-party GGML release from the Distil-Whisper team (Hugging Face, New York). ~2x large-v3 speed at near-parity English accuracy. The repo ships one unquantised ggml-model.bin (1.4 GB), not the ~750 MB quantised estimate in PLAN \u00a76.2."
+    },
+    {
+      "id": "moonshine-base-onnx",
+      "kind": "stt",
+      "engine": "onnx-runtime",
+      "displayName": "Moonshine base",
+      "org": "Moonshine AI",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 64998628,
+      "ramTierGb": 4,
+      "languages": ["en"],
+      "quant": "int8",
+      "files": [
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine/resolve/48b4e427b587bcf67797a5be706d6ddc4a298149/onnx/merged/base/quantized/encoder_model.onnx",
+          "sha256": "1dd9ab0a7f987113d30affcba5a068d11c8f90fa0223caa3e491ade431ad9751",
+          "bytes": 20513063,
+          "filename": "encoder_model.onnx"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine/resolve/48b4e427b587bcf67797a5be706d6ddc4a298149/onnx/merged/base/quantized/decoder_model_merged.onnx",
+          "sha256": "cc9f3cd6698a369c6008b41aa60aa3fb3322e7f03c9bdf19d8e6b7200afca4f3",
+          "bytes": 42498870,
+          "filename": "decoder_model_merged.onnx"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine-base/resolve/7a73d8d55ac0ba2ef3ae761593f6784b51f96dcf/tokenizer.json",
+          "sha256": "6579793438bc4fbafffacf699169ff53e3769c5a0a0f5e71cdee8853e8130deb",
+          "bytes": 1985530,
+          "filename": "tokenizer.json"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine-base/resolve/7a73d8d55ac0ba2ef3ae761593f6784b51f96dcf/config.json",
+          "sha256": "f2073049d85ebf3d02825a35e6355004d59310568a1098779e4421b01333a2b1",
+          "bytes": 976,
+          "filename": "config.json"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine-base/resolve/7a73d8d55ac0ba2ef3ae761593f6784b51f96dcf/generation_config.json",
+          "sha256": "abf6644989715d3704713bf6e5542b433ddc891583b3a89ce31a7614d124c1aa",
+          "bytes": 189,
+          "filename": "generation_config.json"
+        }
+      ],
+      "notes": "Official ONNX export from Moonshine AI (formerly Useful Sensors, Mountain View CA). Weights come from moonshine-ai/moonshine; the tokenizer and generation config from the matching transformers repo. Takes raw 16 kHz audio \u2014 no mel front-end."
+    },
+    {
+      "id": "moonshine-tiny-onnx",
+      "kind": "stt",
+      "engine": "onnx-runtime",
+      "displayName": "Moonshine tiny",
+      "org": "Moonshine AI",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 30167563,
+      "ramTierGb": 4,
+      "languages": ["en"],
+      "quant": "int8",
+      "files": [
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine/resolve/48b4e427b587bcf67797a5be706d6ddc4a298149/onnx/merged/tiny/quantized/encoder_model.onnx",
+          "sha256": "c6fc4b7bc5af75c0591fd157a1f3829b533d18e9769a888fd95a62e470dd4f4a",
+          "bytes": 7937661,
+          "filename": "encoder_model.onnx"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine/resolve/48b4e427b587bcf67797a5be706d6ddc4a298149/onnx/merged/tiny/quantized/decoder_model_merged.onnx",
+          "sha256": "eed87831c3a6103534aae7d47a5d485025c659a1323901513961c39fe8a1a367",
+          "bytes": 20243286,
+          "filename": "decoder_model_merged.onnx"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine-tiny/resolve/390624ed33d594443aa4aa221f5b9f283b545b5a/tokenizer.json",
+          "sha256": "6579793438bc4fbafffacf699169ff53e3769c5a0a0f5e71cdee8853e8130deb",
+          "bytes": 1985530,
+          "filename": "tokenizer.json"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine-tiny/resolve/390624ed33d594443aa4aa221f5b9f283b545b5a/config.json",
+          "sha256": "47a43777a14e17b1ffd5f533e021d4d18c3c475cbb96de0947ce409e16444ded",
+          "bytes": 897,
+          "filename": "config.json"
+        },
+        {
+          "url": "https://huggingface.co/moonshine-ai/moonshine-tiny/resolve/390624ed33d594443aa4aa221f5b9f283b545b5a/generation_config.json",
+          "sha256": "a8e1437432c3ba7d0fca84ced5b3a254bf0c42b8e75fc336497cdcb56675e303",
+          "bytes": 189,
+          "filename": "generation_config.json"
+        }
+      ],
+      "notes": "Smallest Moonshine. Same first-party sources as moonshine-base-onnx."
+    },
+    {
+      "id": "gemma-3-4b-it-qat-q4_0",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Gemma 3 4B-it (QAT)",
+      "org": "Google",
+      "origin": "US",
+      "license": "Gemma",
+      "sizeBytes": 2363511904,
+      "ramTierGb": 16,
+      "languages": ["multi"],
+      "quant": "Q4_0",
+      "files": [
+        {
+          "url": "https://huggingface.co/lmstudio-community/gemma-3-4B-it-qat-GGUF/resolve/34701dc3de023d018ac5cc78e8b1af773cdf9936/gemma-3-4B-it-QAT-Q4_0.gguf",
+          "sha256": "89c167fc6dbe8e6a2e668b87b5789171a3e378e1914cb1580fb5317db82be46a",
+          "bytes": 2363511904,
+          "filename": "gemma-3-4B-it-QAT-Q4_0.gguf"
+        }
+      ],
+      "recommended": true,
+      "notes": "Google's quantisation-aware-trained Gemma 3 4B, GGUF-packaged by lmstudio-community. Google's own google/gemma-3-4b-it-qat-q4_0-gguf repo is licence-gated and returns 401 without a Hugging Face token, so it cannot be fetched by Murmur's anonymous downloader. Recommended polish default on 16 GB+ (PLAN \u00a77.2)."
+    },
+    {
+      "id": "gemma-3-1b-it-qat-q4_0",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Gemma 3 1B-it (QAT)",
+      "org": "Google",
+      "origin": "US",
+      "license": "Gemma",
+      "sizeBytes": 720425472,
+      "ramTierGb": 8,
+      "languages": ["multi"],
+      "quant": "Q4_0",
+      "files": [
+        {
+          "url": "https://huggingface.co/lmstudio-community/gemma-3-1B-it-qat-GGUF/resolve/c8ffb6497c1f3d54cb012c85b5ef3901fe6878e7/gemma-3-1B-it-QAT-Q4_0.gguf",
+          "sha256": "b25d35b00fe699ef52bf399fa579f2c56664897c013aeba2686965fdb6265f0f",
+          "bytes": 720425472,
+          "filename": "gemma-3-1B-it-QAT-Q4_0.gguf"
+        }
+      ],
+      "recommended": true,
+      "notes": "Low-RAM polish default (PLAN \u00a77.2). Same provenance note as the 4B entry: lmstudio-community GGUF of Google's official QAT weights, because Google's own GGUF repo is licence-gated."
+    },
+    {
+      "id": "phi-4-mini-instruct-q4_k_m",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Phi-4-mini-instruct 3.8B",
+      "org": "Microsoft",
+      "origin": "US",
+      "license": "MIT",
+      "sizeBytes": 2491874400,
+      "ramTierGb": 16,
+      "languages": ["multi"],
+      "quant": "Q4_K_M",
+      "files": [
+        {
+          "url": "https://huggingface.co/lmstudio-community/Phi-4-mini-instruct-GGUF/resolve/009f2b81869a0afd6b9aae23d29fa7b7ee2dcac9/Phi-4-mini-instruct-Q4_K_M.gguf",
+          "sha256": "3c4d3cbdf3006d81444f6c7a5a56eb93d8e0f0e2ba5963b8ab62f9fd42604233",
+          "bytes": 2491874400,
+          "filename": "Phi-4-mini-instruct-Q4_K_M.gguf"
+        }
+      ],
+      "notes": "MIT-licensed \u2014 the cleanest licence for strict environments (PLAN \u00a77.2). Microsoft publishes ONNX but no first-party GGUF, so this is the lmstudio-community quantisation of microsoft/Phi-4-mini-instruct."
+    },
+    {
+      "id": "llama-3.2-3b-instruct-q4_k_m",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Llama 3.2 3B Instruct",
+      "org": "Meta",
+      "origin": "US",
+      "license": "Llama-3.2-Community",
+      "sizeBytes": 2019373920,
+      "ramTierGb": 16,
+      "languages": ["multi"],
+      "quant": "Q4_K_M",
+      "files": [
+        {
+          "url": "https://huggingface.co/hugging-quants/Llama-3.2-3B-Instruct-Q4_K_M-GGUF/resolve/eb72f2a08dd2b9edd07ffacfe5aa56938b7939b0/llama-3.2-3b-instruct-q4_k_m.gguf",
+          "sha256": "c55a83bfb6396799337853ca69918a0b9bbb2917621078c34570bc17d20fd7a1",
+          "bytes": 2019373920,
+          "filename": "llama-3.2-3b-instruct-q4_k_m.gguf"
+        }
+      ],
+      "notes": "Quantised by hugging-quants, Hugging Face's own quantisation org, from meta-llama/Llama-3.2-3B-Instruct (which is itself gated)."
+    },
+    {
+      "id": "llama-3.2-1b-instruct-q4_k_m",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Llama 3.2 1B Instruct",
+      "org": "Meta",
+      "origin": "US",
+      "license": "Llama-3.2-Community",
+      "sizeBytes": 807690656,
+      "ramTierGb": 8,
+      "languages": ["multi"],
+      "quant": "Q4_K_M",
+      "files": [
+        {
+          "url": "https://huggingface.co/hugging-quants/Llama-3.2-1B-Instruct-Q4_K_M-GGUF/resolve/7d1f70022fcab2038000074bd0342e03e1d8b755/llama-3.2-1b-instruct-q4_k_m.gguf",
+          "sha256": "1d0e9419ec4e12aef73ccf4ffd122703e94c48344a96bc7c5f0f2772c2152ce3",
+          "bytes": 807690656,
+          "filename": "llama-3.2-1b-instruct-q4_k_m.gguf"
+        }
+      ],
+      "notes": "Same provenance as the 3B entry: hugging-quants GGUF of Meta's official weights."
+    },
+    {
+      "id": "olmo-2-1124-7b-instruct-q4_k_m",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "OLMo 2 7B Instruct",
+      "org": "Allen Institute for AI",
+      "origin": "US",
+      "license": "Apache-2.0",
+      "sizeBytes": 4472020256,
+      "ramTierGb": 16,
+      "languages": ["en"],
+      "quant": "Q4_K_M",
+      "files": [
+        {
+          "url": "https://huggingface.co/allenai/OLMo-2-1124-7B-Instruct-GGUF/resolve/410e0069f64869e4b1d17d8de04810b881fd824b/olmo-2-1124-7B-instruct-Q4_K_M.gguf",
+          "sha256": "e08112e5f84aab7c05fa6e713c58e5214cd5d8e32ed773ff3354b006eed41b95",
+          "bytes": 4472020256,
+          "filename": "olmo-2-1124-7B-instruct-Q4_K_M.gguf"
+        }
+      ],
+      "notes": "First-party GGUF from AI2. Fully open (data + weights) under Apache-2.0 \u2014 the easiest compliance story in the catalogue (PLAN \u00a77.2)."
+    },
+    {
+      "id": "granite-3.3-2b-instruct-q4_k_m",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Granite 3.3 2B Instruct",
+      "org": "IBM",
+      "origin": "US",
+      "license": "Apache-2.0",
+      "sizeBytes": 1545303328,
+      "ramTierGb": 8,
+      "languages": ["multi"],
+      "quant": "Q4_K_M",
+      "files": [
+        {
+          "url": "https://huggingface.co/ibm-granite/granite-3.3-2b-instruct-GGUF/resolve/7cdf86ccd1f1bb3491c9b7017b033f2e51367397/granite-3.3-2b-instruct-Q4_K_M.gguf",
+          "sha256": "ac71e9e32c0bea919b409c5918f69ca74339854b0319c5065e4e9fb6d95c4852",
+          "bytes": 1545303328,
+          "filename": "granite-3.3-2b-instruct-Q4_K_M.gguf"
+        }
+      ],
+      "notes": "First-party GGUF from IBM, Apache-2.0. Enterprise-friendly (PLAN \u00a77.2)."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+out/
+release/
+build/
+*.tsbuildinfo
+
+# native addon artifacts
+*.node
+packages/native/build/
+packages/native/prebuilds/
+
+# downloaded model weights (never committed — see PLAN.md §8).
+# Anchored to the repo root: a bare `models/` also shadows the main process's
+# own src/main/models source directory.
+/resources/models/
+/models/
+
+# sidecar checkouts and binaries, built by scripts/sidecars/*.sh
+.sidecars/
+
+# local env / editor / os
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+*.log
+npm-debug.log*

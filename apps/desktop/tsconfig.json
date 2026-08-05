@@ -1,0 +1,5 @@
+{
+  "//": "Solution file for editors. The real gates are the two configs below, which `npm run typecheck` runs directly.",
+  "files": [],
+  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]
+}

@@ -1,0 +1,12 @@
+node_modules
+dist
+out
+release
+build
+packages/native/build
+*.node
+package-lock.json
+
+# Authored documents — prettier's markdown reflowing fights the tables here.
+PLAN.md
+
