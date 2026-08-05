@@ -71,18 +71,21 @@ export function Button({
   variant = 'secondary',
   disabled = false,
   type = 'button',
+  title,
 }: {
   children: ReactNode
   onClick?: () => void
   variant?: ButtonVariant
   disabled?: boolean
   type?: 'button' | 'submit'
+  title?: string | undefined
 }): React.JSX.Element {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={[
         'rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-colors',
         'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line',
@@ -182,15 +185,24 @@ export function Row({
   label,
   hint,
   children,
+  htmlFor,
 }: {
   label: string
-  hint?: string
+  hint?: string | undefined
   children: ReactNode
+  /** When the control is a labellable element, connect it for screen readers. */
+  htmlFor?: string | undefined
 }): React.JSX.Element {
   return (
     <div className="flex items-center justify-between gap-6 border-b border-line py-3 last:border-b-0">
       <div className="min-w-0">
-        <p className="text-[13px] font-medium text-ink">{label}</p>
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className="text-[13px] font-medium text-ink">
+            {label}
+          </label>
+        ) : (
+          <p className="text-[13px] font-medium text-ink">{label}</p>
+        )}
         {hint ? <p className="mt-0.5 text-[12px] text-ink-muted">{hint}</p> : null}
       </div>
       <div className="shrink-0">{children}</div>
@@ -202,13 +214,20 @@ export function Select<T extends string>({
   value,
   options,
   onChange,
+  id,
+  label,
 }: {
   value: T
   options: readonly { value: T; label: string }[]
   onChange: (value: T) => void
+  id?: string | undefined
+  /** Accessible name for selects whose `Row` label is not linked via `id`. */
+  label?: string | undefined
 }): React.JSX.Element {
   return (
     <select
+      id={id}
+      aria-label={label}
       value={value}
       onChange={(event) => onChange(event.target.value as T)}
       className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
@@ -219,6 +238,16 @@ export function Select<T extends string>({
         </option>
       ))}
     </select>
+  )
+}
+
+/** A one-line "that did not work" under a control, never a dialog. */
+export function InlineError({ children }: { children: ReactNode }): React.JSX.Element | null {
+  if (!children) return null
+  return (
+    <p role="alert" className="mb-4 text-[12px] leading-relaxed text-warning">
+      {children}
+    </p>
   )
 }
 
