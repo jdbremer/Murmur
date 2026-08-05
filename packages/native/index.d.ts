@@ -18,7 +18,15 @@ export interface PermissionsStatus {
 }
 
 export interface HotkeyConfig {
-  key: 'fn' | 'rightCmd' | 'rightOpt' | 'custom'
+  key:
+    | 'fn'
+    | 'rightCmd'
+    | 'rightOpt'
+    | 'rightCtrl'
+    | 'ctrlSpace'
+    | 'altSpace'
+    | 'capsLock'
+    | 'custom'
   customKeyCode: number | null
   activation: 'hold' | 'toggle'
   doubleTapHandsFree: boolean

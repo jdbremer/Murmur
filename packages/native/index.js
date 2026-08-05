@@ -1,33 +1,20 @@
 'use strict'
 
 /**
- * @murmur/native — the single entry point for Murmur's macOS glue (PLAN §4).
+ * @murmur/native — entry point for Murmur OS glue (PLAN §4, §4.1).
  *
- * The desktop app must import this file, never `build/Release/*.node` directly.
  * Resolution order:
  *
- *   1. not macOS                  → typed no-op stub (`available: false`)
- *   2. macOS, binding won't load  → typed no-op stub (`available: false`)
- *   3. macOS, binding loaded      → the binding's functions, with a no-op
- *                                   standing in for anything it does not yet
- *                                   export
+ *   1. unsupported platform       → typed no-op stub (`available: false`)
+ *   2. supported, binding won't load → typed no-op stub (`available: false`)
+ *   3. supported, binding loaded  → binding functions with per-member fallback
  *
- * Case 3's partial fallback is deliberate: Stage 2 implements the native
- * functions one at a time, and each one starts working the moment the binding
- * exports it — no changes needed here.
- *
- * The interface is mirrored (and documented) as `MurmurNative` in
- * `@murmur/shared`; `index.d.ts` next to this file types it for consumers.
- * This file stays dependency-free on purpose — it has to run before, and
- * without, any bundler.
- *
- * The package is macOS-only for v1 (`"os": ["darwin"]`). The Windows and Linux
- * backends planned for M7/M8 (PLAN §4.1) slot in as extra `conditions` entries
- * in binding.gyp and a widened `os` field — the resolution logic below does not
- * change, only the platform check.
+ * Windows lives in `src/win/`; macOS in `src/murmur_native.mm`. Linux stays stub.
  */
 
 const BINDING_PATHS = ['./build/Release/murmur_native.node', './build/Debug/murmur_native.node']
+
+const SUPPORTED = new Set(['darwin', 'win32'])
 
 /** Every capability, inert. Safe to call; nothing happens. */
 function createStub(reason) {
@@ -66,7 +53,6 @@ function createStub(reason) {
   }
 }
 
-/** Prefer the binding's implementation, fall back to the stub's, per member. */
 function adopt(binding, stub, name) {
   return typeof binding[name] === 'function' ? binding[name].bind(binding) : stub[name]
 }
@@ -93,7 +79,7 @@ function fromBinding(binding) {
 }
 
 function load() {
-  if (process.platform !== 'darwin') {
+  if (!SUPPORTED.has(process.platform)) {
     return createStub('unsupported platform "' + process.platform + '"')
   }
 
@@ -106,8 +92,6 @@ function load() {
     }
   }
 
-  // A missing build is the common case (fresh checkout, `npm run native:build`
-  // not run yet); a load failure can also mean a permission-denied dlopen.
   return createStub(
     'failed to load native binding: ' +
       (lastError && lastError.message ? lastError.message : 'unknown'),

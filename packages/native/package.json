@@ -3,10 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "macOS-only N-API glue for Murmur: hotkey event tap, text injection, frontmost-app lookup, secure-input detection and permission checks.",
-  "os": [
-    "darwin"
-  ],
+  "description": "N-API glue for Murmur: hotkey, text injection, frontmost-app, permissions (macOS + Windows).",
+  "os": ["darwin", "win32"],
   "gypfile": true,
   "main": "index.js",
   "types": "index.d.ts",

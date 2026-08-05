@@ -58,6 +58,13 @@ describe('SettingsSchema', () => {
     expect(settings.barVisibility).toBe('showWhileDictating')
   })
 
+  it('accepts Windows hotkey presets alongside macOS ones', () => {
+    for (const key of ['rightCtrl', 'ctrlSpace', 'altSpace', 'capsLock'] as const) {
+      const parsed = SettingsSchema.parse({ hotkey: { key } })
+      expect(parsed.hotkey.key).toBe(key)
+    }
+  })
+
   it('rejects out-of-domain values', () => {
     expect(SettingsSchema.safeParse({ polishingLevel: 'sparkle' }).success).toBe(false)
     expect(SettingsSchema.safeParse({ hotkey: { key: 'leftPinky' } }).success).toBe(false)

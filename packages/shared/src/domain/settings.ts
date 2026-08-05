@@ -14,12 +14,47 @@ import { mergeDefined } from '../internal/merge'
 // ---------------------------------------------------------------------------
 
 /**
- * Which physical key holds-to-talk. `fn` is the default (matches the reference
- * UX); the right-hand modifiers exist for external keyboards that have no `fn`.
+ * Which physical key / chord holds-to-talk.
+ *
+ * macOS presets: `fn` (default), `rightCmd`, `rightOpt`.
+ * Windows presets (PLAN §4.1 / overnight lock): `rightCtrl` (default on win32),
+ * `ctrlSpace`, `altSpace`, `capsLock`.
  * `custom` defers to {@link HotkeyConfig.customKeyCode}.
+ *
+ * One shared enum keeps `settings.json` portable across OSes; the Settings UI
+ * and native backends filter to the keys they support.
  */
-export const HotkeyKeySchema = z.enum(['fn', 'rightCmd', 'rightOpt', 'custom'])
+export const HotkeyKeySchema = z.enum([
+  'fn',
+  'rightCmd',
+  'rightOpt',
+  'rightCtrl',
+  'ctrlSpace',
+  'altSpace',
+  'capsLock',
+  'custom',
+])
 export type HotkeyKey = z.infer<typeof HotkeyKeySchema>
+
+/** Presets shown on macOS (no Windows chords). */
+export const MAC_HOTKEY_KEYS = ['fn', 'rightCmd', 'rightOpt', 'custom'] as const satisfies readonly HotkeyKey[]
+
+/** Presets shown on Windows (no fn / ⌘ / ⌥). Overnight default: Right Ctrl. */
+export const WINDOWS_HOTKEY_KEYS = [
+  'rightCtrl',
+  'ctrlSpace',
+  'altSpace',
+  'capsLock',
+  'custom',
+] as const satisfies readonly HotkeyKey[]
+
+/** True when `key` is a macOS-only preset that must not surface on Windows. */
+export function isMacOnlyHotkeyKey(key: HotkeyKey): boolean {
+  return key === 'fn' || key === 'rightCmd' || key === 'rightOpt'
+}
+
+/** Shipped Windows default hotkey (DEFINITION-OF-DONE overnight lock). */
+export const WINDOWS_DEFAULT_HOTKEY_KEY: HotkeyKey = 'rightCtrl'
 
 /** `hold` = push-to-talk; `toggle` = press once to start, again to stop. */
 export const HotkeyActivationSchema = z.enum(['hold', 'toggle'])

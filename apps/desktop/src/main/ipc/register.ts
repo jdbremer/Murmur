@@ -14,8 +14,11 @@ import type {
   StyleRepository,
 } from '../store/repositories'
 import type { WindowManager } from '../windows/manager'
+import type { CaptureController } from '../audio/controller'
+import type { AudioCaptureStatus } from '@murmur/shared'
+import { AUDIO } from '../config'
 import { framePcm } from '../audio/buffer'
-import { native } from '../native'
+import { describeNative, native } from '../native'
 import { simulateDictation } from '../dictation/simulator'
 
 /**
@@ -41,6 +44,10 @@ export interface IpcContext {
   engines: EngineCoordinator
   models: ModelManager
   hotkeys: HotkeyBridge
+  /** Mic stream controller — Dev tools re-warm through this. */
+  audio: CaptureController
+  /** Real paste path — exposed to Dev/agent for G5 insert proof. */
+  injector: { insert: (text: string) => { ok: boolean; method: 'paste' | 'accessibility' | 'none'; error?: string } }
   dictations: DictationsRepository
   dictionary: DictionaryRepository
   style: StyleRepository
@@ -50,9 +57,18 @@ export interface IpcContext {
 
 export function registerIpcHandlers(context: IpcContext): MainIpc {
   const { ipc, windows, settings, machine, orchestrator, engines, models } = context
+  /** Last capture lifecycle, for `debug.snapshot` and Hub Dev tools. */
+  let lastCapture: AudioCaptureStatus | null = null
 
   // -- app -----------------------------------------------------------------
   ipc.handle('app.version', () => app.getVersion())
+  ipc.handle('app.info', () => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    isDev: context.isDev,
+    native: describeNative(),
+  }))
   ipc.handle('app.quit', () => {
     context.quit()
   })
@@ -152,6 +168,10 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     orchestrator.pushFrame(framePcm(frame.pcm, frame.sampleCount))
   })
   ipc.receive('audio.status', (status) => {
+    // Hub/Dev always get the truth, including idle-time mic failures that the
+    // orchestrator does not turn into a dictation error (WINDOWS-HANDOFF).
+    lastCapture = status
+    ipc.broadcast(windows.uiWebContents(), 'audio.captureStatus', status)
     if (status.status === 'error') orchestrator.reportAudioError(status.message)
   })
 
@@ -164,6 +184,54 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
       // Drives the *real* pipeline, so a dev machine with no event tap can
       // still exercise capture → VAD → STT → polish → insert end to end.
       context.hotkeys.handle({ type: action, timestamp: Date.now() })
+    })
+    ipc.handle('debug.warmMic', () => {
+      context.audio.warm(settings.get().micDeviceId)
+    })
+    ipc.handle('debug.injectPcm', ({ durationMs, amplitude, frequencyHz }) => {
+      const samplesPerFrame = Math.round((AUDIO.sampleRate * AUDIO.frameMs) / 1000)
+      const totalSamples = Math.max(1, Math.round((AUDIO.sampleRate * durationMs) / 1000))
+      let produced = 0
+      let frames = 0
+      let phase = 0
+      const twoPiF = (2 * Math.PI * frequencyHz) / AUDIO.sampleRate
+
+      while (produced < totalSamples) {
+        const n = Math.min(samplesPerFrame, totalSamples - produced)
+        const frame = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+          // Soft envelope so levels are non-zero and VAD sees energy.
+          const t = (produced + i) / totalSamples
+          const env = Math.sin(Math.PI * Math.min(1, Math.max(0, t * 1.05)))
+          frame[i] = amplitude * env * Math.sin(phase)
+          phase += twoPiF
+        }
+        orchestrator.pushFrame(frame)
+        produced += n
+        frames += 1
+      }
+
+      return { frames, sampleCount: produced }
+    })
+    ipc.handle('debug.snapshot', () => ({
+      app: {
+        version: app.getVersion(),
+        platform: process.platform,
+        arch: process.arch,
+        isDev: context.isDev,
+        native: describeNative(),
+      },
+      dictation: machine.getState(),
+      engines: engines.status(),
+      capture: lastCapture,
+    }))
+    ipc.handle('debug.insertText', ({ text }) => {
+      const result = context.injector.insert(text)
+      return {
+        ok: result.ok,
+        method: result.method,
+        ...(result.error ? { error: result.error } : {}),
+      }
     })
   }
 

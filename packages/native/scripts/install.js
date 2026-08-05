@@ -1,18 +1,14 @@
 'use strict'
 
 /**
- * npm's default `install` script for a `"gypfile": true` package is
- * `node-gyp rebuild`, which would fail on any non-macOS machine. This script
- * replaces it: build on macOS, quietly skip everywhere else.
- *
- * In practice npm never even reaches this on Linux/Windows — the package
- * declares `"os": ["darwin"]`, so it is skipped as an optional dependency of
- * `@murmur/desktop`. The guard is here for the case where someone installs
- * this package directly.
+ * Build the N-API addon on supported platforms; skip quietly elsewhere.
+ * Supported: darwin (Obj-C++), win32 (C++ SendInput / hooks).
  */
 
-if (process.platform !== 'darwin') {
-  console.log('[@murmur/native] skipping native build on ' + process.platform + ' (macOS only)')
+if (process.platform !== 'darwin' && process.platform !== 'win32') {
+  console.log(
+    '[@murmur/native] skipping native build on ' + process.platform + ' (macOS/Windows only)',
+  )
   process.exit(0)
 }
 

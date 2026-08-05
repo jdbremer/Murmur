@@ -1,3 +1,7 @@
+import { useEffect, useState } from 'react'
+
+import type { AppInfo, HotkeyKey } from '@murmur/shared'
+
 import { Card, Row, Section, Select, Toggle } from '../../components/Section'
 import { useSettings } from '../../hooks/useSettings'
 
@@ -7,13 +11,24 @@ import { useSettings } from '../../hooks/useSettings'
  * Everything here round-trips for real: each change is a `settings.set` patch
  * to the main-process store, which persists to `settings.json` and broadcasts
  * the new state back to every window.
+ *
+ * Hotkey presets branch on platform (WINDOWS-HANDOFF Phase B / gate G3): Windows
+ * never shows fn / ⌘ / ⌥ labels.
  */
 
-const HOTKEYS = [
-  { value: 'fn' as const, label: 'Hold fn' },
-  { value: 'rightCmd' as const, label: 'Hold right ⌘' },
-  { value: 'rightOpt' as const, label: 'Hold right ⌥' },
-  { value: 'custom' as const, label: 'Custom key' },
+const MAC_HOTKEYS: { value: HotkeyKey; label: string }[] = [
+  { value: 'fn', label: 'Hold fn' },
+  { value: 'rightCmd', label: 'Hold right ⌘' },
+  { value: 'rightOpt', label: 'Hold right ⌥' },
+  { value: 'custom', label: 'Custom key' },
+]
+
+const WINDOWS_HOTKEYS: { value: HotkeyKey; label: string }[] = [
+  { value: 'rightCtrl', label: 'Hold Right Ctrl' },
+  { value: 'ctrlSpace', label: 'Hold Ctrl+Space' },
+  { value: 'altSpace', label: 'Hold Alt+Space' },
+  { value: 'capsLock', label: 'Hold Caps Lock' },
+  { value: 'custom', label: 'Custom key' },
 ]
 
 const ACTIVATIONS = [
@@ -40,10 +55,42 @@ const AUDIO_RETENTION = [
 
 export function SettingsSection(): React.JSX.Element {
   const { settings, update, error } = useSettings()
+  const [info, setInfo] = useState<AppInfo | null>(null)
 
-  if (!settings) {
+  useEffect(() => {
+    void window.murmur.app
+      .info()
+      .then(setInfo)
+      .catch(() => {
+        // Older preload without app.info — assume non-mac so we never show ⌘/⌥
+        // on a Windows box that cannot resolve platform.
+        setInfo({
+          version: 'unknown',
+          platform: 'win32',
+          arch: 'unknown',
+          isDev: true,
+          native: 'unknown',
+        })
+      })
+  }, [])
+
+  // Wait for app.info so we never flash macOS fn/⌘/⌥ chrome on Windows (G3).
+  if (!settings || !info) {
     return <Section title="Settings" description="Loading…" />
   }
+
+  const isWindows = info.platform === 'win32'
+  const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : MAC_HOTKEYS
+  const hotkeyHint = isWindows
+    ? 'Global hold-to-talk. Right Ctrl is the Windows default; chords are supported.'
+    : 'Electron cannot see fn; the native event tap can.'
+  // If a Mac-only key is still stored on Windows (pre-migration), keep the
+  // select valid by coercing the displayed value to a Windows preset.
+  const hotkeyValue = hotkeyOptions.some((o) => o.value === settings.hotkey.key)
+    ? settings.hotkey.key
+    : isWindows
+      ? 'rightCtrl'
+      : settings.hotkey.key
 
   return (
     <Section title="Settings" description="Hotkey, microphone, retention and appearance.">
@@ -54,10 +101,10 @@ export function SettingsSection(): React.JSX.Element {
       ) : null}
 
       <Card className="mb-5">
-        <Row label="Dictation key" hint="Electron cannot see fn; the native event tap can.">
+        <Row label="Dictation key" hint={hotkeyHint}>
           <Select
-            value={settings.hotkey.key}
-            options={HOTKEYS}
+            value={hotkeyValue}
+            options={hotkeyOptions}
             onChange={(key) => void update({ hotkey: { ...settings.hotkey, key } })}
           />
         </Row>

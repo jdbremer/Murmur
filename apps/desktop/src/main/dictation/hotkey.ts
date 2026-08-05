@@ -193,6 +193,14 @@ function describeKey(config: HotkeyConfig): string {
       return 'right ⌘'
     case 'rightOpt':
       return 'right ⌥'
+    case 'rightCtrl':
+      return 'Right Ctrl'
+    case 'ctrlSpace':
+      return 'Ctrl+Space'
+    case 'altSpace':
+      return 'Alt+Space'
+    case 'capsLock':
+      return 'Caps Lock'
     case 'custom':
       return `key code ${config.customKeyCode ?? '?'}`
   }

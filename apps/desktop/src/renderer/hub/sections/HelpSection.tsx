@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { PermissionState, PermissionsStatus } from '@murmur/shared'
+import type { AppInfo, PermissionState, PermissionsStatus } from '@murmur/shared'
 
 import { Card, Row, Section } from '../../components/Section'
+import { DevToolsCard } from './DevToolsCard'
 
-/** Help (PLAN §2.2.6) — permission status, plus the developer escape hatches. */
+/**
+ * Help (PLAN §2.2.6) — permission status, plus the developer escape hatches.
+ *
+ * Permissions copy branches on platform so Windows does not show macOS TCC
+ * rituals (WINDOWS-HANDOFF Phase B starts here; full Settings hotkey lists follow).
+ */
+
 export function HelpSection(): React.JSX.Element {
   const [permissions, setPermissions] = useState<PermissionsStatus | null>(null)
-  const [version, setVersion] = useState<string>('—')
-  const [note, setNote] = useState<string | null>(null)
+  const [info, setInfo] = useState<AppInfo | null>(null)
 
   const refresh = useCallback(() => {
     void window.murmur.permissions
@@ -20,66 +26,141 @@ export function HelpSection(): React.JSX.Element {
   useEffect(() => {
     refresh()
     void window.murmur.app
-      .version()
-      .then(setVersion)
-      .catch(() => undefined)
+      .info()
+      .then(setInfo)
+      .catch(() => {
+        // Older preload without app.info — fall back to version only.
+        void window.murmur.app
+          .version()
+          .then((version) =>
+            setInfo({
+              version,
+              platform: 'unknown',
+              arch: 'unknown',
+              isDev: true,
+              native: 'unknown',
+            }),
+          )
+          .catch(() => undefined)
+      })
   }, [refresh])
 
-  const simulate = useCallback(() => {
-    setNote(null)
-    void window.murmur.debug.simulateDictation().catch((cause: unknown) => {
-      setNote(cause instanceof Error ? cause.message : String(cause))
-    })
-  }, [])
+  const isWindows = info?.platform === 'win32'
+  const isMac = info?.platform === 'darwin'
 
   return (
-    <Section
-      title="Help"
-      description="What Murmur needs from macOS, and what it deliberately does not do."
-    >
+    <Section title="Help" description={helpDescription(info)}>
+      {info?.isDev ? <DevToolsCard /> : null}
+
       <Card className="mb-5">
-        <Row label="Microphone" hint="Capturing what you say. Audio never leaves this machine.">
-          <PermissionBadge state={permissions?.microphone} />
-        </Row>
-        <Row label="Accessibility" hint="Typing the finished text into the app you are using.">
-          <PermissionBadge state={permissions?.accessibility} />
-        </Row>
-        <Row
-          label="Input Monitoring"
-          hint="Watching for your dictation key only — no other keystroke is read."
-        >
-          <PermissionBadge state={permissions?.inputMonitoring} />
-        </Row>
-        <Row label="Re-check">
-          <button
-            type="button"
-            onClick={refresh}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-canvas"
-          >
-            Check again
-          </button>
-        </Row>
+        {isWindows ? <WindowsPermissions permissions={permissions} onRefresh={refresh} /> : null}
+        {isMac || !info ? <MacPermissions permissions={permissions} onRefresh={refresh} /> : null}
+        {!isWindows && !isMac && info ? (
+          <Row label="Permissions">
+            <span className="text-[12px] text-ink-muted">
+              This platform reports OS permission APIs as unavailable; microphone access is handled
+              by the browser/Electron prompt when capture starts.
+            </span>
+          </Row>
+        ) : null}
       </Card>
 
       <Card>
         <Row label="Version">
-          <span className="select-text font-mono text-[12px] text-ink-muted">{version}</span>
+          <span className="select-text font-mono text-[12px] text-ink-muted">
+            {info?.version ?? '—'}
+            {info ? ` · ${info.platform}/${info.arch}` : ''}
+          </span>
         </Row>
-        <Row
-          label="Simulate a dictation"
-          hint="Runs the Bar through every state. Development builds only."
-        >
-          <button
-            type="button"
-            onClick={simulate}
-            className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-canvas"
-          >
-            Run
-          </button>
+        <Row label="Native module">
+          <span className="select-text font-mono text-[11px] leading-snug text-ink-muted">
+            {info?.native ?? '—'}
+          </span>
         </Row>
-        {note ? <p className="pt-3 text-[12px] text-warning">{note}</p> : null}
       </Card>
     </Section>
+  )
+}
+
+function helpDescription(info: AppInfo | null): string {
+  if (info?.platform === 'win32') {
+    return 'What Murmur needs on Windows, and tools for local development.'
+  }
+  if (info?.platform === 'darwin') {
+    return 'What Murmur needs from macOS, and what it deliberately does not do.'
+  }
+  return 'Permissions, version, and development tools.'
+}
+
+function MacPermissions({
+  permissions,
+  onRefresh,
+}: {
+  permissions: PermissionsStatus | null
+  onRefresh: () => void
+}): React.JSX.Element {
+  return (
+    <>
+      <Row label="Microphone" hint="Capturing what you say. Audio never leaves this machine.">
+        <PermissionBadge state={permissions?.microphone} />
+      </Row>
+      <Row label="Accessibility" hint="Typing the finished text into the app you are using.">
+        <PermissionBadge state={permissions?.accessibility} />
+      </Row>
+      <Row
+        label="Input Monitoring"
+        hint="Watching for your dictation key only — no other keystroke is read."
+      >
+        <PermissionBadge state={permissions?.inputMonitoring} />
+      </Row>
+      <Row label="Re-check">
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-canvas"
+        >
+          Check again
+        </button>
+      </Row>
+    </>
+  )
+}
+
+function WindowsPermissions({
+  permissions,
+  onRefresh,
+}: {
+  permissions: PermissionsStatus | null
+  onRefresh: () => void
+}): React.JSX.Element {
+  return (
+    <>
+      <Row
+        label="Microphone"
+        hint="Windows privacy settings + the in-app prompt. Audio never leaves this machine."
+      >
+        <PermissionBadge state={permissions?.microphone} />
+      </Row>
+      <Row
+        label="Global hotkey / paste"
+        hint="Provided by Murmur’s native helper when built for Windows — not separate OS toggles like on macOS."
+      >
+        <span className="text-[12px] text-ink-muted">
+          {permissions?.accessibility === 'unavailable'
+            ? 'Native helper not loaded yet (stub).'
+            : 'See native status below.'}
+        </span>
+      </Row>
+      <Row label="Re-check">
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="rounded-lg border border-line px-3 py-1.5 text-[13px] text-ink hover:bg-canvas"
+        >
+          Check again
+        </button>
+      </Row>
+    </>
   )
 }
 

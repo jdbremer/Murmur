@@ -8,6 +8,9 @@ and the 13-entry catalog loaded.
 Read this alongside [PLAN.md](./PLAN.md) (the product & engineering spec) and
 [README.md](./README.md) (layout, conventions, how to add an IPC channel).
 
+Windows port work lives in **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** so it
+does not collide with this macOS queue.
+
 ---
 
 ## Where things stand

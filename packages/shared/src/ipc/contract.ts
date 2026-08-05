@@ -107,6 +107,22 @@ export const DebugHotkeyRequestSchema = z.object({
 })
 export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 
+/**
+ * Compact runtime snapshot for Help / Dev tools (platform, native module,
+ * last mic status). Safe to expose in unpackaged builds; contains no audio.
+ */
+export const AppInfoSchema = z.object({
+  version: z.string().min(1),
+  /** Node-style platform string, e.g. `darwin`, `win32`, `linux`. */
+  platform: z.string().min(1),
+  arch: z.string().min(1),
+  /** True when running unpackaged (`electron-vite dev` / local out/). */
+  isDev: z.boolean(),
+  /** One-line `@murmur/native` description (active vs stub). */
+  native: z.string().min(1),
+})
+export type AppInfo = z.infer<typeof AppInfoSchema>
+
 // ---------------------------------------------------------------------------
 // renderer → main, request/response
 // ---------------------------------------------------------------------------
@@ -114,6 +130,8 @@ export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 export const invokeContract = {
   // --- app ---------------------------------------------------------------
   'app.version': { request: z.void(), response: z.string().min(1) },
+  /** Platform + native status for Help / Windows-mode UI branching. */
+  'app.info': { request: z.void(), response: AppInfoSchema },
   'app.quit': { request: z.void(), response: z.void() },
   'app.openHub': { request: z.void(), response: z.void() },
 
@@ -195,6 +213,57 @@ export const invokeContract = {
    * the production code path; it just replaces the trigger.
    */
   'debug.simulateHotkey': { request: DebugHotkeyRequestSchema, response: z.void() },
+  /**
+   * Re-issue `audio.command` warm so Dev tools can re-open the mic after a
+   * permission denial or device change without restarting the app.
+   */
+  'debug.warmMic': { request: z.void(), response: z.void() },
+  /**
+   * Agent / Dev: push synthetic 16 kHz mono PCM into the orchestrator as if the
+   * capture worklet had produced it. Used for unattended mic simulation without
+   * a real microphone (WINDOWS-HANDOFF agent loop).
+   */
+  'debug.injectPcm': {
+    request: z.object({
+      /** How long the synthetic utterance should last. */
+      durationMs: z.number().positive().max(30_000).default(800),
+      /** Peak amplitude 0..1 (energy for VAD / levels). */
+      amplitude: z.number().min(0).max(1).default(0.35),
+      /** Sine frequency in Hz — audible-ish energy, not speech content. */
+      frequencyHz: z.number().positive().max(4000).default(220),
+    }),
+    response: z.object({
+      frames: z.number().int().nonnegative(),
+      sampleCount: z.number().int().nonnegative(),
+    }),
+  },
+  /**
+   * Agent: one JSON snapshot of platform, native, engines, dictation, last
+   * capture status — machine-readable without a screenshot.
+   */
+  'debug.snapshot': {
+    request: z.void(),
+    response: z.object({
+      app: AppInfoSchema,
+      dictation: DictationEventSchema,
+      engines: EnginesStatusSchema,
+      capture: AudioCaptureStatusSchema.nullable(),
+    }),
+  },
+  /**
+   * Agent / Dev: run the real TextInjector path with a fixed phrase (G5 paste
+   * proof). Focus the target app first; does not run STT.
+   */
+  'debug.insertText': {
+    request: z.object({
+      text: z.string().min(1).max(10_000).default('hello'),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      method: z.enum(['paste', 'accessibility', 'none']),
+      error: z.string().optional(),
+    }),
+  },
 } as const satisfies Record<string, IpcInvokeDefinition>
 
 export type InvokeContract = typeof invokeContract
@@ -209,6 +278,12 @@ export const eventContract = {
   'dictation.state': DictationEventSchema,
   /** High-rate mic amplitude for the Bar's waveform. */
   'audio.level': AudioLevelEventSchema,
+  /**
+   * Capture renderer lifecycle (ready / error / idle). Broadcast so the Hub
+   * can surface mic failures even while the orchestrator is idle — the
+   * orchestrator only turns errors into dictation failures mid-utterance.
+   */
+  'audio.captureStatus': AudioCaptureStatusSchema,
   /** Broadcast after any successful `settings.set`, to all windows. */
   'settings.changed': SettingsSchema,
   'models.downloadProgress': ModelDownloadProgressSchema,

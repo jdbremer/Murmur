@@ -1,7 +1,11 @@
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { app, ipcMain } from 'electron'
 
 import {
   createMainIpc,
+  isMacOnlyHotkeyKey,
+  WINDOWS_DEFAULT_HOTKEY_KEY,
   type DictationEvent,
   type EnginesStatus,
   type Settings,
@@ -44,6 +48,7 @@ import { WindowManager } from './windows/manager'
 
 const log = createLogger('app')
 const isDev = !app.isPackaged
+const isAgent = process.env['MURMUR_AGENT'] === '1'
 
 // The workspace package is called `@murmur/desktop`, which Electron would
 // otherwise use for the user-data directory. Name it before anything reads
@@ -51,8 +56,22 @@ const isDev = !app.isPackaged
 // `~/Library/Application Support/Murmur` (PLAN §9).
 app.setName('Murmur')
 
+// Agent loop: isolate userData so unattended runs never fight a human session,
+// and optionally feed Chromium a fake media device / WAV as the "mic".
+// Switches must be set before ready (Chromium command line).
+if (isAgent) {
+  app.setPath('userData', join(tmpdir(), 'murmur-agent-userdata'))
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
+  const fakeAudio = process.env['MURMUR_AGENT_FAKE_AUDIO']
+  if (fakeAudio) {
+    app.commandLine.appendSwitch('use-fake-device-for-media-stream')
+    app.commandLine.appendSwitch('use-file-for-fake-audio-capture', fakeAudio)
+  }
+}
+
 // Single instance: a second launch focuses the running app's Hub instead of
 // starting a rival tray icon, event tap and set of sidecars.
+// Agent runs use a separate userData but still take the lock within that profile.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
@@ -78,6 +97,18 @@ async function bootstrap(): Promise<void> {
 
   const userDataPath = app.getPath('userData')
   const settings = SettingsStore.inUserData(userDataPath)
+  // Windows surface (gate G3 / G6): never keep a Mac-only hotkey as the active
+  // preset. Schema still accepts them so a settings.json from Mac validates;
+  // on win32 we rewrite to Right Ctrl (overnight lock).
+  if (process.platform === 'win32') {
+    const current = settings.get()
+    if (isMacOnlyHotkeyKey(current.hotkey.key)) {
+      settings.set({
+        hotkey: { ...current.hotkey, key: WINDOWS_DEFAULT_HOTKEY_KEY },
+      })
+      log.info(`Windows default hotkey applied: ${WINDOWS_DEFAULT_HOTKEY_KEY}`)
+    }
+  }
   const catalog = loadCatalog(app.getAppPath(), process.resourcesPath)
 
   log.info(`${app.getName()} ${app.getVersion()} on ${process.platform}`)
@@ -179,6 +210,8 @@ async function bootstrap(): Promise<void> {
     engines,
     models,
     hotkeys,
+    audio,
+    injector,
     dictations,
     dictionary,
     style,

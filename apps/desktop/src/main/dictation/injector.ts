@@ -31,8 +31,12 @@ import { createLogger, redact, type Logger } from '../logging'
  * into a typed result rather than an exception.
  */
 
-/** Delay before the clipboard is put back (PLAN §3.2.5). */
-export const CLIPBOARD_RESTORE_MS = 150
+/**
+ * Delay before the clipboard is put back (PLAN §3.2.5).
+ * Windows needs a longer settle — Win11 Notepad / packaged apps often read the
+ * pasteboard after the synthetic Ctrl+V returns, so 150 ms races the restore.
+ */
+export const CLIPBOARD_RESTORE_MS = process.platform === 'win32' ? 400 : 150
 
 export type InjectionFailure =
   'secure-input' | 'unsupported-platform' | 'no-focus' | 'paste-failed' | 'empty-text'
@@ -86,7 +90,7 @@ export class TextInjector {
       return {
         ok: false,
         reason: 'unsupported-platform',
-        message: 'Text insertion needs the macOS helper, which is not available on this platform.',
+        message: 'Text insertion needs the native helper, which is not available yet on this build.',
       }
     }
     if (native.isSecureInputActive()) {
