@@ -1,0 +1,115 @@
+# Release (PLAN §11, §15 M6).
+#
+# Push a tag like `v0.1.0` and this builds the installers on their own native
+# runners and attaches them to a **draft** GitHub release. Nothing reaches
+# users until a human opens that draft and clicks publish.
+#
+# Native runners rather than cross-compilation, because both `better-sqlite3`
+# and `@murmur/native` are compiled per platform — there is no honest way to
+# produce a Windows build from a Mac.
+#
+# Linux is absent on purpose: `@murmur/native` is darwin + win32 only, so a
+# Linux artifact would be a UI that can never dictate.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Lets you rehearse the whole thing without cutting a tag. The draft it
+  # produces is named for the last tag, so delete it afterwards.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      # electron-builder creates the draft release and uploads to it.
+      contents: write
+    strategy:
+      # One platform failing must not bin the other's artifacts.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS (arm64 + x64 DMG)
+            script: release:mac
+          - os: windows-latest
+            name: Windows (NSIS x64)
+            script: release:win
+
+    steps:
+      # The repo is LF; stop the Windows runner's autocrlf from rewriting it.
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # npm treats @murmur/native as optional, so a broken compile during
+      # `npm ci` is skipped silently. Build it explicitly: shipping an
+      # installer whose addon quietly failed to compile would produce an app
+      # that launches and cannot dictate.
+      - name: Build the native module
+        run: npm run native:build
+
+      - name: Verify the native module loads
+        run: node -e "const n=require('@murmur/native'); if(!n.isAvailable()) { console.error('native module did not load:', n.platformInfo()); process.exit(1) } console.log(n.platformInfo())"
+
+      # The same gate as CI. A release should never be the first time these run
+      # against the tagged commit.
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      # macOS code signing is NOT configured yet. Until a Developer ID is
+      # available the DMG is ad-hoc signed, which means Gatekeeper will block
+      # it after download — the release notes have to say so.
+      #
+      # To enable, add these repository secrets and delete the
+      # CSC_IDENTITY_AUTO_DISCOVERY line below:
+      #   CSC_LINK             base64 of the .p12 certificate
+      #   CSC_KEY_PASSWORD     its password
+      #   APPLE_ID             Apple account for notarisation
+      #   APPLE_APP_SPECIFIC_PASSWORD
+      #   APPLE_TEAM_ID
+      # electron-builder picks all of these up from the environment, and
+      # `hardenedRuntime` + the entitlements are already declared in
+      # electron-builder.yml, so no further config change is needed.
+      - name: Build and attach installers
+        run: npm run ${{ matrix.script }} --workspace @murmur/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # Kept for the case where publishing fails but the build succeeded, so a
+      # tag never leaves you with nothing to hand out.
+      - name: Keep the installers as artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml

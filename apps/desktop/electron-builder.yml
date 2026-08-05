@@ -65,6 +65,35 @@ dmg:
       type: link
       path: /Applications
 
-# Off by default for corporate installs; opt-in arrives with the release
-# milestone (PLAN §15, M6).
-publish: null
+# Windows: NSIS installer, x64. Not signed yet — see the note under `mac`
+# above; the same Authenticode gap applies here and SmartScreen will warn until
+# a certificate is configured.
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  # A real installer rather than one-click: this app asks for a keyboard hook,
+  # so the user should get to see and choose where it lands.
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # Per-user by default so no UAC prompt is needed to install.
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+# Linux is deliberately absent. `@murmur/native` declares os: [darwin, win32],
+# so a Linux build would ship the no-op stub: the Hub and settings would run,
+# and nothing would ever dictate. Shipping that as a download would be a
+# broken promise — see WINDOWS-HANDOFF.md and PLAN §4.1.
+
+# Draft, not published: a release is created with the binaries attached and
+# waits for a human to review and publish it. Nothing reaches users by accident.
+# Local `pack:*` scripts pass `--publish never`; only the release workflow
+# passes `--publish always`.
+publish:
+  provider: github
+  owner: jdbremer
+  repo: Murmur
+  releaseType: draft

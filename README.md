@@ -8,6 +8,35 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 - 🧠 Local STT (Parakeet, Whisper, Moonshine, …) and local polishing LLMs (Gemma 3, Phi-4-mini, Llama 3.2, OLMo 2, …) — US-origin only, with origin + license labels
 - 🔒 No accounts, no telemetry, no network traffic except user-initiated model downloads
 
+## Download
+
+Installers are attached to each [release](https://github.com/jdbremer/Murmur/releases):
+a `.dmg` for macOS (separate arm64 and Intel builds) and an NSIS `.exe` for
+Windows x64. There is no Linux build — `@murmur/native` is macOS + Windows
+only, so a Linux package would run the UI and never dictate.
+
+**Both are currently unsigned**, which the OS will tell you about in an alarming
+way:
+
+- **macOS** quarantines anything downloaded and Gatekeeper refuses to open it,
+  usually reporting that Murmur "is damaged". It is not. Right-click → Open, or
+  on macOS 15+ go to System Settings → Privacy & Security → Open Anyway. You can
+  also clear it directly: `xattr -dr com.apple.quarantine /Applications/Murmur.app`
+- **Windows** SmartScreen shows "Windows protected your PC" → More info → Run anyway.
+
+Only accept those warnings if you trust this build — Murmur asks for permission
+to watch your keyboard and type into other applications, so that is not a
+prompt to wave through on a whim. Building it yourself (below) sidesteps the
+question entirely. Signing and notarisation are the fix and are already
+declared in `apps/desktop/electron-builder.yml`, waiting on a certificate.
+
+Also note macOS ties Accessibility and Input Monitoring grants to an app's code
+signature, so with an unsigned build those permissions can reset on each update.
+
+Fresh installs transcribe nothing until you download a model from the Hub, and
+on macOS until `whisper-server` / `llama-server` are built
+(`scripts/sidecars/build-*.sh`). Windows can install them from the Models tab.
+
 ## Status
 
 **Working on macOS (field-proven).** Hold `fn`, speak, release — polished text lands in the frontmost app. Windows port is in progress with native hook, paste, whisper/llama sidecars, and Models install UX. The full plan lives in **[PLAN.md](./PLAN.md)**. Remaining work:
@@ -37,27 +66,36 @@ npm test             # vitest
 npm run lint         # eslint (flat config) — `npm run format` for prettier
 ```
 
-### Building a Mac app (DMG)
+### Packaging
 
 ```bash
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:mac --workspace @murmur/desktop
 ```
 
-Writes `apps/desktop/release/Murmur-<version>-arm64.dmg` (and an x64 one).
-Open it and drag Murmur to Applications.
+Writes `apps/desktop/release/Murmur-<version>-arm64.dmg` and an x64 one. Run
+`pack:win` on Windows for the NSIS installer — the native module and
+`better-sqlite3` are compiled per platform, so each installer has to be built
+on its own OS.
 
-That env var skips code signing, which is what makes this runnable without a
-Developer ID. The result is fine on the machine that built it and **not**
-distributable: Gatekeeper blocks an unsigned app that arrives from anywhere
-else, and because macOS keys Accessibility and Input Monitoring grants to the
-code signature, an ad-hoc signed build can lose its permissions on every
-rebuild. Drop the variable once a Developer ID is configured — `hardenedRuntime`,
+That env var skips code signing; see [Download](#download) for what unsigned
+means in practice. Drop it once a Developer ID is configured — `hardenedRuntime`,
 the entitlements and notarisation are already declared in
 `apps/desktop/electron-builder.yml`.
 
-Sidecars are not bundled, so a fresh install transcribes nothing until
-`whisper-server` / `llama-server` are on disk (`scripts/sidecars/build-*.sh`)
-and a model is downloaded from the Hub.
+### Cutting a release
+
+Push a tag and `.github/workflows/release.yml` builds both installers on their
+native runners and attaches them to a **draft** release:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+Draft, so nothing reaches anyone until you open it and click publish. The
+workflow runs typecheck and tests against the tagged commit first, and fails
+loudly if the native module does not compile or load — an installer whose addon
+silently failed would launch fine and never dictate. The macOS signing secrets
+it expects are listed in a comment in the workflow.
 
 ### Layout
 
