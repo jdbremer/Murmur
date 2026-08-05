@@ -28,8 +28,14 @@ const isMac = process.platform === 'darwin'
  * Stage 2 follows the display containing the focused window, and honours the
  * optional pin-to-one-display setting.
  */
+/**
+ * Bottom-centre of the display under the cursor (multi-monitor safe).
+ * Primary-only bounds put the pill off-screen when the primary is not the
+ * display the user is looking at.
+ */
 export function barBounds(): Rectangle {
-  const { bounds } = screen.getPrimaryDisplay()
+  const point = screen.getCursorScreenPoint()
+  const { bounds } = screen.getDisplayNearestPoint(point)
   return {
     x: Math.round(bounds.x + (bounds.width - BAR_WIDTH) / 2),
     y: Math.round(bounds.y + bounds.height - BAR_HEIGHT - BAR_MARGIN_BOTTOM),
@@ -67,13 +73,16 @@ export function createBarWindow(): BrowserWindow {
     },
   })
 
-  // Above the Dock and above full-screen apps.
-  window.setAlwaysOnTop(true, 'screen-saver')
-
+  // Windows: `screen-saver` level is unreliable for frameless transparent
+  // windows; `pop-up-menu` keeps the pill above ordinary apps without fighting
+  // the shell. macOS keeps the stronger full-screen level.
   if (isMac) {
+    window.setAlwaysOnTop(true, 'screen-saver')
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     // A non-activating panel: clicking the pill must not raise Murmur.
     window.setWindowButtonVisibility(false)
+  } else {
+    window.setAlwaysOnTop(true, 'pop-up-menu')
   }
 
   void loadRenderer(window, 'bar')

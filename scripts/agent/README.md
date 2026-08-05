@@ -79,3 +79,4 @@ Artifacts: `.agent/screenshots/` · `.agent/session.json` (gitignored)
 | `MURMUR_AGENT_SKIP_BUILD=1` | Skip rebuild if `out/` exists |
 | `MURMUR_AGENT_FAKE_AUDIO` | WAV path for Chromium fake capture |
 | `MURMUR_AGENT_URL` | CLI base URL |
+| `MURMUR_DEV_TOOLS=1` | Show Help → Developer panel (hidden in normal/production UI) |

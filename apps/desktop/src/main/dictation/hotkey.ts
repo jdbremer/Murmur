@@ -66,7 +66,7 @@ export class HotkeyBridge {
     return this.#running
   }
 
-  /** Start (or restart) the listener with `config`. Safe to call repeatedly. */
+  /** Start (or restart) the listener with `config`. Safe to call repeatedly. Never throws. */
   start(config: HotkeyConfig): void {
     this.stop()
     this.#config = config
@@ -77,20 +77,33 @@ export class HotkeyBridge {
       return
     }
 
-    // Native may return `false` when the OS hook/tap could not be installed
-    // (e.g. missing Input Monitoring on macOS, or WH_KEYBOARD_LL failure on Windows).
-    const started = native.startHotkeyListener(config, (event) => this.handle(event)) as
-      | boolean
-      | void
-    if (started === false) {
+    // Incomplete custom bindings would throw from the native addon — refuse here
+    // so bootstrap never dies with UnhandledPromiseRejection.
+    if (config.key === 'custom' && (config.customKeyCode === null || config.customKeyCode < 0)) {
       this.#running = false
-      this.#log.warn(
-        `native hotkey listener failed to start for ${describeKey(config)} — use debug.simulateHotkey`,
-      )
+      this.#log.warn('custom hotkey has no customKeyCode — listener not started')
       return
     }
-    this.#running = true
-    this.#log.info(`listening for ${describeKey(config)}`)
+
+    try {
+      // Native may return `false` when the OS hook/tap could not be installed
+      // (e.g. missing Input Monitoring on macOS, or WH_KEYBOARD_LL failure on Windows).
+      const started = native.startHotkeyListener(config, (event) => this.handle(event)) as
+        | boolean
+        | void
+      if (started === false) {
+        this.#running = false
+        this.#log.warn(
+          `native hotkey listener failed to start for ${describeKey(config)} — use debug.simulateHotkey`,
+        )
+        return
+      }
+      this.#running = true
+      this.#log.info(`listening for ${describeKey(config)}`)
+    } catch (error) {
+      this.#running = false
+      this.#log.warn('native hotkey listener threw:', error)
+    }
   }
 
   stop(): void {

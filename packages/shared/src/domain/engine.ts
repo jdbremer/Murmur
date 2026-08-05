@@ -66,10 +66,27 @@ export const EngineStatusSchema = z.object({
 })
 export type EngineStatus = z.infer<typeof EngineStatusSchema>
 
+/** Whether a loopback sidecar binary is on disk (not whether it is running). */
+export const SidecarBinaryStatusSchema = z.object({
+  installed: z.boolean(),
+  path: z.string().nullable().default(null),
+})
+export type SidecarBinaryStatus = z.infer<typeof SidecarBinaryStatusSchema>
+
 /** Both slots at once — what `engines.status` returns and broadcasts. */
 export const EnginesStatusSchema = z.object({
   stt: EngineStatusSchema,
   polish: EngineStatusSchema,
+  /**
+   * Sidecar binaries the UI can offer to install. Present so Models can hide
+   * "Recommended" on polish when llama-server is missing, and show an Install button.
+   */
+  sidecars: z
+    .object({
+      whisper: SidecarBinaryStatusSchema,
+      llama: SidecarBinaryStatusSchema,
+    })
+    .optional(),
 })
 export type EnginesStatus = z.infer<typeof EnginesStatusSchema>
 

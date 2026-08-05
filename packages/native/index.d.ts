@@ -66,6 +66,8 @@ export interface MurmurNative {
    */
   startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): void
   stopHotkeyListener(): void
+  /** Clear a stuck chord latch after a failed dictation begin. */
+  releaseHotkeyLatch(): void
   /** Synthesize ⌘V. The clipboard save/set/restore dance lives in main. */
   sendPasteShortcut(): NativeActionResult
   /** AX fallback for apps that drop synthetic keystrokes. */

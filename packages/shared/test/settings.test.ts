@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   applySettingsPatch,
   createDefaultSettings,
+  sanitizeHotkeyForPlatform,
   SettingsPatchSchema,
   SettingsSchema,
+  WINDOWS_DEFAULT_HOTKEY_KEY,
   type Settings,
 } from '../src/domain/settings'
 import { createDefaultStyleProfiles, StyleProfileSchema } from '../src/domain/style'
@@ -63,6 +65,19 @@ describe('SettingsSchema', () => {
       const parsed = SettingsSchema.parse({ hotkey: { key } })
       expect(parsed.hotkey.key).toBe(key)
     }
+  })
+
+  it('sanitizes incomplete custom hotkeys and Mac-only keys on Windows', () => {
+    const broken = SettingsSchema.parse({ hotkey: { key: 'custom', customKeyCode: null } }).hotkey
+    expect(sanitizeHotkeyForPlatform(broken, 'win32').key).toBe(WINDOWS_DEFAULT_HOTKEY_KEY)
+    expect(sanitizeHotkeyForPlatform(broken, 'darwin').key).toBe('fn')
+
+    const macOnly = SettingsSchema.parse({ hotkey: { key: 'fn' } }).hotkey
+    expect(sanitizeHotkeyForPlatform(macOnly, 'win32').key).toBe(WINDOWS_DEFAULT_HOTKEY_KEY)
+    expect(sanitizeHotkeyForPlatform(macOnly, 'darwin').key).toBe('fn')
+
+    const chord = SettingsSchema.parse({ hotkey: { key: 'ctrlSpace' } }).hotkey
+    expect(sanitizeHotkeyForPlatform(chord, 'win32').key).toBe(WINDOWS_DEFAULT_HOTKEY_KEY)
   })
 
   it('rejects out-of-domain values', () => {

@@ -59,6 +59,11 @@ export interface MurmurNative {
   startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): void
   stopHotkeyListener(): void
   /**
+   * Clear a stuck chord latch (e.g. after a failed begin while Space is still
+   * held). Safe no-op when nothing is latched. Does not synthesize a user key.
+   */
+  releaseHotkeyLatch(): void
+  /**
    * Synthesize ⌘V into whatever owns input right now.
    *
    * Deliberately *only* the keystroke: the clipboard save/set/restore dance
@@ -96,6 +101,9 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
       /* no-op: no event tap without the native module */
     },
     stopHotkeyListener() {
+      /* no-op */
+    },
+    releaseHotkeyLatch() {
       /* no-op */
     },
     sendPasteShortcut() {

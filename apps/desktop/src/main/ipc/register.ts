@@ -20,6 +20,7 @@ import { AUDIO } from '../config'
 import { framePcm } from '../audio/buffer'
 import { describeNative, native } from '../native'
 import { simulateDictation } from '../dictation/simulator'
+import { installSidecarBinary } from '../engines/install-sidecar'
 
 /**
  * Every `ipcMain` handler the app registers.
@@ -67,6 +68,8 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     platform: process.platform,
     arch: process.arch,
     isDev: context.isDev,
+    // Explicit opt-in — never ship the Developer panel to end users.
+    showDevTools: context.isDev && process.env['MURMUR_DEV_TOOLS'] === '1',
     native: describeNative(),
   }))
   ipc.handle('app.quit', () => {
@@ -130,6 +133,15 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
 
   // -- engines -------------------------------------------------------------
   ipc.handle('engines.status', () => engines.status())
+  ipc.handle('engines.installSidecar', async ({ which }) => {
+    // Consent is gathered in the renderer (Models UI). Main only downloads.
+    const result = await installSidecarBinary(which, app.getAppPath())
+    if (result.ok) {
+      // Reload engines so polish/STT pick up the new binary without restart.
+      await engines.apply(settings.get())
+    }
+    return result
+  })
 
   // -- history -------------------------------------------------------------
   ipc.handle('history.query', (query) => context.dictations.query(query))

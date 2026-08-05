@@ -84,6 +84,11 @@ export interface OrchestratorDeps {
   persist(record: Omit<DictationRecord, 'id'>): void
   /** High-rate mic level for the Bar's waveform. */
   onLevel?(level: number): void
+  /**
+   * Clear a stuck OS hotkey latch (Ctrl+Space Space key) after a failed begin.
+   * Optional — tests omit it.
+   */
+  releaseHotkeyLatch?(): void
   log?: Logger
   /** Injected for tests. */
   now?(): number
@@ -266,6 +271,11 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.#finishing = false
     this.#phase = 'idle'
     this.#deps.audio.stop()
+    try {
+      this.#deps.releaseHotkeyLatch?.()
+    } catch {
+      /* ignore */
+    }
 
     if (!wasBusy) {
       this.#deps.machine.reset()
@@ -575,6 +585,13 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.#finishing = false
     this.#phase = 'idle'
     this.#deps.audio.stop()
+    // If the user is still holding Space from Ctrl+Space, do not keep swallowing
+    // Space key-ups (that sticks the key in other apps).
+    try {
+      this.#deps.releaseHotkeyLatch?.()
+    } catch {
+      /* ignore */
+    }
     this.#deps.machine.fail(code, message)
   }
 }

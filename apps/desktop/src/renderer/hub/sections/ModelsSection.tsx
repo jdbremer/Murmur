@@ -64,8 +64,18 @@ const KIND_TITLE: Record<ModelKind, string> = {
 }
 
 export function ModelsSection(): React.JSX.Element {
-  const { models, engines, downloads, error, busyModelId, download, cancel, select, remove } =
-    useModels()
+  const {
+    models,
+    engines,
+    downloads,
+    error,
+    busyModelId,
+    download,
+    cancel,
+    select,
+    remove,
+    refresh,
+  } = useModels()
   const { settings } = useSettings()
 
   if (!models) {
@@ -113,6 +123,8 @@ export function ModelsSection(): React.JSX.Element {
           kind={kind}
           models={models}
           engine={kind === 'stt' ? engines?.stt : engines?.polish}
+          llamaRuntimeReady={engines?.sidecars?.llama?.installed === true}
+          whisperRuntimeReady={engines?.sidecars?.whisper?.installed === true}
           selectedId={selectedFor(kind)}
           installedIds={installedIds}
           downloads={downloads}
@@ -121,6 +133,7 @@ export function ModelsSection(): React.JSX.Element {
           onCancel={cancel}
           onSelect={select}
           onRemove={remove}
+          onRefresh={() => void refreshModels(refresh)}
         />
       ))}
 
@@ -133,6 +146,8 @@ function ModelGroup({
   kind,
   models,
   engine,
+  llamaRuntimeReady,
+  whisperRuntimeReady,
   selectedId,
   installedIds,
   downloads,
@@ -141,10 +156,13 @@ function ModelGroup({
   onCancel,
   onSelect,
   onRemove,
+  onRefresh,
 }: {
   kind: ModelKind
   models: ModelsList
   engine: EngineStatus | undefined
+  llamaRuntimeReady: boolean
+  whisperRuntimeReady: boolean
   selectedId: string | null
   installedIds: ReadonlySet<string>
   downloads: Record<string, ModelDownloadProgress>
@@ -153,9 +171,11 @@ function ModelGroup({
   onCancel: (modelId: string) => Promise<void>
   onSelect: (kind: ModelKind, modelId: string | null) => Promise<void>
   onRemove: (modelId: string) => Promise<void>
+  onRefresh: () => void
 }): React.JSX.Element {
   const entries = models.catalog.models.filter((entry) => entry.kind === kind)
   const imported = models.imported.filter((entry) => entry.kind === kind)
+  const runtimeReady = kind === 'polish' ? llamaRuntimeReady : whisperRuntimeReady
 
   return (
     <div className="mb-7">
@@ -163,6 +183,23 @@ function ModelGroup({
         <h2 className="text-[15px] font-semibold text-ink">{KIND_TITLE[kind]}</h2>
         {engine ? <EngineBadge engine={engine} /> : null}
       </div>
+
+      {kind === 'polish' && !llamaRuntimeReady ? (
+        <SidecarInstallCard
+          title="Polishing needs llama-server"
+          body="Gemma and other polish models are weights only. Murmur also needs the local llama-server runtime (like whisper-server for speech). Without it, dictation still works — text is inserted raw."
+          which="llama-server"
+          onInstalled={onRefresh}
+        />
+      ) : null}
+      {kind === 'stt' && !whisperRuntimeReady ? (
+        <SidecarInstallCard
+          title="Speech needs whisper-server"
+          body="Whisper models need the local whisper-server binary next to the app."
+          which="whisper-server"
+          onInstalled={onRefresh}
+        />
+      ) : null}
 
       {entries.length === 0 && imported.length === 0 ? (
         <EmptyState>
@@ -179,6 +216,8 @@ function ModelGroup({
                 selected={selectedId === entry.id}
                 progress={downloads[entry.id]}
                 busy={busyModelId === entry.id}
+                showRecommended={Boolean(entry.recommended) && runtimeReady}
+                runtimeReady={runtimeReady}
                 onDownload={() => void onDownload(entry.id)}
                 onCancel={() => void onCancel(entry.id)}
                 onSelect={() => void onSelect(kind, entry.id)}
@@ -212,6 +251,8 @@ function ModelRow({
   selected,
   progress,
   busy,
+  showRecommended,
+  runtimeReady,
   onDownload,
   onCancel,
   onSelect,
@@ -224,6 +265,8 @@ function ModelRow({
   selected: boolean
   progress: ModelDownloadProgress | undefined
   busy: boolean
+  showRecommended: boolean
+  runtimeReady: boolean
   onDownload: () => void
   onCancel: () => void
   onSelect: () => void
@@ -242,7 +285,12 @@ function ModelRow({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-[13px] font-semibold text-ink">{entry.displayName}</h3>
-            {entry.recommended ? <Badge tone="accent">Recommended</Badge> : null}
+            {showRecommended ? <Badge tone="accent">Recommended</Badge> : null}
+            {!runtimeReady && entry.kind === 'polish' ? (
+              <Badge tone="warning" title="Install llama-server first (button above)">
+                Needs runtime
+              </Badge>
+            ) : null}
             {selected ? <Badge tone="positive">In use</Badge> : null}
             {fit ? (
               <Badge
@@ -446,6 +494,65 @@ function ImportCard(): React.JSX.Element {
       {error ? <p className="mt-2.5 text-[12px] text-warning">{error}</p> : null}
     </Card>
   )
+}
+
+function SidecarInstallCard({
+  title,
+  body,
+  which,
+  onInstalled,
+}: {
+  title: string
+  body: string
+  which: 'llama-server' | 'whisper-server'
+  onInstalled: () => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState<string | null>(null)
+
+  const install = async (): Promise<void> => {
+    setBusy(true)
+    setNote(null)
+    try {
+      const ok = window.confirm(
+        which === 'llama-server'
+          ? 'Install llama-server so polishing models (Gemma, etc.) can run locally?\n\nMurmur will download an official Windows build from ggml-org/llama.cpp (a few hundred MB). Nothing leaves your machine except this download.'
+          : 'Install whisper-server so speech-to-text models can run locally?\n\nMurmur will download an official Windows build from ggml-org/whisper.cpp.',
+      )
+      if (!ok) {
+        setBusy(false)
+        return
+      }
+      const result = await window.murmur.engines.installSidecar({ which })
+      if (result.ok) {
+        setNote(result.detail)
+        onInstalled()
+      } else {
+        setNote(result.detail || result.error || 'Install failed')
+      }
+    } catch (cause) {
+      setNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="mb-3 border-warning/40">
+      <p className="text-[13px] font-semibold text-ink">{title}</p>
+      <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{body}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button variant="primary" disabled={busy} onClick={() => void install()}>
+          {busy ? 'Installing…' : `Install ${which}`}
+        </Button>
+        {note ? <span className="text-[12px] text-ink-muted">{note}</span> : null}
+      </div>
+    </Card>
+  )
+}
+
+function refreshModels(refresh: () => Promise<void>): Promise<void> {
+  return refresh()
 }
 
 /**

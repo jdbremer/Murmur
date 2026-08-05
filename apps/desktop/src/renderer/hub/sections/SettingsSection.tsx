@@ -24,9 +24,9 @@ const MAC_HOTKEYS: { value: HotkeyKey; label: string }[] = [
 ]
 
 const WINDOWS_HOTKEYS: { value: HotkeyKey; label: string }[] = [
-  { value: 'rightCtrl', label: 'Hold Right Ctrl' },
-  { value: 'ctrlSpace', label: 'Hold Ctrl+Space' },
-  { value: 'altSpace', label: 'Hold Alt+Space' },
+  { value: 'rightCtrl', label: 'Hold Right Ctrl (recommended)' },
+  // Ctrl+Space / Alt+Space temporarily removed: LL-hook Space swallow can stick
+  // the key across the whole OS. Re-add when latch release is proven solid.
   { value: 'capsLock', label: 'Hold Caps Lock' },
   { value: 'custom', label: 'Custom key' },
 ]
@@ -68,7 +68,8 @@ export function SettingsSection(): React.JSX.Element {
           version: 'unknown',
           platform: 'win32',
           arch: 'unknown',
-          isDev: true,
+          isDev: false,
+          showDevTools: false,
           native: 'unknown',
         })
       })
@@ -82,7 +83,7 @@ export function SettingsSection(): React.JSX.Element {
   const isWindows = info.platform === 'win32'
   const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : MAC_HOTKEYS
   const hotkeyHint = isWindows
-    ? 'Global hold-to-talk. Right Ctrl is the Windows default; chords are supported.'
+    ? 'Global hold-to-talk. Prefer Right Ctrl — it never swallows Space. Chords work but release fully if a key sticks.'
     : 'Electron cannot see fn; the native event tap can.'
   // If a Mac-only key is still stored on Windows (pre-migration), keep the
   // select valid by coercing the displayed value to a Windows preset.

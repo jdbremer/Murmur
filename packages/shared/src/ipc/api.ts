@@ -72,6 +72,8 @@ export interface MurmurApi {
   readonly engines: {
     status(): Promise<Res<'engines.status'>>
     subscribe(listener: (status: Evt<'engines.changed'>) => void): Unsubscribe
+    /** User-consented download of whisper-server / llama-server (Windows). */
+    installSidecar(request: Req<'engines.installSidecar'>): Promise<Res<'engines.installSidecar'>>
   }
 
   readonly history: {

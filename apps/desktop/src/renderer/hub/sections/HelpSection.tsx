@@ -37,7 +37,8 @@ export function HelpSection(): React.JSX.Element {
               version,
               platform: 'unknown',
               arch: 'unknown',
-              isDev: true,
+              isDev: false,
+              showDevTools: false,
               native: 'unknown',
             }),
           )
@@ -50,7 +51,7 @@ export function HelpSection(): React.JSX.Element {
 
   return (
     <Section title="Help" description={helpDescription(info)}>
-      {info?.isDev ? <DevToolsCard /> : null}
+      {info?.showDevTools ? <DevToolsCard /> : null}
 
       <Card className="mb-5">
         {isWindows ? <WindowsPermissions permissions={permissions} onRefresh={refresh} /> : null}

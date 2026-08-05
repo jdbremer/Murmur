@@ -1,13 +1,14 @@
 # Windows handoff
 
-This is the **Windows track** handoff (sibling to the macOS [HANDOFF.md](./HANDOFF.md)).
-It does not replace [PLAN.md](./PLAN.md).
+**Scope: Windows only.** Cross-platform product queue: [HANDOFF.md](./HANDOFF.md).
+macOS: [MAC-HANDOFF.md](./MAC-HANDOFF.md). Spec: [PLAN.md](./PLAN.md).
 
 | Doc | Owner / purpose |
 | --- | --- |
-| [PLAN.md](./PLAN.md) | Shared product & engineering spec. Windows is §4.1 and milestone **M7**. Edit only for durable product decisions, not session notes. |
-| [HANDOFF.md](./HANDOFF.md) | Mac remaining work queue (friend’s stream). Leave it alone unless a change is truly cross-platform. |
-| **WINDOWS-HANDOFF.md** (this file) | Active Windows plan, sequencing, remaining work, and **agent automation** for unattended iteration. |
+| [PLAN.md](./PLAN.md) | Shared product & engineering spec. Windows is §4.1 and milestone **M7**. |
+| [HANDOFF.md](./HANDOFF.md) | **App-wide** product backlog (language, Parakeet, History tab, insert-copy toast, privacy). |
+| [MAC-HANDOFF.md](./MAC-HANDOFF.md) | macOS residual work. |
+| **WINDOWS-HANDOFF.md** (this file) | Windows port status, gates, agent automation, OS-specific residual work. |
 
 Session-only AI notes stay **out of the repo** (local agent state, scratch
 plans). Anything durable for the product lands here or in a small code change.
@@ -50,7 +51,18 @@ Verified on a Windows dev box (agent overnight loop — **commits only, never pu
 | G9 Elevated | **pass** | Early refuse via `isForegroundElevated` + clear admin/UIPI message (unit + native API; live elevated Notepad needs UAC) |
 | G10 Stability | **pass** | 20× short JFK utterance: 20 inserted, 0 stuck, 0 crash (~600 ms each) |
 
-**Next gate:** none — **G0–G10 green** on this machine. Human review before any push.
+**Gates G0–G10** were green on the agent overnight loop. Human field testing
+continues; treat E2E with real voice + polish as still worth a casual poke.
+
+### Windows residual (platform-specific)
+
+| Item | Notes |
+| --- | --- |
+| Ctrl+Space / Alt+Space chords | Removed from Settings; boot migrates to Right Ctrl — re-add only when Space latch is proven solid |
+| Bar visibility on multi-monitor | Repositions to cursor display; verify on real multi-monitor desks |
+| In-app sidecar install | Models UI installs whisper/llama from GitHub after confirm; keep HF allowlist story honest in docs |
+| Polish “Ready” after install | After `Install llama-server` + Gemma download, badge should be Ready — re-verify |
+| App-wide product items | See [HANDOFF.md](./HANDOFF.md) (language, Parakeet, History tab, insert-copy toast) |
 
 Idle policy: if blocked, walk every Hub section — “would I like this as a user?” / advances hold→speak→insert.
 
@@ -166,7 +178,7 @@ H  Ship / CI             ✓ G8–G10 (secure / elevated refuse / 20× stable)
 | `packages/native/src/win/**` | `packages/shared` schema/IPC | `packages/native/src/*.mm` |
 | `apps/desktop/.../platform/win32/**` | `packages/native/index.js`, `binding.gyp` | Mac-only Help/Settings strings if extracted |
 | `scripts/sidecars/*.ps1` | `sidecar.ts` (`.exe` resolve) | `scripts/sidecars/*.sh` |
-| `WINDOWS-HANDOFF.md`, `scripts/agent/**` | Tiny pointers only | `HANDOFF.md` (Mac queue) |
+| `WINDOWS-HANDOFF.md`, `scripts/agent/**` | App-wide [HANDOFF.md](./HANDOFF.md) items | [MAC-HANDOFF.md](./MAC-HANDOFF.md) |
 
 Branch practice: long-lived Windows work off `main`; rebase often; no drive-by
 Mac refactors.

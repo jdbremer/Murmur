@@ -9,6 +9,7 @@ import {
 
 import { createLogger, type Logger } from '../logging'
 import type { ModelManager } from '../models/manager'
+import { allSidecarPresence } from './install-sidecar'
 import { LlamaCppPolishEngine } from './polish/llama-cpp'
 import { ExternalPolishEngine } from './polish/external'
 import { OnnxRuntimeEngine } from './stt/onnx-runtime'
@@ -66,7 +67,15 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
   }
 
   status(): EnginesStatus {
-    return { stt: this.#sttStatus, polish: this.#polishStatus }
+    const sidecars = allSidecarPresence(this.#options.resourcesPath, this.#options.appPath)
+    return {
+      stt: this.#sttStatus,
+      polish: this.#polishStatus,
+      sidecars: {
+        whisper: { installed: sidecars.whisper.installed, path: sidecars.whisper.path },
+        llama: { installed: sidecars.llama.installed, path: sidecars.llama.path },
+      },
+    }
   }
 
   /** The STT engine, if one is loaded. The orchestrator asks per utterance. */

@@ -402,6 +402,16 @@ void UpdateModifierState(const KBDLLHOOKSTRUCT* kb) {
   }
 }
 
+void InjectKeyUp(WORD vk) {
+  INPUT input = {};
+  input.type = INPUT_KEYBOARD;
+  input.ki.wVk = vk;
+  input.ki.dwFlags = KEYEVENTF_KEYUP;
+  // Mark as injected so our own LL hook can ignore it if needed.
+  input.ki.dwExtraInfo = 0;
+  SendInput(1, &input, sizeof(INPUT));
+}
+
 // Returns true when the event should be swallowed (targeted suppression).
 bool ProcessHotkeyEvent(const KBDLLHOOKSTRUCT* kb) {
   UpdateModifierState(kb);
@@ -416,23 +426,33 @@ bool ProcessHotkeyEvent(const KBDLLHOOKSTRUCT* kb) {
     }
 
     case HotkeyKind::CtrlSpace: {
+      // Chord = Ctrl held + Space edge. We swallow Space only while the chord is
+      // active. On any end path we inject KEYUP(Space) so the key cannot stick.
       if (kb->vkCode == VK_SPACE) {
+        const bool ctrlDown =
+            gCtrlHeld.load() || (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
         if (down) {
-          if (!gCtrlHeld.load() && (GetAsyncKeyState(VK_CONTROL) & 0x8000) == 0) return false;
+          if (!ctrlDown) {
+            if (gHotkeyDown.exchange(false)) InjectKeyUp(VK_SPACE);
+            return false;
+          }
           HandleEdge(true);
           return true;  // swallow Space so the chord does not type a space
         }
-        if (gHotkeyDown.load()) {
-          HandleEdge(false);
+        // Space up while latched: end hold and swallow (we ate the down).
+        if (gHotkeyDown.exchange(false)) {
+          EmitHotkeyEvent(1, NowSeconds());
           return true;
         }
         return false;
       }
-      // Ctrl released while chord latched → end hold.
+      // Ctrl released while latched → end hold + force Space KEYUP.
       if (!down && IsLeftOrRightControl(kb->vkCode) && gHotkeyDown.load()) {
         if ((GetAsyncKeyState(VK_LCONTROL) & 0x8000) == 0 &&
             (GetAsyncKeyState(VK_RCONTROL) & 0x8000) == 0) {
-          HandleEdge(false);
+          gHotkeyDown.store(false);
+          EmitHotkeyEvent(1, NowSeconds());
+          InjectKeyUp(VK_SPACE);
         }
       }
       return false;
@@ -440,13 +460,18 @@ bool ProcessHotkeyEvent(const KBDLLHOOKSTRUCT* kb) {
 
     case HotkeyKind::AltSpace: {
       if (kb->vkCode == VK_SPACE) {
+        const bool altDown =
+            gAltHeld.load() || (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
         if (down) {
-          if (!gAltHeld.load() && (GetAsyncKeyState(VK_MENU) & 0x8000) == 0) return false;
+          if (!altDown) {
+            if (gHotkeyDown.exchange(false)) InjectKeyUp(VK_SPACE);
+            return false;
+          }
           HandleEdge(true);
           return true;
         }
-        if (gHotkeyDown.load()) {
-          HandleEdge(false);
+        if (gHotkeyDown.exchange(false)) {
+          EmitHotkeyEvent(1, NowSeconds());
           return true;
         }
         return false;
@@ -454,7 +479,9 @@ bool ProcessHotkeyEvent(const KBDLLHOOKSTRUCT* kb) {
       if (!down && IsLeftOrRightAlt(kb->vkCode) && gHotkeyDown.load()) {
         if ((GetAsyncKeyState(VK_LMENU) & 0x8000) == 0 &&
             (GetAsyncKeyState(VK_RMENU) & 0x8000) == 0) {
-          HandleEdge(false);
+          gHotkeyDown.store(false);
+          EmitHotkeyEvent(1, NowSeconds());
+          InjectKeyUp(VK_SPACE);
         }
       }
       return false;
@@ -594,8 +621,8 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
   }
 
   if (parsed.kind == HotkeyKind::Custom && parsed.customVk < 0) {
-    Napi::Error::New(env, "custom hotkey requires customKeyCode").ThrowAsJavaScriptException();
-    return env.Undefined();
+    // Fail soft: never throw into Electron bootstrap (UnhandledPromiseRejection).
+    return Napi::Boolean::New(env, false);
   }
   if (parsed.kind == HotkeyKind::Unsupported) {
     // Do not install a hook that can never fire.
@@ -633,6 +660,16 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
 
   gListening.store(true);
   return Napi::Boolean::New(env, true);
+}
+
+Napi::Value ReleaseHotkeyLatch(const Napi::CallbackInfo& info) {
+  const bool wasDown = gHotkeyDown.exchange(false);
+  // If Space is still physically down (or the OS still thinks it is), force a
+  // KEYUP into the input stream so the key cannot stick in other apps.
+  if (wasDown || (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0) {
+    InjectKeyUp(VK_SPACE);
+  }
+  return info.Env().Undefined();
 }
 
 Napi::Value StopHotkeyListener(const Napi::CallbackInfo& info) {
@@ -696,6 +733,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("platformInfo", Napi::Function::New(env, PlatformInfo));
   exports.Set("startHotkeyListener", Napi::Function::New(env, StartHotkeyListener));
   exports.Set("stopHotkeyListener", Napi::Function::New(env, StopHotkeyListener));
+  exports.Set("releaseHotkeyLatch", Napi::Function::New(env, ReleaseHotkeyLatch));
   exports.Set("sendPasteShortcut", Napi::Function::New(env, SendPasteShortcut));
   exports.Set("insertTextViaAccessibility", Napi::Function::New(env, InsertTextViaAccessibility));
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));

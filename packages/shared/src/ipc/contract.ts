@@ -118,6 +118,11 @@ export const AppInfoSchema = z.object({
   arch: z.string().min(1),
   /** True when running unpackaged (`electron-vite dev` / local out/). */
   isDev: z.boolean(),
+  /**
+   * True only when `MURMUR_DEV_TOOLS=1`. The Help Developer panel is **not**
+   * shown in normal dev or production — agent IPC still works in unpackaged builds.
+   */
+  showDevTools: z.boolean().default(false),
   /** One-line `@murmur/native` description (active vs stub). */
   native: z.string().min(1),
 })
@@ -175,6 +180,22 @@ export const invokeContract = {
   // --- engines (PLAN §6.1, §7.1) -----------------------------------------
   /** Current STT + polish engine lifecycle, for the Hub's Models/Help panels. */
   'engines.status': { request: z.void(), response: EnginesStatusSchema },
+  /**
+   * Download and install a sidecar binary (Windows prebuild) after user consent.
+   * Used when polish/STT needs whisper-server / llama-server and it is missing.
+   */
+  'engines.installSidecar': {
+    request: z.object({
+      which: z.enum(['llama-server', 'whisper-server']),
+    }),
+    response: z.object({
+      ok: z.boolean(),
+      which: z.enum(['llama-server', 'whisper-server']),
+      path: z.string().nullable(),
+      error: z.string().nullable(),
+      detail: z.string(),
+    }),
+  },
 
   // --- history (PLAN §2.2.1) ---------------------------------------------
   'history.query': { request: HistoryQuerySchema, response: HistoryPageSchema },

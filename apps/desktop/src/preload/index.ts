@@ -86,6 +86,7 @@ const api: MurmurApi = {
   engines: {
     status: () => ipc.invoke('engines.status'),
     subscribe: (listener) => ipc.on('engines.changed', listener),
+    installSidecar: (request) => ipc.invoke('engines.installSidecar', request),
   },
 
   debug: {

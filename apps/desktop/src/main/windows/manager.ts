@@ -55,10 +55,24 @@ export class WindowManager {
     return this.#bar
   }
 
-  /** `showInactive` so the pill never takes focus from the target app. */
+  /**
+   * Show the pill without stealing focus from the target app.
+   * Repositions every show so multi-monitor cursor moves stay correct.
+   */
   showBar(): void {
     const window = this.bar()
-    if (!window.isVisible()) window.showInactive()
+    repositionBar(window)
+    // Windows sometimes no-ops showInactive on a never-shown transparent window.
+    if (!window.isVisible()) {
+      window.showInactive()
+      if (!window.isVisible() && process.platform === 'win32') {
+        window.show()
+        // Immediately yield focus back if anything grabbed it.
+        window.blur()
+      }
+    } else {
+      window.moveTop()
+    }
   }
 
   hideBar(): void {

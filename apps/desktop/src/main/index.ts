@@ -4,8 +4,7 @@ import { app, ipcMain } from 'electron'
 
 import {
   createMainIpc,
-  isMacOnlyHotkeyKey,
-  WINDOWS_DEFAULT_HOTKEY_KEY,
+  sanitizeHotkeyForPlatform,
   type DictationEvent,
   type EnginesStatus,
   type Settings,
@@ -97,16 +96,19 @@ async function bootstrap(): Promise<void> {
 
   const userDataPath = app.getPath('userData')
   const settings = SettingsStore.inUserData(userDataPath)
-  // Windows surface (gate G3 / G6): never keep a Mac-only hotkey as the active
-  // preset. Schema still accepts them so a settings.json from Mac validates;
-  // on win32 we rewrite to Right Ctrl (overnight lock).
-  if (process.platform === 'win32') {
+  // Heal hotkey config so native never throws at boot (custom without a code,
+  // or a Mac-only preset on Windows). Schema still accepts those shapes.
+  {
     const current = settings.get()
-    if (isMacOnlyHotkeyKey(current.hotkey.key)) {
-      settings.set({
-        hotkey: { ...current.hotkey, key: WINDOWS_DEFAULT_HOTKEY_KEY },
-      })
-      log.info(`Windows default hotkey applied: ${WINDOWS_DEFAULT_HOTKEY_KEY}`)
+    const healed = sanitizeHotkeyForPlatform(current.hotkey, process.platform)
+    if (
+      healed.key !== current.hotkey.key ||
+      healed.customKeyCode !== current.hotkey.customKeyCode
+    ) {
+      settings.set({ hotkey: healed })
+      log.info(
+        `hotkey healed: ${current.hotkey.key}/${current.hotkey.customKeyCode} → ${healed.key}`,
+      )
     }
   }
   const catalog = loadCatalog(app.getAppPath(), process.resourcesPath)
@@ -187,6 +189,13 @@ async function bootstrap(): Promise<void> {
     onLevel: (level) => {
       ipc.broadcast(windows.uiWebContents(), 'audio.level', { level, peak: null })
     },
+    releaseHotkeyLatch: () => {
+      try {
+        native().releaseHotkeyLatch()
+      } catch {
+        /* older native builds */
+      }
+    },
   })
 
   const hotkeys = new HotkeyBridge({
@@ -265,7 +274,12 @@ async function bootstrap(): Promise<void> {
   })
 
   /** PLAN §2.1: show while dictating (default) · always · hidden. */
+  let errorBarHideTimer: NodeJS.Timeout | null = null
   function applyBarVisibility(current: Settings, event: DictationEvent): void {
+    if (errorBarHideTimer) {
+      clearTimeout(errorBarHideTimer)
+      errorBarHideTimer = null
+    }
     switch (current.barVisibility) {
       case 'always':
         windows.showBar()
@@ -274,8 +288,20 @@ async function bootstrap(): Promise<void> {
         windows.hideBar()
         return
       case 'showWhileDictating':
-        if (event.state === 'idle') windows.hideBar()
-        else windows.showBar()
+        if (event.state === 'idle') {
+          windows.hideBar()
+          return
+        }
+        windows.showBar()
+        // Errors should not leave the Bar stuck open forever; Hub toast carries
+        // the message. Hide after a short beat so the user can still read it.
+        if (event.state === 'error') {
+          errorBarHideTimer = setTimeout(() => {
+            errorBarHideTimer = null
+            if (machine.state === 'idle') windows.hideBar()
+          }, 2800)
+          errorBarHideTimer.unref?.()
+        }
         return
     }
   }
@@ -330,6 +356,12 @@ async function bootstrap(): Promise<void> {
   applyBarVisibility(settings.get(), machine.getState())
   applyLaunchAtLogin(settings.get())
   hotkeys.start(settings.get().hotkey)
+  // Clear any stuck Space latch from a previous crash / bad chord session.
+  try {
+    native().releaseHotkeyLatch()
+  } catch {
+    /* ignore */
+  }
   await engines.apply(settings.get())
 
   // Warm the mic so the first dictation does not pay `getUserMedia`'s

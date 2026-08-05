@@ -70,6 +70,37 @@ export const HotkeyConfigSchema = z.object({
 })
 export type HotkeyConfig = z.infer<typeof HotkeyConfigSchema>
 
+/** True when `custom` was chosen without a key code — native cannot install a hook. */
+export function isIncompleteCustomHotkey(hotkey: HotkeyConfig): boolean {
+  return hotkey.key === 'custom' && (hotkey.customKeyCode === null || hotkey.customKeyCode < 0)
+}
+
+/** Space-swallowing chords — easy to leave Space stuck if a hold fails mid-key. */
+export function isSpaceChordHotkey(key: HotkeyKey): boolean {
+  return key === 'ctrlSpace' || key === 'altSpace'
+}
+
+/**
+ * Heal a hotkey config so the native module never throws at boot.
+ * Pass `process.platform` from the main process (shared stays Node-free).
+ *
+ * On Windows we also migrate Ctrl+Space / Alt+Space → Right Ctrl: swallowing
+ * Space system-wide is too risky until the hook is rock-solid.
+ */
+export function sanitizeHotkeyForPlatform(hotkey: HotkeyConfig, platform: string): HotkeyConfig {
+  if (isIncompleteCustomHotkey(hotkey)) {
+    return {
+      ...hotkey,
+      key: platform === 'win32' ? WINDOWS_DEFAULT_HOTKEY_KEY : 'fn',
+      customKeyCode: null,
+    }
+  }
+  if (platform === 'win32' && (isMacOnlyHotkeyKey(hotkey.key) || isSpaceChordHotkey(hotkey.key))) {
+    return { ...hotkey, key: WINDOWS_DEFAULT_HOTKEY_KEY, customKeyCode: null }
+  }
+  return hotkey
+}
+
 // ---------------------------------------------------------------------------
 // Retention
 // ---------------------------------------------------------------------------

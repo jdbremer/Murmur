@@ -288,8 +288,8 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
   // A custom binding with no key code would match nothing; refuse rather than
   // install a tap that can never fire.
   if (parsed.kind == HotkeyKind::Custom && parsed.customKeyCode < 0) {
-    Napi::Error::New(env, "custom hotkey requires customKeyCode").ThrowAsJavaScriptException();
-    return env.Undefined();
+    // Fail soft: never throw into Electron bootstrap.
+    return Napi::Boolean::New(env, false);
   }
   gConfig = parsed;
 
