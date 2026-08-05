@@ -56,6 +56,24 @@ export default tseslint.config(
     rules: reactHooks.configs.recommended.rules,
   },
 
+  // The capture AudioWorklet runs in AudioWorkletGlobalScope, not on the main
+  // thread, so it sees neither `window` nor the DOM — just these three globals
+  // the spec puts in scope. It is plain JS because it is loaded by URL through
+  // `audioWorklet.addModule` rather than bundled into the page.
+  {
+    files: ['apps/desktop/src/renderer/audio/capture-processor.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: {
+        AudioWorkletProcessor: 'readonly',
+        registerProcessor: 'readonly',
+        sampleRate: 'readonly',
+        currentTime: 'readonly',
+        currentFrame: 'readonly',
+      },
+    },
+  },
+
   // Shared package is platform-neutral; only needs the console/process shims it guards for.
   {
     files: ['packages/shared/**/*.ts'],

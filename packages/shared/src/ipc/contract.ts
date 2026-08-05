@@ -144,6 +144,15 @@ export const invokeContract = {
   },
   'models.delete': { request: ModelIdRequestSchema, response: z.void() },
   'models.import': { request: ModelImportRequestSchema, response: ImportedModelSchema },
+  /**
+   * Native open-dialog for "bring your own model". Returns the chosen path, or
+   * `null` if the user cancelled.
+   *
+   * A dialog rather than an `<input type="file">` because a sandboxed renderer
+   * cannot turn a `File` into the absolute path `models.import` needs, and
+   * because this way the file filters live next to the engines that define them.
+   */
+  'models.chooseFile': { request: z.void(), response: z.string().min(1).nullable() },
 
   // --- engines (PLAN §6.1, §7.1) -----------------------------------------
   /** Current STT + polish engine lifecycle, for the Hub's Models/Help panels. */

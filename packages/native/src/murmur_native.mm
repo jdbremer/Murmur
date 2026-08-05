@@ -433,7 +433,7 @@ Napi::Value InsertTextViaAccessibility(const Napi::CallbackInfo& info) {
     // Replace the selection rather than the value: this inserts at the caret and
     // leaves the rest of the field alone. Setting kAXValue would wipe it.
     error = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute,
-                                         static_cast<CFTypeRef>(value));
+                                         (__bridge CFTypeRef)value);
     CFRelease(element);
 
     if (error != kAXErrorSuccess) {
@@ -516,7 +516,7 @@ Napi::Value PermissionsRequest(const Napi::CallbackInfo& info) {
     @autoreleasepool {
       NSDictionary* options = @{(__bridge id)kAXTrustedCheckOptionPrompt : @YES};
       const bool trusted =
-          AXIsProcessTrustedWithOptions(static_cast<CFDictionaryRef>(options)) ? true : false;
+          AXIsProcessTrustedWithOptions((__bridge CFDictionaryRef)options) ? true : false;
       deferred.Resolve(Napi::String::New(env, trusted ? "granted" : "denied"));
     }
     return deferred.Promise();

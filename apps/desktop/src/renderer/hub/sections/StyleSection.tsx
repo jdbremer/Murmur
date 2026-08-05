@@ -1,9 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { StyleProfileSet } from '@murmur/shared'
+import type {
+  AppCategory,
+  EmojiPolicy,
+  FillerHandling,
+  Formality,
+  StyleProfile,
+  StyleProfileSet,
+} from '@murmur/shared'
 
-import { Card, ComingSoon, Row, Section, Select } from '../../components/Section'
+import { Card, ErrorCard, Row, Section, Select } from '../../components/Section'
 import { useSettings } from '../../hooks/useSettings'
+
+/**
+ * Style (PLAN §2.2.3) — the global polishing level plus per-category tone.
+ *
+ * Categories are derived from the frontmost app's bundle id at hotkey-down, so
+ * these profiles are the answer to "sound professional in Slack but not in
+ * Messages" without the user having to switch anything by hand. Each panel
+ * writes through `style.set`, which patches exactly the named profile and
+ * re-validates the whole set.
+ */
 
 const POLISHING_LEVELS = [
   { value: 'off' as const, label: 'Off — raw transcript' },
@@ -11,29 +28,79 @@ const POLISHING_LEVELS = [
   { value: 'rewrite' as const, label: 'Rewrite — tone & structure' },
 ]
 
-/** Style (PLAN §2.2.3) — the global polishing level plus per-category tone. */
+const FORMALITY: { value: Formality; label: string }[] = [
+  { value: 'casual', label: 'Casual' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'formal', label: 'Formal' },
+]
+
+const FILLERS: { value: FillerHandling; label: string }[] = [
+  { value: 'keep', label: 'Keep them' },
+  { value: 'trim', label: 'Trim the worst' },
+  { value: 'remove', label: 'Remove them' },
+]
+
+const EMOJI: { value: EmojiPolicy; label: string }[] = [
+  { value: 'never', label: 'Never' },
+  { value: 'preserve', label: 'Only if I say one' },
+  { value: 'allow', label: 'Allowed' },
+]
+
+const CATEGORY_HINT: Record<AppCategory, string> = {
+  personal: 'Messages, WhatsApp, Discord — anything conversational.',
+  work: 'Slack, Teams, Jira, your editor.',
+  email: 'Mail, Gmail, Outlook, Superhuman.',
+  other: 'Everything Murmur cannot confidently place.',
+}
+
 export function StyleSection(): React.JSX.Element {
   const { settings, update } = useSettings()
-  const [profiles, setProfiles] = useState<StyleProfileSet>([])
+  const [profiles, setProfiles] = useState<StyleProfileSet | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const active = useRef(true)
 
   useEffect(() => {
-    let active = true
+    active.current = true
     void window.murmur.style
       .get()
       .then((value) => {
-        if (active) setProfiles(value)
+        if (active.current) setProfiles(value)
       })
-      .catch(() => undefined)
+      .catch((cause: unknown) => {
+        if (!active.current) return
+        setError(cause instanceof Error ? cause.message : String(cause))
+        setProfiles([])
+      })
     return () => {
-      active = false
+      active.current = false
     }
   }, [])
+
+  const patch = async (
+    category: AppCategory,
+    change: Partial<Omit<StyleProfile, 'category'>>,
+  ): Promise<void> => {
+    try {
+      const next = await window.murmur.style.set({ category, ...change })
+      if (active.current) {
+        setProfiles(next)
+        setError(null)
+      }
+    } catch (cause) {
+      if (active.current) setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
+  const polishingOff = settings?.polishingLevel === 'off'
 
   return (
     <Section
       title="Style"
       description="How much Murmur is allowed to change what you said, and how it should sound in each kind of app."
     >
+      {error ? <ErrorCard>{error}</ErrorCard> : null}
+
       <Card className="mb-5">
         <Row label="Polishing level" hint="Applies everywhere unless a category overrides it.">
           {settings ? (
@@ -46,23 +113,102 @@ export function StyleSection(): React.JSX.Element {
         </Row>
       </Card>
 
-      <Card className="mb-5">
-        {profiles.map((profile) => (
-          <Row
-            key={profile.category}
-            label={capitalise(profile.category)}
-            hint={`${profile.formality} · fillers: ${profile.fillerHandling} · emoji: ${profile.emoji}`}
-          >
-            <span className="text-[12px] text-ink-faint">read-only</span>
-          </Row>
-        ))}
-      </Card>
+      {polishingOff ? (
+        <Card className="mb-5 border-dashed">
+          <p className="text-[13px] leading-relaxed text-ink-muted">
+            Polishing is off, so these profiles are not used — the raw transcript is inserted as
+            spoken. They are still editable, and take effect as soon as you turn polishing back on.
+          </p>
+        </Card>
+      ) : null}
 
-      <ComingSoon>
-        Editing tone per app category — and the bundle-id → category mapping that drives it — lands
-        with the polishing pipeline.
-      </ComingSoon>
+      {(profiles ?? []).map((profile) => (
+        <Card key={profile.category} className="mb-4">
+          <div className="mb-1">
+            <h2 className="text-[15px] font-semibold text-ink">{capitalise(profile.category)}</h2>
+            <p className="mt-0.5 text-[12px] text-ink-muted">{CATEGORY_HINT[profile.category]}</p>
+          </div>
+
+          <Row label="Formality">
+            <Select
+              value={profile.formality}
+              options={FORMALITY}
+              onChange={(formality) => void patch(profile.category, { formality })}
+            />
+          </Row>
+          <Row label="Filler words" hint="“um”, “uh”, “like”, and false starts.">
+            <Select
+              value={profile.fillerHandling}
+              options={FILLERS}
+              onChange={(fillerHandling) => void patch(profile.category, { fillerHandling })}
+            />
+          </Row>
+          <Row label="Emoji">
+            <Select
+              value={profile.emoji}
+              options={EMOJI}
+              onChange={(emoji) => void patch(profile.category, { emoji })}
+            />
+          </Row>
+
+          <div className="pt-3">
+            <label className="mb-1.5 block text-[13px] font-medium text-ink">
+              Custom instructions
+            </label>
+            <CustomInstructions
+              value={profile.customInstructions}
+              onCommit={(customInstructions) =>
+                void patch(profile.category, { customInstructions })
+              }
+            />
+          </div>
+        </Card>
+      ))}
     </Section>
+  )
+}
+
+/**
+ * Free text appended to the system prompt for one category.
+ *
+ * Kept as local state and committed on blur rather than on every keystroke:
+ * each commit is a disk write plus a prompt rebuild, and firing one per
+ * character would be both wasteful and visibly laggy.
+ */
+function CustomInstructions({
+  value,
+  onCommit,
+}: {
+  value: string
+  onCommit: (value: string) => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState(value)
+  const committed = useRef(value)
+
+  // Adopt external changes (another window edited the same profile) without
+  // stomping on what is being typed here.
+  useEffect(() => {
+    if (value !== committed.current) {
+      committed.current = value
+      setDraft(value)
+    }
+  }, [value])
+
+  return (
+    <textarea
+      value={draft}
+      maxLength={2000}
+      rows={2}
+      aria-label="Custom instructions"
+      placeholder="e.g. Prefer British spelling. Never start a message with “Hi there”."
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft === committed.current) return
+        committed.current = draft
+        onCommit(draft)
+      }}
+      className="w-full resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+    />
   )
 }
 

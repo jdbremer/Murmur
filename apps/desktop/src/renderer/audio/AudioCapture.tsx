@@ -1,47 +1,91 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+
+import type { AudioCaptureStatus } from '@murmur/shared'
+
+import { MicrophoneCapture } from './capture'
 
 /**
  * The hidden capture page (PLAN §3.1, §5).
  *
  * This window is never shown; it exists because `getUserMedia` lives in a
- * renderer. The main-process half is finished — the orchestrator drives capture
- * over the `audio.command` event and consumes `audio.frame` — so what remains
- * for the renderer stage is:
+ * renderer. All of the interesting logic is in {@link MicrophoneCapture} — the
+ * component is the IPC seam and nothing else:
  *
- *  1. subscribe with `window.murmur.audio.onCommand`; the payload is
- *     `{ action: 'warm' | 'start' | 'stop' | 'release', deviceId: string | null }`.
- *     `warm` opens the stream but drops frames, `start` begins streaming,
- *     `stop` pauses without closing, `release` closes it;
- *  2. run an `AudioWorklet` that downsamples to 16 kHz mono Float32 and emit
- *     ~100 ms frames via `sendFrame({ pcm, sampleCount, sampleRate: 16000, ts })`
- *     — `pcm` is the raw `ArrayBuffer`, and main copies it on arrival;
- *  3. report lifecycle with `reportStatus`; an `error` status is turned into a
- *     `mic-unavailable` dictation error by the orchestrator.
+ *  - `audio.command` in  → {@link MicrophoneCapture.apply};
+ *  - PCM frames out      → `audio.frame`;
+ *  - lifecycle out       → `audio.status`, which the orchestrator turns into a
+ *                          `mic-unavailable` dictation error when it is `error`.
  *
- * It deliberately does **not** call `getUserMedia` on load: asking for the
- * microphone before the user has been told why would be the wrong first
- * impression, and the permission flow belongs to onboarding.
+ * It deliberately does **not** open the microphone on load. Main sends `warm`
+ * once settings are known (PLAN §5), so the mic opens because the app decided
+ * to, not because a page happened to render.
+ *
+ * The visible markup only ever shows up in devtools, so it is a status readout
+ * rather than a design: when capture misbehaves, the first question is always
+ * "did the worklet actually start, and at what rate".
  */
 export function AudioCapture(): React.JSX.Element {
+  const [status, setStatus] = useState<AudioCaptureStatus>({ status: 'idle' })
+  const [frames, setFrames] = useState(0)
+  const frameCount = useRef(0)
+
   useEffect(() => {
+    const capture = new MicrophoneCapture({
+      onFrame: (pcm, sampleCount) => {
+        window.murmur.audio.sendFrame({ pcm, sampleCount, sampleRate: 16_000, ts: Date.now() })
+        frameCount.current += 1
+        // Throttled to ~1 Hz: this is a debug readout, not a meter, and
+        // re-rendering on every 100 ms frame would be pure waste.
+        if (frameCount.current % 10 === 0) setFrames(frameCount.current)
+      },
+      onStatus: (next) => {
+        setStatus(next)
+        window.murmur.audio.reportStatus(next)
+      },
+    })
+
+    const unsubscribe = window.murmur.audio.onCommand((command) => {
+      void capture.apply(command)
+    })
+
     // Tell main the page is alive but idle, so the status channel is exercised
     // end to end from the very first build.
-    window.murmur?.audio.reportStatus({ status: 'idle' })
+    window.murmur.audio.reportStatus({ status: 'idle' })
+
+    return () => {
+      unsubscribe()
+      capture.dispose()
+    }
   }, [])
 
   return (
     <main className="flex h-full flex-col justify-center gap-2 p-6">
       <h1 className="text-sm font-semibold text-ink">Audio capture</h1>
       <p className="text-[13px] leading-relaxed text-ink-muted">
-        Hidden renderer that will own the microphone:{' '}
-        <code className="font-mono">getUserMedia</code> plus an{' '}
-        <code className="font-mono">AudioWorklet</code> downsampling to 16 kHz mono Float32,
-        streamed to the main process as ~100 ms frames.
+        Hidden renderer that owns the microphone: <code className="font-mono">getUserMedia</code>{' '}
+        plus an <code className="font-mono">AudioWorklet</code> downsampling to 16 kHz mono Float32,
+        streamed to the main process as 100 ms frames.
       </p>
-      <p className="text-[12px] text-ink-faint">
-        Not capturing yet — the main process drives this page over{' '}
-        <code className="font-mono">audio.command</code>.
-      </p>
+      <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12px] text-ink-faint">
+        <dt>State</dt>
+        <dd className="font-mono text-ink-muted">{status.status}</dd>
+        {status.status === 'ready' ? (
+          <>
+            <dt>Rate</dt>
+            <dd className="font-mono text-ink-muted">{status.sampleRate} Hz</dd>
+            <dt>Device</dt>
+            <dd className="truncate font-mono text-ink-muted">{status.deviceId ?? 'default'}</dd>
+          </>
+        ) : null}
+        {status.status === 'error' ? (
+          <>
+            <dt>Error</dt>
+            <dd className="text-warning">{status.message}</dd>
+          </>
+        ) : null}
+        <dt>Frames</dt>
+        <dd className="font-mono tabular-nums text-ink-muted">{frames}</dd>
+      </dl>
     </main>
   )
 }

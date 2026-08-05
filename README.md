@@ -10,11 +10,13 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 ## Status
 
-Early implementation. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)** — UX spec, architecture, model catalogs, roadmap (M0–M6), risks, and open questions.
+Early implementation. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)** — UX spec, architecture, model catalogs, roadmap (M0–M6), risks, and open questions. Remaining work and known gaps are tracked in **[HANDOFF.md](./HANDOFF.md)**.
 
 The **main process is complete**: the dictation orchestrator with per-stage timeouts and typed error states, the no-ML VAD, both STT engines (whisper.cpp sidecar, ONNX Runtime utility process), the polish engine with its prompt builder and hallucination guard, the model manager with a resumable checksum-verified downloader, the SQLite store with FTS5 search, clipboard-swap text insertion, and the macOS native module (event tap, paste synthesis, permissions).
 
-Still to come: the Bar and Hub UIs, the audio-capture renderer's `getUserMedia` half, onboarding, and CI. Dictation therefore does not run end to end yet — the main process is ready for it, the microphone is not connected.
+The **capture renderer and the Hub are now wired**: `getUserMedia` plus an AudioWorklet streaming 16 kHz mono frames, and Hub sections that really do download, verify, select and delete models, search history, edit the dictionary, and set per-app tone.
+
+Still to come: the Bar's real waveform (it renders a stand-in today), the microphone picker, onboarding, and CI. **Dictation has not yet been demonstrated end to end** — every stage is implemented, but proving the loop needs built sidecars, a downloaded model and granted macOS permissions on one machine. See [HANDOFF.md](./HANDOFF.md).
 
 ## Development
 

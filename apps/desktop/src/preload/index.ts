@@ -53,6 +53,7 @@ const api: MurmurApi = {
     select: (request) => ipc.invoke('models.select', request),
     remove: (request) => ipc.invoke('models.delete', request),
     import: (request) => ipc.invoke('models.import', request),
+    chooseFile: () => ipc.invoke('models.chooseFile'),
   },
 
   history: {

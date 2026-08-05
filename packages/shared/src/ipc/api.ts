@@ -62,6 +62,8 @@ export interface MurmurApi {
     select(request: Req<'models.select'>): Promise<Res<'models.select'>>
     remove(request: Req<'models.delete'>): Promise<void>
     import(request: Req<'models.import'>): Promise<Res<'models.import'>>
+    /** Native open-dialog; resolves to the chosen path or `null` if cancelled. */
+    chooseFile(): Promise<Res<'models.chooseFile'>>
   }
 
   readonly engines: {

@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, dialog } from 'electron'
 
 import type { MainIpc } from '@murmur/shared'
 
@@ -97,6 +97,20 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     if (current.polishModelId === modelId) settings.set({ polishModelId: null })
   })
   ipc.handle('models.import', (request) => models.import(request))
+  ipc.handle('models.chooseFile', async () => {
+    // The three weight formats Murmur's engines can actually load: GGUF for the
+    // llama.cpp / whisper.cpp sidecars, `.bin` for whisper's older dumps, and
+    // ONNX for the utility-process runtime.
+    const result = await dialog.showOpenDialog({
+      title: 'Choose a model file',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Model weights', extensions: ['gguf', 'bin', 'onnx'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    })
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
 
   // -- engines -------------------------------------------------------------
   ipc.handle('engines.status', () => engines.status())

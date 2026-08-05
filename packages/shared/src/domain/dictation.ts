@@ -135,11 +135,18 @@ export type AudioCaptureStatus = z.infer<typeof AudioCaptureStatusSchema>
  * Main → hidden capture renderer. The orchestrator decides when the mic is
  * open; the renderer never starts on its own.
  *
- *  - `warm`    — open the stream and keep it running, but drop frames. Removes
- *                the cold-start delay before the first utterance (PLAN §5).
- *  - `start`   — begin streaming frames to main.
- *  - `stop`    — stop streaming; the stream stays warm.
+ *  - `warm`    — open the stream and start sending frames. Removes the
+ *                cold-start delay before the first utterance, and fills main's
+ *                rolling pre-roll ring (PLAN §5).
+ *  - `start`   — begin an utterance; frames now accumulate instead.
+ *  - `stop`    — stop sending frames; the stream stays open and warm.
  *  - `release` — close the stream entirely (idle timeout, mic changed).
+ *
+ * `warm` and `start` differ only in what **main** does with the frames, not in
+ * whether they arrive. That is deliberate: `PreRollBuffer` is a rolling 300 ms
+ * ring fed by frames received while idle, so a `warm` that withheld them would
+ * leave it permanently empty and clip the first syllable of every utterance —
+ * precisely what pre-roll exists to prevent.
  */
 export const AudioCommandSchema = z.object({
   action: z.enum(['warm', 'start', 'stop', 'release']),
