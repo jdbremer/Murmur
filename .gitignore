@@ -1,0 +1,31 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+out/
+release/
+build/
+*.tsbuildinfo
+
+# native addon artifacts
+*.node
+packages/native/build/
+packages/native/prebuilds/
+
+# downloaded model weights (never committed — see PLAN.md §8)
+models/
+resources/models/
+
+# local env / editor / os
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# logs
+*.log
+npm-debug.log*

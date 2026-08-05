@@ -1,0 +1,26 @@
+/*
+ * The Bar window is frameless and transparent: the page background must stay
+ * fully clear so only the capsule itself is visible over whatever the user is
+ * dictating into.
+ *
+ * Click-through is handled per element rather than per window — the window
+ * ignores the mouse (`pointer-events: none` on the body) and the pill opts back
+ * in, which is what makes "click-through everywhere except the pill" work
+ * (PLAN §2.1).
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+  background: transparent;
+}
+
+body {
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bar-pill {
+  pointer-events: auto;
+}

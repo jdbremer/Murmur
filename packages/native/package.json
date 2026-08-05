@@ -1,0 +1,28 @@
+{
+  "name": "@murmur/native",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "macOS-only N-API glue for Murmur: hotkey event tap, text injection, frontmost-app lookup, secure-input detection and permission checks.",
+  "os": [
+    "darwin"
+  ],
+  "gypfile": true,
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "binding.gyp",
+    "src",
+    "scripts"
+  ],
+  "scripts": {
+    "install": "node scripts/install.js",
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.9.1"
+  }
+}
