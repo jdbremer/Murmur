@@ -84,12 +84,22 @@ bool ForegroundElevated() {
 // Paste: Ctrl+V via SendInput (clipboard choreography lives in main)
 // ---------------------------------------------------------------------------
 
+// Forward decls used by paste + secure-field checks (definitions below).
+HWND ResolveFocusedHwnd();
+bool IsPasswordClassHwnd(HWND hwnd);
+
 Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
 
   HWND hwnd = GetForegroundWindow();
   if (hwnd == nullptr) {
     return MakeResult(env, false, "no focused window");
+  }
+
+  // Never paste into a password-class control (G8) — belt-and-braces with
+  // TextInjector.precheck() which should refuse before STT starts.
+  if (IsPasswordClassHwnd(ResolveFocusedHwnd())) {
+    return MakeResult(env, false, "secure input is active");
   }
 
   // UIPI: a non-elevated process cannot synthesize input into an elevated one.
@@ -145,31 +155,66 @@ Napi::Value InsertTextViaAccessibility(const Napi::CallbackInfo& info) {
   return MakeResult(env, false, "UI Automation fallback not yet implemented on Windows");
 }
 
-Napi::Value IsSecureInputActive(const Napi::CallbackInfo& info) {
-  // Heuristic: focused control with ES_PASSWORD. Full UIA later.
-  HWND focus = GetFocus();
-  if (focus == nullptr) {
-    // Cross-process focus: GetFocus is thread-local; try foreground attach.
-    HWND fg = GetForegroundWindow();
-    if (fg == nullptr) return Napi::Boolean::New(info.Env(), false);
+// Resolve the HWND that currently owns keyboard focus (may be another process).
+HWND ResolveFocusedHwnd() {
+  // Preferred: GUITHREADINFO gives the focused control on the foreground thread
+  // without AttachThreadInput races.
+  HWND fg = GetForegroundWindow();
+  if (fg != nullptr) {
     DWORD fgThread = GetWindowThreadProcessId(fg, nullptr);
-    DWORD thisThread = GetCurrentThreadId();
-    if (fgThread != 0 && fgThread != thisThread) {
-      AttachThreadInput(thisThread, fgThread, TRUE);
+    if (fgThread != 0) {
+      GUITHREADINFO gti{};
+      gti.cbSize = sizeof(gti);
+      if (GetGUIThreadInfo(fgThread, &gti) && gti.hwndFocus != nullptr) {
+        return gti.hwndFocus;
+      }
+    }
+  }
+
+  // Fallback: thread-local GetFocus, with attach for cross-process.
+  HWND focus = GetFocus();
+  if (focus != nullptr) return focus;
+  if (fg == nullptr) return nullptr;
+  DWORD fgThread = GetWindowThreadProcessId(fg, nullptr);
+  DWORD thisThread = GetCurrentThreadId();
+  if (fgThread != 0 && fgThread != thisThread) {
+    if (AttachThreadInput(thisThread, fgThread, TRUE)) {
       focus = GetFocus();
       AttachThreadInput(thisThread, fgThread, FALSE);
     }
   }
-  if (focus == nullptr) return Napi::Boolean::New(info.Env(), false);
+  return focus;
+}
 
-  char className[64] = {};
-  GetClassNameA(focus, className, static_cast<int>(sizeof(className)));
-  // Standard Edit and RichEdit password styles.
-  const LONG_PTR style = GetWindowLongPtr(focus, GWL_STYLE);
-  const bool passwordEdit =
-      (style & ES_PASSWORD) != 0 &&
-      (strstr(className, "Edit") != nullptr || strstr(className, "edit") != nullptr);
-  return Napi::Boolean::New(info.Env(), passwordEdit);
+// True when the focused control is a password-class edit (G8).
+// Best-effort: classic Win32 ES_PASSWORD and common password class names.
+// Modern Chromium/UWP password fields need UIA later; we still refuse when we
+// can detect the classic case so we never paste into a known password box.
+bool IsPasswordClassHwnd(HWND hwnd) {
+  if (hwnd == nullptr || !IsWindow(hwnd)) return false;
+
+  char className[128] = {};
+  GetClassNameA(hwnd, className, static_cast<int>(sizeof(className)));
+
+  const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+  // Win32 / WinForms TextBox.UseSystemPasswordChar / many password dialogs.
+  if ((style & ES_PASSWORD) != 0) return true;
+
+  // Some hosts use a dedicated class name without ES_PASSWORD on the outer HWND.
+  if (_stricmp(className, "PasswordBox") == 0) return true;          // WPF
+  if (strstr(className, "PasswordBox") != nullptr) return true;
+
+  // EM_GETPASSWORDCHAR: non-zero means the edit is masking input.
+  // Works for Edit/RichEdit across processes when the message is allowed.
+  const LRESULT passwordChar = SendMessageW(hwnd, EM_GETPASSWORDCHAR, 0, 0);
+  if (passwordChar != 0) return true;
+
+  return false;
+}
+
+Napi::Value IsSecureInputActive(const Napi::CallbackInfo& info) {
+  HWND focus = ResolveFocusedHwnd();
+  return Napi::Boolean::New(info.Env(), IsPasswordClassHwnd(focus));
 }
 
 Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {

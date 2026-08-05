@@ -46,9 +46,10 @@ Verified on a Windows dev box (agent overnight loop — **commits only, never pu
 | G5b Word | **pass (canned)** | Recognizable word pasted; real STT word still G7 |
 | G6 Hotkey | **pass** | `WH_KEYBOARD_LL` installed; `startHotkeyListener` → true; Right Ctrl down/up via nut.js |
 | G7 STT | **pass** | `whisper-server.exe` + `whisper-tiny-en`; JFK sample → `inserted` (107 chars, paste) |
-| G8–G10 | **open** | secure field, elevated, stability |
+| G8 Secure field | **pass** | Password TextBox focus → `secure-input` / “Secure field — Murmur will not type here.” |
+| G9–G10 | **open** | elevated (optional), stability 20× |
 
-**Next gate:** G8 — password-class focus refuses dictation with a clear message.
+**Next gate:** G9 elevated Notepad UIPI message (optional) or G10 20× utterance stability.
 
 Idle policy: if blocked, walk every Hub screen — “would I like this as a user?” / advances hold→speak→insert.
 
@@ -152,7 +153,7 @@ D  Paste                 ✓ G5 / G5b (canned)
 E  Hotkey + chords       ✓ G6 (Right Ctrl + chords in native)
 F  App categories
 G  STT                   ✓ G7 (whisper-server.exe + tiny.en)
-H  Ship / CI             ← current (G8–G10)
+H  Ship / CI             ✓ G8 secure field; next G9–G10
 ```
 
 ---
