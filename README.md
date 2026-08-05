@@ -2,10 +2,10 @@
 
 **Local-first dictation for macOS.** Hold a key, speak, release — polished text appears wherever your cursor is.
 
-Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, per-app tones, personal dictionary) but runs **entirely on-device**: speech-to-text and LLM polishing both use local models you choose — including models developed outside the US — so no audio or text ever leaves the machine. Built as an Electron app.
+Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, per-app tones, personal dictionary) but runs **entirely on-device**: speech-to-text and LLM polishing both use local models you choose from a **US-only catalog** — every listed model comes from a US-based organization, enforced by the catalog's origin policy — and no audio or text ever leaves the machine. Built as an Electron app.
 
 - 🎙️ System-wide push-to-talk (hold `fn`) + hands-free mode
-- 🧠 Local STT (SenseVoice, Parakeet, Whisper, Paraformer, …) and local polishing LLMs (Qwen3, Mistral, EuroLLM, …) with origin + license labels and a region filter
+- 🧠 Local STT (Parakeet, Whisper, Moonshine, …) and local polishing LLMs (Gemma 3, Phi-4-mini, Llama 3.2, OLMo 2, …) — US-origin only, with origin + license labels
 - 🔒 No accounts, no telemetry, no network traffic except user-initiated model downloads
 
 ## Status

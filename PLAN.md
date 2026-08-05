@@ -1,22 +1,23 @@
 # Murmur — Product & Engineering Plan
 
-**A local-first dictation app for macOS.** Hold a key, speak, release — polished text appears wherever your cursor is. The user experience mirrors Wispr Flow, but every byte of audio and text stays on the machine: speech-to-text and text polishing both run on local models that the user chooses, including models developed outside the US.
+**A local-first dictation app for macOS.** Hold a key, speak, release — polished text appears wherever your cursor is. The user experience mirrors Wispr Flow, but every byte of audio and text stays on the machine: speech-to-text and text polishing both run on local models that the user chooses. One hard constraint on that choice: the model catalog is **US-only** — every listed model comes from a US-based organization, enforced by the catalog itself (§8).
 
-> Status: planning document, v1. Nothing in this repo is built yet; this is the blueprint.
+> Status: v1.1 — execution in progress.
+> Decision log — **2026-08-05**: model catalog restricted to US-origin models only (owner decision). Non-US entries removed; the restriction is enforced by the catalog's origin policy (§8), and even utility models (VAD) comply (§5).
 
 ---
 
 ## 1. Why this exists
 
 - Company policy forbids cloud dictation tools (Wispr Flow, Superwhisper cloud modes, etc.) because dictated audio/text leaves the machine.
-- Existing local tools don't combine all of: Wispr-Flow-grade UX, an LLM "polishing" pass, and free choice of models (including non-US-origin models).
+- Existing local tools don't combine all of: Wispr-Flow-grade UX, an LLM "polishing" pass, and model choice inside a compliance-friendly, US-only catalog.
 - Goal: a tool an IT/security team can approve at a glance — **no audio, transcript, or telemetry ever leaves the device**. The only network traffic is model downloads, which are user-initiated and auditable.
 
 ### Goals (v1)
 
 1. System-wide push-to-talk dictation on macOS: hold hotkey → speak → release → text inserted into the frontmost app.
 2. Fully local speech-to-text (STT) and local LLM polishing (filler removal, punctuation, formatting, tone).
-3. User-selectable models for both stages, from a curated catalog labeled by **country of origin**, license, size, and hardware needs — plus "bring your own model" (any GGUF / ONNX / OpenAI-compatible local endpoint).
+3. User-selectable models for both stages, from a curated catalog **restricted to models from US-based organizations** (hard policy, §8), each labeled with origin, license, size, and hardware needs — plus "bring your own model" (a GGUF/ONNX file or a local OpenAI-compatible endpoint; imports bypass the catalog and are labeled origin-unverified).
 4. Wispr Flow's interface shape: a floating **Bar** (recording pill) + a **Hub** window (history, dictionary, style, settings) + menu-bar presence.
 5. Signed, notarized Electron app distributed as a DMG (not Mac App Store — see §15).
 
@@ -72,7 +73,7 @@ Left sidebar navigation, content pane right — Wispr Flow's layout, tracked clo
 1. **Home / History** — reverse-chronological feed of dictations: polished text (primary), expandable raw transcript, target app icon, duration, copy button, delete. Header stats like Flow's: total words dictated, average WPM, daily streak. Full-text search.
 2. **Dictionary** — user-managed vocabulary: proper nouns, jargon, acronyms + optional "replace X with Y" rules (e.g., "murmer → Murmur", "eta → ETA"). Fed to both STT biasing and the polish prompt (§7.4). "Add from correction" flow later (M4).
 3. **Style** — tone controls per app category (Personal / Work / Email / Other), mapped from the frontmost app's bundle ID. Options per category: capitalization/punctuation strictness, formality, emoji allowance, filler-word handling. Plus a global "polishing level": Off (raw transcript) / Clean (punctuation, fillers, self-corrections) / Rewrite (tone + structure).
-4. **Models** — the model manager (§8): pick STT model, pick polish model, download/delete, disk usage, region & license badges, custom model import, advanced: external OpenAI-compatible endpoint (e.g., company-approved LM Studio/Ollama).
+4. **Models** — the model manager (§8): pick STT model, pick polish model, download/delete, disk usage, origin & license badges (US-only catalog, policy visibly enforced), custom model import, advanced: external OpenAI-compatible endpoint (e.g., company-approved LM Studio/Ollama).
 5. **Settings** — hotkey config (default: hold `fn`, like Flow; alternatives Right-⌘/Right-⌥ for external keyboards), double-tap for hands-free, mic selection, language(s), launch at login, audio retention toggle (default **off** — audio deleted after transcription), history retention window, appearance (system/dark/light).
 6. **Help** — permissions status panel (re-check/fix buttons), troubleshooting, logs export (local only).
 
@@ -121,7 +122,7 @@ flowchart LR
 - **Main process** — the state machine (idle → listening → transcribing → polishing → inserting), window/tray management, model lifecycle, settings, SQLite. Typed IPC contract shared with renderers.
 - **Hub / Bar windows** — plain React; no Node integration, context-isolated, talk over typed IPC only.
 - **Audio capture** — a hidden renderer using `getUserMedia` + `AudioWorklet` downsampling to 16 kHz mono Float32 frames streamed to main via IPC. Renderer-side capture avoids native audio code and gets device-picker + level metering for free. (If latency or reliability disappoints, fallback plan: AVAudioEngine in `@murmur/native`.)
-- **STT utility process** — Electron `utilityProcess` hosting **sherpa-onnx** (Node addon) for ONNX-family models (Parakeet, SenseVoice, Paraformer, Moonshine, streaming Zipformer) and **Silero VAD** for trimming silence and hands-free endpointing. Keeps models resident between utterances; crash-isolated and restartable.
+- **STT utility process** — Electron `utilityProcess` hosting **sherpa-onnx** (Node addon) for ONNX-family models (Parakeet, Moonshine, NVIDIA NeMo streaming models) plus the VAD stage (§5). Keeps models resident between utterances; crash-isolated and restartable.
 - **whisper-server sidecar** — bundled `whisper.cpp` server binary (Metal + Core ML on Apple Silicon) for the Whisper family. Spawned on demand, bound to `127.0.0.1` on a random port with a per-session auth token; model stays loaded between utterances.
 - **llama-server sidecar** — bundled `llama.cpp` server (Metal) exposing the OpenAI-compatible chat API for the polishing pass. Because polishing already speaks OpenAI-compatible HTTP, "use an external local endpoint" (Ollama / LM Studio / company-hosted vLLM) is the same code path with a different base URL.
 - **`@murmur/native`** — one small N-API module (Obj-C/Swift) for everything Electron can't do: CGEventTap hotkey listening (incl. the `fn` key via `flagsChanged`), paste injection, frontmost-app lookup, secure-input detection, permission checks/prompts. Detailed in §4.
@@ -161,7 +162,7 @@ Bundled sidecar binaries (`whisper-server`, `llama-server`) are compiled in CI f
 
 - Format: 16 kHz mono Float32 (what every candidate STT model wants). Downsample in an `AudioWorklet`; ship ~100 ms frames over IPC.
 - Pre-roll ring buffer: capture starts *on hotkey-down*, but keep a ~300 ms rolling pre-buffer once the mic stream is warm so first syllables aren't clipped; mic stream is opened lazily on first dictation and kept warm for a configurable idle window (default 5 min) to avoid cold-start latency.
-- **VAD (Silero, via sherpa-onnx)**: trim leading/trailing silence before STT; in hands-free mode, auto-finalize an utterance after ~800 ms of silence; hard cap per-utterance length (default 5 min, configurable).
+- **VAD (no-ML, policy-clean)**: an energy/spectral gate in the WebRTC-VAD lineage, implemented in-process — trims leading/trailing silence before STT and auto-finalizes hands-free utterances after ~800 ms of silence; hard cap per-utterance length (default 5 min, configurable). Deliberately *not* Silero VAD (non-US origin): the US-only policy holds even for utility models.
 - Echo/noise: rely on macOS voice-processing input (`echoCancellation: true` constraint) — good enough v1; revisit if AirPods/laptop-mic feedback complaints appear.
 - Audio is held in memory only and discarded after transcription unless the user opts into retention (§10).
 
@@ -185,34 +186,33 @@ Two engines cover the whole catalog:
 
 | Engine | Runs | Why |
 |---|---|---|
-| **sherpa-onnx** (Node addon in utility process) | Parakeet (NeMo transducer ONNX), SenseVoice, Paraformer, Moonshine, streaming Zipformer, Silero VAD | One runtime, many architectures, prebuilt Node bindings, streaming support for M5, CPU int8 fast enough for real-time on any Mac |
+| **sherpa-onnx** (Node addon in utility process) | Parakeet (NeMo transducer ONNX), Moonshine, NVIDIA NeMo streaming models | One runtime, many architectures, prebuilt Node bindings, streaming support for M5, CPU int8 fast enough for real-time on any Mac |
 | **whisper.cpp** (`whisper-server` sidecar) | Whisper family (large-v3-turbo, distil, quantized) | Best Whisper performance on Apple Silicon (Metal + Core ML encoder); Whisper remains the multilingual quality bar |
 
-A third path — **audio-LLMs via llama.cpp** (Mistral's Voxtral Mini 3B) — reuses the llama-server sidecar and is flagged experimental (§6.3).
+A possible third path — **audio-LLMs via llama.cpp** — is deferred until a US-origin audio-LLM matures in local runtimes (§6.3).
 
-### 6.2 Curated STT catalog (v1)
+### 6.2 Curated STT catalog (v1) — US-origin only
 
-Every entry shows **origin, license, size, languages, engine** in the picker so users can filter to non-US models at a glance. Sizes are quantized on-disk estimates.
+Only models from US-based organizations are listed. The picker still shows **origin, license, size, languages, engine** for every entry so the policy is auditable at a glance. Sizes are quantized on-disk estimates.
 
 | Model | Origin | License | Disk | Languages | Engine | Notes |
 |---|---|---|---|---|---|---|
-| **SenseVoice-Small** (Alibaba FunAudioLLM) | 🇨🇳 China | Apache-2.0 (model card) | ~250 MB int8 | zh, en, yue, ja, ko | sherpa-onnx | Non-autoregressive → ~15× faster than Whisper-large; **default non-US pick** |
-| **Paraformer-large** (Alibaba FunASR) | 🇨🇳 China | Apache-2.0 | ~230 MB int8 | zh, en | sherpa-onnx | Mature, excellent Mandarin |
-| **Whisper large-v3-turbo** (OpenAI) | 🇺🇸 US | MIT | ~1.6 GB q5 | ~100 languages | whisper.cpp | Multilingual quality default |
-| **Distil-Whisper / small.en** | 🇺🇸 US | MIT | 150–500 MB | en | whisper.cpp | Low-RAM fallback |
-| **Parakeet-TDT 0.6B v2/v3** (NVIDIA) | 🇺🇸 US | CC-BY-4.0 | ~650 MB int8 | v2 en; v3 25 European langs | sherpa-onnx | Fastest high-accuracy English; **default US pick** |
+| **Parakeet-TDT 0.6B v3** (NVIDIA) | 🇺🇸 US | CC-BY-4.0 | ~650 MB int8 | en + 24 European langs | sherpa-onnx | Fastest high-accuracy option; **recommended default** |
+| **Parakeet-TDT 0.6B v2** (NVIDIA) | 🇺🇸 US | CC-BY-4.0 | ~650 MB int8 | en | sherpa-onnx | English-only alternative |
+| **Whisper large-v3-turbo** (OpenAI) | 🇺🇸 US | MIT | ~1.6 GB q5 | ~100 languages | whisper.cpp | Multilingual quality bar |
+| **Whisper small.en / tiny.en** (OpenAI) | 🇺🇸 US | MIT | 75–500 MB | en | whisper.cpp | Low-RAM fallback; small.en is the M1 bring-up model |
+| **Distil-Whisper large-v3.5** (Hugging Face, NYC) | 🇺🇸 US | MIT | ~750 MB | en | whisper.cpp | ~2× Whisper-large speed at near-parity accuracy |
 | **Moonshine base** (Useful Sensors) | 🇺🇸 US | MIT | ~60 MB | en | sherpa-onnx | Tiny; old-Intel-Mac tier |
-| **Voxtral Mini 3B** (Mistral) | 🇫🇷 France | Apache-2.0 | ~2.5 GB q4 | 8+ langs | llama.cpp (experimental) | Audio-LLM; can transcribe **and** polish in one pass (§6.3) |
-| **Kyutai STT 1B** (Kyutai Labs) | 🇫🇷 France | CC-BY-4.0 | ~1 GB | en, fr | *future* (Rust sidecar) | Purpose-built streaming; M5 candidate |
-| **FireRedASR-AED-S** (Xiaohongshu) | 🇨🇳 China | Apache-2.0 | ~600 MB | zh, en | sherpa-onnx | Strong Mandarin alternative |
 
-Watch list (re-evaluate at build time; the catalog is a signed JSON file the app can update, §8): Cohere's open ASR model (🇨🇦, currently tops the Open ASR Leaderboard — include when a local ONNX/GGUF runtime lands), NVIDIA Canary-Qwen, IBM Granite Speech.
+Watch list (US-origin, add when a local ONNX/GGML runtime path is proven; the catalog is a signed JSON file the app can update without a release, §8): NVIDIA Canary / Canary-Qwen, IBM Granite Speech.
 
-**Recommended defaults:** 8 GB Mac → SenseVoice-Small (non-US) or Moonshine (US); 16 GB+ → Parakeet v3 or Whisper large-v3-turbo. Onboarding offers one non-US and one US default; the user picks.
+Removed by policy (previously listed): SenseVoice, Paraformer, FireRedASR (🇨🇳); Voxtral, Kyutai STT (🇫🇷); Cohere ASR (🇨🇦). The catalog's origin allowlist (§8) is what keeps them out — not just this document.
 
-### 6.3 Voxtral combo mode (experiment, M5)
+**Recommended defaults:** 8 GB Mac → Whisper small.en or Moonshine; 16 GB+ → Parakeet v3 (speed) or Whisper large-v3-turbo (multilingual).
 
-Voxtral Mini 3B ingests audio directly in llama.cpp. One model, one pass: audio in → polished text out, honoring the tone prompt. If quality/latency prove out on 16 GB Apple Silicon, this becomes the flagship "one non-US model does everything" configuration. Kept experimental until llama.cpp's audio path proves stable across updates.
+### 6.3 Audio-LLM combo mode (deferred)
+
+A single audio-LLM doing transcription **and** polishing in one pass stays architecturally attractive (one model, one latency budget), and the llama-server sidecar already provides the plumbing. Deferred because the strong open audio-LLMs today are non-US-origin and therefore out of policy. Revisit if a US-origin option (e.g., the Ultravox line) matures with solid llama.cpp support.
 
 ### 6.4 Accuracy aids
 
@@ -228,21 +228,21 @@ Voxtral Mini 3B ingests audio directly in llama.cpp. One model, one pass: audio 
 
 `llama-server` (llama.cpp) sidecar with the OpenAI-compatible `/v1/chat/completions` API. Model resident between utterances; unloadable after idle timeout (configurable) to release RAM. Alternative backend = any OpenAI-compatible **local** URL (Ollama, LM Studio, company vLLM box) — same client code; the app warns if the endpoint isn't loopback/RFC-1918 so "local-only" stays honest.
 
-### 7.2 Curated polish-model catalog (v1)
+### 7.2 Curated polish-model catalog (v1) — US-origin only
 
 Task profile: short-input, short-output rewriting — needs instruction-following and speed, not reasoning. Small models excel here.
 
 | Model | Origin | License | Disk (Q4) | RAM tier | Notes |
 |---|---|---|---|---|---|
-| **Qwen3-4B-Instruct-2507** (Alibaba) | 🇨🇳 China | Apache-2.0 | ~2.5 GB | 16 GB | **Default non-US pick** — best small-model instruction following |
-| **Qwen3-1.7B** (Alibaba) | 🇨🇳 China | Apache-2.0 | ~1.1 GB | 8 GB | Default for low-RAM; run with thinking disabled |
-| **Ministral / Mistral 7B v0.3** (Mistral) | 🇫🇷 France | Apache-2.0 | ~4.1 GB | 16 GB | European option |
-| **EuroLLM-1.7B / 9B** (EU consortium) | 🇪🇺 EU | Apache-2.0 | 1.1–5.5 GB | 8–16 GB | EU-funded, 24 official EU languages |
-| **GLM-Edge-1.5B / 4B** (Zhipu) | 🇨🇳 China | custom (permissive) | 1–2.5 GB | 8–16 GB | Designed for on-device |
-| **Falcon-H1 1.5B / 3B** (TII) | 🇦🇪 UAE | Apache-2.0 | 1–2 GB | 8–16 GB | Another non-US lineage |
-| **Gemma 3 4B** (Google) | 🇺🇸 US | Gemma license | ~2.6 GB | 16 GB | US option, strong rewriter |
-| **Phi-4-mini** (Microsoft) | 🇺🇸 US | MIT | ~2.4 GB | 16 GB | US option |
-| *Bring your own GGUF* | — | — | — | — | File picker or HF repo ID |
+| **Gemma 3 4B-it** (Google) | 🇺🇸 US | Gemma license | ~2.6 GB | 16 GB | **Recommended default** — best small-model rewriting quality |
+| **Gemma 3 1B-it** (Google) | 🇺🇸 US | Gemma license | ~800 MB | 8 GB | Low-RAM default |
+| **Phi-4-mini-instruct 3.8B** (Microsoft) | 🇺🇸 US | MIT | ~2.4 GB | 16 GB | MIT — cleanest license for strict environments |
+| **Llama 3.2 3B / 1B Instruct** (Meta) | 🇺🇸 US | Llama license | 0.8–2 GB | 8–16 GB | Ubiquitous, well-tested quants |
+| **OLMo 2 7B Instruct** (Allen Institute for AI) | 🇺🇸 US | Apache-2.0 | ~4.5 GB | 16 GB+ | Fully open (data + weights) — easiest compliance story |
+| **Granite 3.3 2B / 8B Instruct** (IBM) | 🇺🇸 US | Apache-2.0 | 1.5–5 GB | 8–16 GB | Enterprise-friendly |
+| *Bring your own GGUF* | — | — | — | — | File picker or HF repo ID; labeled origin-unverified |
+
+Removed by policy (previously listed): Qwen3, GLM-Edge (🇨🇳); Mistral/Ministral (🇫🇷); EuroLLM (🇪🇺); Falcon (🇦🇪).
 
 (Exact SKUs re-verified when the catalog file is authored — small-model releases move monthly; catalog updates don't require app releases, §8.)
 
@@ -253,7 +253,7 @@ Task profile: short-input, short-output rewriting — needs instruction-followin
 | VAD trim + transfer | < 50 ms |
 | STT (Parakeet/SenseVoice int8) | 150–500 ms |
 | STT (Whisper turbo, Metal) | 500–1000 ms |
-| Polish (Qwen3-1.7B/4B Q4, ~50 tok out) | 300–800 ms |
+| Polish (Gemma 3 1B/4B Q4, ~50 tok out) | 300–800 ms |
 | Injection | < 100 ms |
 | **End-to-end target** | **≤ 1.5 s typical, ≤ 2.5 s with Whisper turbo** |
 
@@ -270,9 +270,10 @@ Guardrail: if polish output diverges wildly in length from input (hallucination 
 ## 8. Model manager
 
 - **Catalog** = a versioned, signed JSON file shipped with the app (updatable independently of app releases): model metadata, origin, license, quant variants, SHA-256 checksums, download URLs with mirrors.
-- **Sources**: Hugging Face primary; **ModelScope mirror** for each Chinese-origin model (useful when HF is slow/blocked); all downloads resumable, checksum-verified, into `~/Library/Application Support/Murmur/models/`.
-- UI: per-model card (origin flag, license, disk, RAM tier, languages), download progress, delete, "active" markers for the current STT/polish pair, total disk usage, and a **region filter** ("hide US models" / "hide China models" etc. — policy-driven users get exactly what their compliance team asks for).
-- **Custom models**: local file import (GGUF for polish/whisper.cpp; ONNX bundle for sherpa) or HF repo reference; clearly marked "unverified".
+- **Sources**: Hugging Face only; all downloads resumable, checksum-verified, into `~/Library/Application Support/Murmur/models/`.
+- UI: per-model card (origin flag, license, disk, RAM tier, languages), download progress, delete, "active" markers for the current STT/polish pair, total disk usage.
+- **Origin policy (enforced, not advisory)**: every catalog entry carries an `origin` field and the catalog carries an `originPolicy` allowlist, compiled into the app as `["US"]`. Entries failing the allowlist are rejected at catalog load — a mirrored or hand-edited catalog can't smuggle a non-US model into the picker.
+- **Custom models**: local file import (GGUF for polish/whisper.cpp; ONNX bundle for sherpa) or HF repo reference; these bypass the catalog by definition and are clearly labeled "user-supplied — origin unverified".
 - Hardware advisor: detect chip + RAM (`systemProfiler`/`os` APIs), badge each model *Runs well / Tight / Not recommended*.
 
 ---
@@ -291,7 +292,7 @@ Guardrail: if polish output diverges wildly in length from input (hallucination 
 ## 10. Privacy & security posture (the selling point — make it auditable)
 
 1. **No telemetry, no analytics, no accounts, no crash uploads.** Crash reports write to local disk; the user chooses whether to share them.
-2. Network access happens **only** for: model catalog refresh + model downloads (user-initiated, to HF/ModelScope) and the optional update check (off by default in v1; see §15). Enforced in code by a single fetch wrapper with an allowlist, and documented so IT can verify with Little Snitch/proxy logs.
+2. Network access happens **only** for: model catalog refresh + model downloads (user-initiated, to Hugging Face) and the optional update check (off by default in v1; see §15). Enforced in code by a single fetch wrapper with an allowlist, and documented so IT can verify with Little Snitch/proxy logs.
 3. Sidecars bind to `127.0.0.1` with a random port + bearer token generated per launch (no other local user/process can use our inference servers or read prompts).
 4. Audio in memory only by default; history is local SQLite; both retention windows user-controlled.
 5. The event tap is **listen-only for the configured hotkey** — key events other than the hotkey are never logged, buffered, or transmitted; this is stated in-app and verifiable in source.
@@ -361,19 +362,19 @@ Scaffold (electron-vite, workspaces, TS strict), tray + empty Hub/Bar windows, t
 **Accept:** on a clean machine, onboarding → hold `fn`, speak 5 s, release → correct text lands in Notes/Slack/Chrome/Terminal in ≤ 2.5 s; secure fields refused gracefully; Esc cancels; survives display sleep and app relaunch.
 
 ### M2 — Model manager + engine abstraction (weeks 5–6)
-sherpa-onnx utility process (SenseVoice + Parakeet + Paraformer), catalog JSON + downloader (resume, SHA-256, ModelScope mirrors), Models UI with origin/license badges + region filter, hardware advisor, STT model switching without restart, language selection, mic picker, launch-at-login, hotkey customization UI.
-**Accept:** fresh install can go fully non-US (SenseVoice) or US (Parakeet) in two clicks; model switch < 10 s; downloads survive network drops.
+sherpa-onnx utility process (Parakeet + Moonshine), catalog JSON + downloader (resume, SHA-256), Models UI with origin/license badges and visible US-only policy enforcement, hardware advisor, STT model switching without restart, language selection, mic picker, launch-at-login, hotkey customization UI.
+**Accept:** fresh install reaches Parakeet or Whisper turbo in two clicks; a tampered catalog containing a non-US entry is rejected with a visible error; model switch < 10 s; downloads survive network drops.
 
 ### M3 — Polishing (weeks 7–8)
 llama-server sidecar + lifecycle (idle unload), polish pipeline with levels Off/Clean/Rewrite, prompt assembly (tone per app category, dictionary, few-shots), Style UI, Dictionary UI + STT hotword/initial-prompt biasing + replacement rules, external OpenAI-compatible endpoint option, hallucination guard, ≤3-word skip rule.
-**Accept:** "um so basically we should uh ship it on on tuesday no wednesday" → "We should ship it on Wednesday." via Qwen3 in ≤ 800 ms added latency; polish eval suite (§13.4) ≥ 90% pass; raw-transcript fallback observable.
+**Accept:** "um so basically we should uh ship it on on tuesday no wednesday" → "We should ship it on Wednesday." via Gemma 3 4B in ≤ 800 ms added latency; polish eval suite (§13.4) ≥ 90% pass; raw-transcript fallback observable.
 
 ### M4 — History, stats, personalization depth (weeks 9–10)
 Hub Home with search (FTS5), copy/delete, stats (words, WPM, streak), per-app category mapping UI, audio retention opt-in + auto-prune, data export/delete-all, Help panel with permission re-checks, polish pass over visual design.
 **Accept:** 1k-row history searches < 50 ms; stats match hand-computed fixtures; export produces valid JSON/CSV.
 
 ### M5 — Latency & streaming upgrades (weeks 11–12)
-Streaming STT (sherpa-onnx Zipformer; evaluate Kyutai STT sidecar) with live partial text in the Bar, hands-free double-tap mode with VAD auto-finalize, prompt caching for polish, Voxtral combo-mode experiment behind a flag, Intel-Mac performance pass.
+Streaming STT (NVIDIA NeMo streaming models via sherpa-onnx; evaluate Moonshine's streaming mode) with live partial text in the Bar, hands-free double-tap mode with VAD auto-finalize, prompt caching for polish, Intel-Mac performance pass.
 **Accept:** perceived latency (release → text) ≤ 1 s with streaming pipeline on M-series; hands-free dictates three consecutive utterances without touching the keyboard.
 
 ### M6 — Distribution hardening (week 13)
@@ -391,9 +392,9 @@ Auto-update via electron-updater + GitHub Releases (opt-in, off by default for c
 
 | Tier | Machines | STT default | Polish default | Expected e2e (5 s utterance) |
 |---|---|---|---|---|
-| A | Apple Silicon ≥ 16 GB | Parakeet v3 / Whisper turbo / SenseVoice | Qwen3-4B Q4 | ≤ 1.5 s |
-| B | Apple Silicon 8 GB | SenseVoice-Small | Qwen3-1.7B Q4 (or polish Off) | ≤ 2 s |
-| C | Intel Macs | Moonshine / SenseVoice int8 | polish Off by default | ≤ 3 s, best-effort |
+| A | Apple Silicon ≥ 16 GB | Parakeet v3 / Whisper turbo | Gemma 3 4B Q4 | ≤ 1.5 s |
+| B | Apple Silicon 8 GB | Whisper small.en / Moonshine | Gemma 3 1B Q4 (or polish Off) | ≤ 2 s |
+| C | Intel Macs | Moonshine / Whisper tiny.en | polish Off by default | ≤ 3 s, best-effort |
 
 RAM guardrail: warn before loading a combo whose working set exceeds ~60% of physical RAM; auto-unload polish model after idle.
 
@@ -410,7 +411,7 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 | Latency disappoints on low-RAM machines | Medium | Tiered defaults (§14); polish-off mode; streaming in M5; honest hardware advisor |
 | llama.cpp/whisper.cpp API churn across updates | Medium | Pin versions; sidecar HTTP API is our stable seam; upgrade deliberately with the bench suite as gate |
 | Small-LLM polish quality (hallucinated edits) | Medium | Tight system prompt + few-shots, length-divergence guard with raw fallback, eval suite gating catalog entries |
-| Model licensing/compliance concerns from employer | Low | Origin + license surfaced in UI; region filter; catalog only lists redistributable-weight models; SBOM |
+| Model licensing/compliance concerns from employer | Low | US-only origin policy enforced by the catalog schema; origin + license surfaced in UI; catalog only lists redistributable-weight models; SBOM |
 | Electron mic capture edge cases (device switching, AirPods handoff) | Low | Device-change listener re-opens stream; mic picker in Bar; fallback plan: native AVAudioEngine capture |
 | Wispr Flow trade-dress proximity | Accepted | Close visual recreation is a deliberate choice for this personal/internal tool (§2). Kept clean by construction: recreated by eye in our own code/artwork, nothing extracted from their bundle, no use of their name/logo/marketing copy. Revisit only if Murmur is ever distributed commercially |
 
@@ -419,8 +420,8 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 ## 16. Open questions (defaults chosen; flag disagreement)
 
 1. **Minimum macOS**: proposed macOS 13 Ventura+ (covers modern permission APIs; Electron support window). Intel supported but tier-C.
-2. **Starter default**: onboarding offers "Non-US bundle" (SenseVoice + Qwen3) and "Best-for-English bundle" (Parakeet + Qwen3) — is a single opinionated default preferred?
-3. **Languages at launch**: English-first with zh/ja/ko/fr/de functional via SenseVoice/Whisper — any must-have language to prioritize in evals?
+2. **Starter default**: onboarding proposes Parakeet v3 + Gemma 3 4B on 16 GB+ machines, Whisper small.en + Gemma 3 1B on 8 GB — one opinionated default per tier.
+3. **Languages at launch**: English-first; multilingual available via Whisper large-v3-turbo and Parakeet v3's European languages — any must-have language to prioritize in evals?
 4. **Open-source the repo?** Recommended (MIT) for IT-approval credibility — decision needed before v1.0.
 5. **App name**: assuming **Murmur** (repo name) is the product name.
 
@@ -431,6 +432,6 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 - Wispr Flow UX (Hub/Flow Bar/hotkeys/dictionary/tones): [navigating the app](https://docs.wisprflow.ai/articles/5096240724-navigating-the-wispr-flow-app-desktop-ios-and-android), [features](https://wisprflow.ai/features), [what is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow)
 - STT landscape 2026: [Northflank open-source STT benchmarks](https://northflank.com/blog/best-open-source-speech-to-text-stt-model-in-2026-benchmarks), [Gladia open-source STT roundup](https://www.gladia.io/blog/best-open-source-speech-to-text-models), [local STT comparison](https://www.onresonant.com/resources/local-stt-models-2026)
 - Small local LLMs 2026: [HF blog — open models to run locally](https://huggingface.co/blog/daya-shankar/open-source-llm-models-to-run-locally), [local LLM guide](https://klymentiev.com/blog/best-local-llm)
-- Runtimes: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [whisper.cpp](https://github.com/ggml-org/whisper.cpp), [llama.cpp](https://github.com/ggml-org/llama.cpp), [Silero VAD](https://github.com/snakers4/silero-vad)
-- Models: [SenseVoice](https://github.com/FunAudioLLM/SenseVoice), [FunASR/Paraformer](https://github.com/modelscope/FunASR), [Parakeet-TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), [Voxtral](https://huggingface.co/mistralai/Voxtral-Mini-3B-2507), [Kyutai STT](https://kyutai.org/next/stt), [Qwen3](https://huggingface.co/collections/Qwen/qwen3-67dd247413f0e2e4f653967f), [EuroLLM](https://huggingface.co/utter-project), [Moonshine](https://github.com/moonshine-ai/moonshine)
+- Runtimes: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [whisper.cpp](https://github.com/ggml-org/whisper.cpp), [llama.cpp](https://github.com/ggml-org/llama.cpp)
+- Models (US-origin catalog): [Parakeet-TDT](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), [Whisper](https://github.com/openai/whisper), [Distil-Whisper](https://huggingface.co/distil-whisper), [Moonshine](https://github.com/moonshine-ai/moonshine), [Gemma 3](https://huggingface.co/google/gemma-3-4b-it), [Phi-4-mini](https://huggingface.co/microsoft/Phi-4-mini-instruct), [Llama 3.2](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct), [OLMo 2](https://huggingface.co/allenai), [Granite](https://huggingface.co/ibm-granite)
 - Prior art: [VoiceInk](https://github.com/Beingpax/VoiceInk), [Handy](https://github.com/cjpais/Handy), [Vibe](https://github.com/thewh1teagle/vibe)
