@@ -68,3 +68,25 @@ export function formatLanguages(languages: readonly string[]): string {
     })
     .join(', ')
 }
+
+/** Whole-number percentage for a download row; never NaN, never >100. */
+export function downloadPercent(receivedBytes: number, totalBytes: number): number {
+  if (!(totalBytes > 0)) return 0
+  return Math.min(100, Math.round((receivedBytes / totalBytes) * 100))
+}
+
+/** The engine ids, as a person would say them. */
+export function engineLabel(engine: string): string {
+  switch (engine) {
+    case 'whisper-cpp':
+      return 'whisper.cpp'
+    case 'llama-cpp':
+      return 'llama.cpp'
+    case 'onnx-runtime':
+      return 'ONNX Runtime'
+    case 'external':
+      return 'external endpoint'
+    default:
+      return engine
+  }
+}

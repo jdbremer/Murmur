@@ -4,16 +4,22 @@ export function Section({
   title,
   description,
   children,
+  actions,
 }: {
   title: string
   description: string
   children?: ReactNode
+  /** Right-aligned header controls, e.g. a "Check again" button. */
+  actions?: ReactNode | undefined
 }): React.JSX.Element {
   return (
     <section>
-      <header className="mb-6">
-        <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{description}</p>
+      <header className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{description}</p>
+        </div>
+        {actions ? <div className="shrink-0 pt-1">{actions}</div> : null}
       </header>
       {children}
     </section>
@@ -97,13 +103,14 @@ export function Button({
   )
 }
 
-type BadgeTone = 'neutral' | 'positive' | 'warning' | 'accent'
+type BadgeTone = 'neutral' | 'positive' | 'warning' | 'accent' | 'danger'
 
 const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: 'border-line text-ink-muted',
   positive: 'border-positive/40 text-positive',
   warning: 'border-warning/40 text-warning',
   accent: 'border-accent/40 text-accent',
+  danger: 'border-danger/40 text-danger',
 }
 
 export function Badge({
@@ -238,6 +245,64 @@ export function Select<T extends string>({
         </option>
       ))}
     </select>
+  )
+}
+
+export function Banner({
+  tone = 'warning',
+  title,
+  children,
+  actions,
+}: {
+  tone?: 'warning' | 'danger' | 'accent'
+  title: string
+  children?: ReactNode
+  actions?: ReactNode | undefined
+}): React.JSX.Element {
+  const border =
+    tone === 'danger'
+      ? 'border-danger/40'
+      : tone === 'accent'
+        ? 'border-accent/40'
+        : 'border-warning/40'
+  const text =
+    tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-warning'
+  return (
+    <div className={`rounded-card border ${border} bg-surface p-4`} role="status">
+      <p className={`text-[13px] font-medium ${text}`}>{title}</p>
+      {children ? (
+        <div className="mt-1 text-[12px] leading-relaxed text-ink-muted">{children}</div>
+      ) : null}
+      {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
+    </div>
+  )
+}
+
+export function TextArea({
+  value,
+  onChange,
+  placeholder,
+  label,
+  id,
+  rows = 3,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string | undefined
+  label: string
+  id?: string | undefined
+  rows?: number
+}): React.JSX.Element {
+  return (
+    <textarea
+      id={id}
+      rows={rows}
+      value={value}
+      aria-label={label}
+      placeholder={placeholder}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full select-text resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+    />
   )
 }
 
