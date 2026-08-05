@@ -65,8 +65,10 @@ jobs:
       - name: Build the native module
         run: npm run native:build
 
+      # `available` is a boolean property, not a method — the stub sets it to
+      # false and reports why through platformInfo().
       - name: Verify the native module loads
-        run: node -e "const n=require('@murmur/native'); if(!n.isAvailable()) { console.error('native module did not load:', n.platformInfo()); process.exit(1) } console.log(n.platformInfo())"
+        run: node -e "const n=require('@murmur/native'); if (!n.available) { console.error('native module failed to load:', n.platformInfo()); process.exit(1) } console.log('native ok:', n.platformInfo())"
 
       # The same gate as CI. A release should never be the first time these run
       # against the tagged commit.
