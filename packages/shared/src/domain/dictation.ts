@@ -123,6 +123,29 @@ export const AudioFrameSchema = z.object({
 })
 export type AudioFrame = z.infer<typeof AudioFrameSchema>
 
+/**
+ * One selectable microphone, as the hidden capture renderer sees it.
+ *
+ * Enumerated in that renderer rather than in the Hub because `getUserMedia`
+ * lives there: device *labels* are only exposed to a context that holds (or has
+ * held) microphone permission, so any other window would render a list of
+ * anonymous ids. Main caches the last list and serves it to the pickers.
+ */
+export const AudioDeviceSchema = z.object({
+  /** `MediaDeviceInfo.deviceId`. */
+  deviceId: z.string().min(1),
+  /** Empty until microphone permission has been granted at least once. */
+  label: z.string().default(''),
+  /** True for the entry macOS reports as the system default input. */
+  isDefault: z.boolean().default(false),
+})
+export type AudioDevice = z.infer<typeof AudioDeviceSchema>
+
+export const AudioDeviceListSchema = z.object({
+  devices: z.array(AudioDeviceSchema).default([]),
+})
+export type AudioDeviceList = z.infer<typeof AudioDeviceListSchema>
+
 /** Lifecycle reports from the hidden capture renderer. */
 export const AudioCaptureStatusSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('idle') }),

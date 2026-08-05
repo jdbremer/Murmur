@@ -3,10 +3,16 @@
  * fully clear so only the capsule itself is visible over whatever the user is
  * dictating into.
  *
- * Click-through is handled per element rather than per window — the window
- * ignores the mouse (`pointer-events: none` on the body) and the pill opts back
- * in, which is what makes "click-through everywhere except the pill" work
- * (PLAN §2.1).
+ * Click-through is enforced twice, on purpose:
+ *
+ *  1. At the window level — main opens the Bar with
+ *     `setIgnoreMouseEvents(true, { forward: true })` and the renderer flips it
+ *     off only while the pointer is over the pill (`bar.pointerRegion`). This is
+ *     the one that matters: CSS alone cannot pass a click through to the app
+ *     *behind* an Electron window.
+ *  2. Here, so that within the window itself only the pill and its menu are
+ *     targets. Mouse *moves* still reach `document`, which is what the hover
+ *     hit-testing in Bar.tsx runs on.
  */
 
 html,
@@ -19,8 +25,18 @@ body,
 body {
   pointer-events: none;
   overflow: hidden;
+  /* The capsule is dark in every theme, so the page must not inherit the
+     light-theme canvas colour from theme.css. */
+  background-color: transparent;
 }
 
 .bar-pill {
   pointer-events: auto;
+}
+
+/* Nothing in the Bar is selectable or draggable — it is chrome, not content. */
+.bar-pill,
+.bar-pill * {
+  user-select: none;
+  -webkit-user-drag: none;
 }

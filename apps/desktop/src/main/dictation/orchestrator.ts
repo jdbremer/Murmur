@@ -82,8 +82,6 @@ export interface OrchestratorDeps {
   frontmostApp(): { bundleId: string; name: string } | null
   /** Persists a finished dictation. Failures here must not break the loop. */
   persist(record: Omit<DictationRecord, 'id'>): void
-  /** High-rate mic level for the Bar's waveform. */
-  onLevel?(level: number): void
   log?: Logger
   /** Injected for tests. */
   now?(): number
@@ -274,11 +272,14 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
   }
 
-  /** One PCM frame from the capture renderer. */
+  /**
+   * One PCM frame from the capture renderer.
+   *
+   * Frames carry no metering duty: the Bar's waveform is fed by the capture
+   * renderer's ~30 Hz `audio.meter` channel, because one RMS value per 100 ms
+   * frame is a 10 Hz stutter, not a waveform (PLAN §2.1).
+   */
   pushFrame(frame: Float32Array): void {
-    const level = this.#deps.onLevel ? levelOf(frame) : 0
-    this.#deps.onLevel?.(level)
-
     if (this.#phase !== 'listening') {
       // Between utterances the mic stays warm; keep the rolling pre-roll fresh.
       this.#preRoll.push(frame)
@@ -595,16 +596,4 @@ function describe(error: unknown, fallback: string): string {
   if (error instanceof StageTimeoutError) return 'That took too long — try again'
   if (error instanceof Error && error.message) return error.message
   return fallback
-}
-
-/** Cheap RMS→0..1 level, duplicated from the VAD so the hot path stays allocation-free. */
-function levelOf(frame: Float32Array): number {
-  let sum = 0
-  for (let index = 0; index < frame.length; index += 1) {
-    const sample = frame[index] ?? 0
-    sum += sample * sample
-  }
-  const rms = Math.sqrt(sum / Math.max(1, frame.length))
-  const db = 20 * Math.log10(Math.max(rms, 1e-10))
-  return Math.min(1, Math.max(0, (db + 60) / 60))
 }

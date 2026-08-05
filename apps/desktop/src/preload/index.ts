@@ -42,7 +42,15 @@ const api: MurmurApi = {
   audio: {
     sendFrame: (frame) => ipc.send('audio.frame', frame),
     reportStatus: (status) => ipc.send('audio.status', status),
+    reportLevel: (level) => ipc.send('audio.meter', level),
+    reportDevices: (devices) => ipc.send('audio.devices', devices),
     onCommand: (listener) => ipc.on('audio.command', listener),
+    listDevices: () => ipc.invoke('audio.listDevices'),
+    onDevicesChanged: (listener) => ipc.on('audio.devicesChanged', listener),
+  },
+
+  bar: {
+    setPointerRegion: (region) => ipc.send('bar.pointerRegion', region),
   },
 
   models: {

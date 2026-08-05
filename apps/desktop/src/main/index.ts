@@ -9,6 +9,7 @@ import {
 
 import { CaptureController } from './audio/controller'
 import { AUDIO } from './config'
+import { EscapeCancel } from './dictation/escape'
 import { HotkeyBridge } from './dictation/hotkey'
 import { TextInjector } from './dictation/injector'
 import { DictationOrchestrator } from './dictation/orchestrator'
@@ -153,9 +154,10 @@ async function bootstrap(): Promise<void> {
     persist: (record) => {
       dictations.insert(record)
     },
-    onLevel: (level) => {
-      ipc.broadcast(windows.uiWebContents(), 'audio.level', { level, peak: null })
-    },
+    // No `onLevel`: the Bar's waveform is fed by the capture renderer's ~30 Hz
+    // `audio.meter` messages (relayed as `audio.level` in the IPC registry).
+    // Deriving it from the ~100 ms PCM frames instead would meter at 10 Hz and
+    // make the bars step rather than dance (PLAN §2.1).
   })
 
   const hotkeys = new HotkeyBridge({
@@ -219,6 +221,13 @@ async function bootstrap(): Promise<void> {
   machine.on('event', (event: DictationEvent) => {
     ipc.broadcast(windows.uiWebContents(), 'dictation.state', event)
     applyBarVisibility(settings.get(), event)
+  })
+
+  // Esc cancels while listening, and only while listening (PLAN §2.1).
+  const escape = new EscapeCancel({ cancel: () => orchestrator.cancel() })
+  machine.on('state', (next) => {
+    if (next === 'listening') escape.arm()
+    else escape.disarm()
   })
 
   engines.on('status', (status: EnginesStatus) => {
@@ -335,6 +344,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(): Promise<void> {
     log.info('shutting down')
     tray.destroy()
+    escape.dispose()
     hotkeys.stop()
     orchestrator.dispose()
     injector.dispose()

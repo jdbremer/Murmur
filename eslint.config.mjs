@@ -13,6 +13,9 @@ export default tseslint.config(
       '**/release/**',
       '**/build/**',
       'packages/native/build/**',
+      // Sidecar source checkouts (scripts/sidecars/build-*.sh) carry their own
+      // eslint configs, which must never be resolved against our node_modules.
+      '.sidecars/**',
     ],
   },
 

@@ -1,6 +1,7 @@
-import type { AudioCaptureStatus, AudioCommand } from '@murmur/shared'
+import type { AudioCaptureStatus, AudioCommand, AudioDevice } from '@murmur/shared'
 
 import processorUrl from './capture-processor.js?url'
+import { normaliseLevel } from './meter'
 import { describeMicError } from './mic-errors'
 
 /**
@@ -38,6 +39,10 @@ export interface CaptureCallbacks {
   /** One 16 kHz mono Float32 frame, as a transferable `ArrayBuffer`. */
   onFrame(pcm: ArrayBuffer, sampleCount: number): void
   onStatus(status: AudioCaptureStatus): void
+  /** ~30 Hz mic meter, already normalised to the 0..1 the Bar draws. */
+  onMeter(level: number, peak: number): void
+  /** The microphone list, on demand and on `devicechange`. */
+  onDevices(devices: AudioDevice[]): void
 }
 
 export class MicrophoneCapture {
@@ -65,6 +70,35 @@ export class MicrophoneCapture {
   apply(command: AudioCommand): Promise<void> {
     this.#queue = this.#queue.then(() => this.#run(command)).catch(() => undefined)
     return this.#queue
+  }
+
+  /**
+   * Enumerate the microphones and report them (PLAN §2.2.5).
+   *
+   * This renderer is the one place labels are available: `enumerateDevices`
+   * only exposes them to a context that holds (or has held) mic permission,
+   * which is this page and no other window. Labels stay empty before the first
+   * grant — the pickers substitute a position-based name rather than a UUID.
+   */
+  async refreshDevices(): Promise<void> {
+    if (this.#disposed) return
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      this.#callbacks.onDevices([])
+      return
+    }
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices()
+      const devices = all
+        .filter((device) => device.kind === 'audioinput')
+        .map((device, index) => ({
+          deviceId: device.deviceId || `input-${index}`,
+          label: device.label,
+          isDefault: device.deviceId === 'default',
+        }))
+      this.#callbacks.onDevices(devices)
+    } catch {
+      this.#callbacks.onDevices([])
+    }
   }
 
   dispose(): void {
@@ -148,7 +182,19 @@ export class MicrophoneCapture {
       })
 
       worklet.port.onmessage = (event: MessageEvent) => {
-        const message = event.data as { type?: string; pcm?: ArrayBuffer } | null
+        const message = event.data as {
+          type?: string
+          pcm?: ArrayBuffer
+          rms?: number
+          peak?: number
+        } | null
+        if (message?.type === 'meter') {
+          this.#callbacks.onMeter(
+            normaliseLevel(message.rms ?? 0),
+            normaliseLevel(message.peak ?? 0),
+          )
+          return
+        }
         if (message?.type !== 'frame' || !message.pcm) return
         this.#callbacks.onFrame(message.pcm, message.pcm.byteLength / 4)
       }

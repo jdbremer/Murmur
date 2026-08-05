@@ -14,9 +14,11 @@ import type {
   StyleRepository,
 } from '../store/repositories'
 import type { WindowManager } from '../windows/manager'
+import type { AudioDeviceList } from '@murmur/shared'
 import { framePcm } from '../audio/buffer'
 import { native } from '../native'
 import { simulateDictation } from '../dictation/simulator'
+import { setBarInteractive } from '../windows/bar'
 
 /**
  * Every `ipcMain` handler the app registers.
@@ -153,6 +155,24 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   })
   ipc.receive('audio.status', (status) => {
     if (status.status === 'error') orchestrator.reportAudioError(status.message)
+  })
+  // The capture renderer meters at ~30 Hz; main is only the relay to the Bar,
+  // which interpolates it up to 60 fps (PLAN §2.1).
+  ipc.receive('audio.meter', (level) => {
+    ipc.broadcast(windows.uiWebContents(), 'audio.level', level)
+  })
+
+  // -- audio devices: enumerated by the capture renderer, cached here --------
+  let devices: AudioDeviceList = { devices: [] }
+  ipc.receive('audio.devices', (next) => {
+    devices = next
+    ipc.broadcast(windows.uiWebContents(), 'audio.devicesChanged', next)
+  })
+  ipc.handle('audio.listDevices', () => devices)
+
+  // -- bar: click-through everywhere except the pill (PLAN §2.1) -------------
+  ipc.receive('bar.pointerRegion', ({ interactive }) => {
+    setBarInteractive(windows.bar(), interactive)
   })
 
   // -- debug: unpackaged builds only ---------------------------------------

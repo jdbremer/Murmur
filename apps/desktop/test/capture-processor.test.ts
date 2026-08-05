@@ -19,6 +19,8 @@ interface PortMessage {
   type: string
   pcm?: ArrayBuffer
   value?: boolean
+  rms?: number
+  peak?: number
 }
 
 interface FakePort {
@@ -33,7 +35,7 @@ interface ProcessorLike {
 }
 
 type ProcessorConstructor = new (options: {
-  processorOptions?: { targetSampleRate?: number; frameSamples?: number }
+  processorOptions?: { targetSampleRate?: number; frameSamples?: number; meterSamples?: number }
 }) => ProcessorLike
 
 const globals = globalThis as unknown as {
@@ -71,11 +73,15 @@ beforeAll(async () => {
 /** Build a processor at a given context rate and put it in streaming mode. */
 function createProcessor(
   contextRate: number,
-  options: { frameSamples?: number; streaming?: boolean } = {},
+  options: { frameSamples?: number; streaming?: boolean; meterSamples?: number } = {},
 ): ProcessorLike {
   globals.sampleRate = contextRate
   const processor = new CaptureProcessor({
-    processorOptions: { targetSampleRate: 16_000, frameSamples: options.frameSamples ?? 1_600 },
+    processorOptions: {
+      targetSampleRate: 16_000,
+      frameSamples: options.frameSamples ?? 1_600,
+      ...(options.meterSamples ? { meterSamples: options.meterSamples } : {}),
+    },
   })
   if (options.streaming !== false) {
     processor.port.onmessage?.({ data: { type: 'streaming', value: true } })
@@ -224,6 +230,57 @@ describe('streaming gate', () => {
     const processor = createProcessor(16_000)
     expect(processor.process([])).toBe(true)
     expect(processor.process([[]])).toBe(true)
+  })
+})
+
+describe('metering', () => {
+  const metersFrom = (port: FakePort): PortMessage[] =>
+    port.sent.filter((message) => message.type === 'meter')
+
+  it('posts one raw RMS/peak reading per meter window', () => {
+    const processor = createProcessor(16_000, { frameSamples: 1_600, meterSamples: 100 })
+    feed(processor, new Float32Array(250).fill(0.5))
+
+    const meters = metersFrom(processor.port)
+    // 250 samples with a 100-sample window: two complete readings, 50 held.
+    expect(meters).toHaveLength(2)
+    expect(meters[0]?.rms).toBeCloseTo(0.5, 6)
+    expect(meters[0]?.peak).toBeCloseTo(0.5, 6)
+  })
+
+  it('reports the RMS of the window, not the mean', () => {
+    const processor = createProcessor(16_000, { frameSamples: 1_600, meterSamples: 4 })
+    // Alternating ±1 has mean 0 but RMS 1 — the meter must say "loud".
+    feed(processor, new Float32Array([1, -1, 1, -1]))
+
+    expect(metersFrom(processor.port)[0]?.rms).toBeCloseTo(1, 6)
+  })
+
+  it('meters even while frame streaming is off', () => {
+    // The Bar can show a live level while the mic is merely warm; the meter
+    // must not be gated behind the frame stream.
+    const processor = createProcessor(16_000, {
+      frameSamples: 1_600,
+      meterSamples: 100,
+      streaming: false,
+    })
+    feed(processor, new Float32Array(100).fill(0.25))
+
+    expect(framesFrom(processor.port)).toHaveLength(0)
+    expect(metersFrom(processor.port)).toHaveLength(1)
+  })
+
+  it('drops the partial meter window when streaming stops', () => {
+    const processor = createProcessor(16_000, { frameSamples: 1_600, meterSamples: 100 })
+    feed(processor, new Float32Array(50).fill(1))
+    processor.port.onmessage?.({ data: { type: 'streaming', value: false } })
+    processor.port.onmessage?.({ data: { type: 'streaming', value: true } })
+    feed(processor, new Float32Array(100).fill(0.1))
+
+    // The stale loud half-window must not leak into the fresh reading.
+    const meters = metersFrom(processor.port)
+    expect(meters).toHaveLength(1)
+    expect(meters[0]?.rms).toBeCloseTo(0.1, 6)
   })
 })
 

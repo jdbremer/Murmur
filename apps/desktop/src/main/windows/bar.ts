@@ -15,7 +15,15 @@ import { loadRenderer, PRELOAD_PATH } from './renderer'
  */
 
 export const BAR_WIDTH = 360
-export const BAR_HEIGHT = 64
+/**
+ * Taller than the capsule on purpose. The pill sits flush with the bottom of
+ * the page; the empty space above it is where the hover controls' mic picker
+ * opens, so the window never has to resize mid-interaction (which on macOS
+ * would fight the ~150 ms morph the pill is already animating). Everything
+ * above the pill is transparent *and* click-through, so it costs the user
+ * nothing.
+ */
+export const BAR_HEIGHT = 200
 /** Gap between the pill and the bottom edge of the display (PLAN §2.1). */
 export const BAR_MARGIN_BOTTOM = 10
 
@@ -70,6 +78,12 @@ export function createBarWindow(): BrowserWindow {
   // Above the Dock and above full-screen apps.
   window.setAlwaysOnTop(true, 'screen-saver')
 
+  // Click-through by default: the window covers a strip of the screen the user
+  // is dictating into, and none of it may swallow a click. `forward: true` keeps
+  // mouse *moves* flowing to the renderer, which flips this back off while the
+  // pointer is over the capsule (`bar.pointerRegion`, PLAN §2.1).
+  window.setIgnoreMouseEvents(true, { forward: true })
+
   if (isMac) {
     window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     // A non-activating panel: clicking the pill must not raise Murmur.
@@ -78,6 +92,18 @@ export function createBarWindow(): BrowserWindow {
 
   void loadRenderer(window, 'bar')
   return window
+}
+
+/**
+ * Let the pill receive clicks, or go back to being transparent to the mouse.
+ *
+ * Driven entirely by the renderer's hit-testing, because only the renderer
+ * knows where the capsule currently is — it moves as the pill morphs between
+ * states and as the hover controls appear.
+ */
+export function setBarInteractive(window: BrowserWindow, interactive: boolean): void {
+  if (window.isDestroyed()) return
+  window.setIgnoreMouseEvents(!interactive, { forward: true })
 }
 
 /** Re-centre after a display change (resolution, arrangement, hot-plug). */
