@@ -35,8 +35,11 @@ function createStub(reason) {
     available: false,
     startHotkeyListener() {},
     stopHotkeyListener() {},
-    insertText() {
-      return { ok: false, method: 'none', error: reason }
+    sendPasteShortcut() {
+      return { ok: false, error: reason }
+    },
+    insertTextViaAccessibility() {
+      return { ok: false, error: reason }
     },
     getFrontmostApp() {
       return null
@@ -76,7 +79,8 @@ function fromBinding(binding) {
     available: typeof binding.isAvailable === 'function' ? Boolean(binding.isAvailable()) : true,
     startHotkeyListener: adopt(binding, stub, 'startHotkeyListener'),
     stopHotkeyListener: adopt(binding, stub, 'stopHotkeyListener'),
-    insertText: adopt(binding, stub, 'insertText'),
+    sendPasteShortcut: adopt(binding, stub, 'sendPasteShortcut'),
+    insertTextViaAccessibility: adopt(binding, stub, 'insertTextViaAccessibility'),
     getFrontmostApp: adopt(binding, stub, 'getFrontmostApp'),
     isSecureInputActive: adopt(binding, stub, 'isSecureInputActive'),
     permissions: {

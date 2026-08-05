@@ -31,9 +31,10 @@ export interface HotkeyEvent {
 
 export type HotkeyListener = (event: HotkeyEvent) => void
 
-export interface InsertTextResult {
+/** What one native side effect reports back. Never throws across the boundary. */
+export interface NativeActionResult {
   ok: boolean
-  method: 'paste' | 'accessibility' | 'none'
+  /** Present when `ok` is false. Safe to show the user; never contains text. */
   error?: string
 }
 
@@ -51,9 +52,16 @@ export interface NativePermissions {
 export interface MurmurNative {
   /** `false` when this is the stub — every call below is then a no-op. */
   readonly available: boolean
+  /**
+   * Install the listen-only CGEventTap. Returns `false` from the binding when
+   * the tap could not be created (almost always missing Input Monitoring).
+   */
   startHotkeyListener(config: HotkeyConfig, listener: HotkeyListener): void
   stopHotkeyListener(): void
-  insertText(text: string): InsertTextResult
+  /** Synthesize ⌘V. The clipboard save/set/restore dance lives in main. */
+  sendPasteShortcut(): NativeActionResult
+  /** AX fallback for apps that drop synthetic keystrokes. */
+  insertTextViaAccessibility(text: string): NativeActionResult
   getFrontmostApp(): FrontmostApp | null
   isSecureInputActive(): boolean
   readonly permissions: NativePermissions

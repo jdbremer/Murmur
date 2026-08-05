@@ -12,7 +12,9 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 Early implementation. The full product & engineering plan lives in **[PLAN.md](./PLAN.md)** — UX spec, architecture, model catalogs, roadmap (M0–M6), risks, and open questions.
 
-The scaffold is in place: the workspaces, the typed IPC contract, the model-catalog origin policy, the tray, the three windows and the three renderer apps. Speech-to-text, polishing, the model downloader and the native hotkey tap are not implemented yet.
+The **main process is complete**: the dictation orchestrator with per-stage timeouts and typed error states, the no-ML VAD, both STT engines (whisper.cpp sidecar, ONNX Runtime utility process), the polish engine with its prompt builder and hallucination guard, the model manager with a resumable checksum-verified downloader, the SQLite store with FTS5 search, clipboard-swap text insertion, and the macOS native module (event tap, paste synthesis, permissions).
+
+Still to come: the Bar and Hub UIs, the audio-capture renderer's `getUserMedia` half, onboarding, and CI. Dictation therefore does not run end to end yet — the main process is ready for it, the microphone is not connected.
 
 ## Development
 
@@ -33,6 +35,40 @@ npm run lint         # eslint (flat config) — `npm run format` for prettier
 | `packages/shared`   | `@murmur/shared` — domain types, zod schemas, catalog policy, the typed IPC contract    |
 | `packages/native`   | `@murmur/native` — the macOS-only N-API addon (hotkey tap, text insertion, permissions) |
 | `resources/catalog` | `models.json`, validated against the origin policy every time it loads                  |
+| `scripts/sidecars`  | Build universal `whisper-server` / `llama-server` binaries — macOS only                 |
+| `scripts/models`    | The first-party Parakeet NeMo→ONNX export we will run before listing it                 |
+
+Inside `apps/desktop/src/main`:
+
+| Path           | What lives there                                                                 |
+| -------------- | -------------------------------------------------------------------------------- |
+| `dictation/`   | The orchestrator (the loop), the hotkey bridge, clipboard-swap insertion         |
+| `engines/`     | `SttEngine` / `PolishEngine` impls, sidecar lifecycle, the ONNX decode loops     |
+| `models/`      | Catalog loading, the resumable downloader, on-disk storage, the hardware advisor |
+| `store/`       | SQLite (WAL, migrations, FTS5), the repositories, the settings JSON store        |
+| `net/fetch.ts` | The **only** outbound network path — a Hugging-Face-only allowlist (PLAN §10.2)  |
+| `config.ts`    | Every timeout, threshold and budget, in one place                                |
+
+### Running without models or sidecars
+
+Everything degrades to a status rather than a crash, which is what makes the app
+developable on a machine that has none of the heavy parts:
+
+| Missing                      | What happens                                                                 |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| `whisper-server` binary      | STT engine reports `unavailable(binary-missing)`, naming every path searched |
+| `llama-server` binary        | Polish engine likewise; dictation still inserts the raw transcript           |
+| `onnxruntime-node`           | ONNX engine reports `unavailable(runtime-missing)`; Whisper is unaffected    |
+| The model files themselves   | `unavailable(model-missing)` until the download finishes                     |
+| `@murmur/native` (non-macOS) | Hotkey listener never starts; insertion returns `unsupported-platform`       |
+
+`MURMUR_SIDECAR_DIR` points a dev build at a custom sidecar build.
+`MURMUR_DEBUG=1` enables debug logging; `MURMUR_LOG_TRANSCRIPTS=1` disables
+transcript redaction (local debugging only — see `src/main/logging.ts`).
+
+In an unpackaged build two dev-only IPC channels exist:
+`debug.simulateDictation` cycles the state machine with no mic or models, and
+`debug.simulateHotkey` feeds the **real** orchestrator a synthetic hotkey edge.
 
 ### macOS vs. other platforms
 
