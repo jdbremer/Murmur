@@ -15,6 +15,7 @@ import {
 } from '../../components/Section'
 import { useAudioDevices, micOptions } from '../../hooks/useAudioDevices'
 import { useCaptureStatus } from '../../hooks/useCaptureStatus'
+import { useDevMode } from '../../hooks/useDevMode'
 import { useDictationState } from '../../hooks/useDictationState'
 import { useSettings } from '../../hooks/useSettings'
 import { isMacPlatform } from '../../lib/platform'
@@ -268,6 +269,7 @@ export function SettingsSection(): React.JSX.Element {
  */
 function TryIt({ hotkey }: { hotkey: HotkeyKey }): React.JSX.Element {
   const event = useDictationState()
+  const dev = useDevMode()
   const [simulating, setSimulating] = useState(false)
 
   const label = HOTKEYS.find((option) => option.value === hotkey)?.label ?? 'your key'
@@ -292,26 +294,28 @@ function TryIt({ hotkey }: { hotkey: HotkeyKey }): React.JSX.Element {
       <p aria-live="polite" className="flex-1 text-[12px] text-ink-muted">
         {message}
       </p>
-      <Button
-        disabled={simulating}
-        onClick={() => {
-          setSimulating(true)
-          void window.murmur.debug
-            .simulateHotkey({ action: 'down' })
-            .then(
-              () =>
-                new Promise<void>((resolve) => {
-                  setTimeout(resolve, 1200)
-                }),
-            )
-            .then(() => window.murmur.debug.simulateHotkey({ action: 'up' }))
-            .catch(() => undefined)
-            .finally(() => setSimulating(false))
-        }}
-        title="Development builds only — runs the real pipeline without the event tap"
-      >
-        Simulate
-      </Button>
+      {dev ? (
+        <Button
+          disabled={simulating}
+          onClick={() => {
+            setSimulating(true)
+            void window.murmur.debug
+              .simulateHotkey({ action: 'down' })
+              .then(
+                () =>
+                  new Promise<void>((resolve) => {
+                    setTimeout(resolve, 1200)
+                  }),
+              )
+              .then(() => window.murmur.debug.simulateHotkey({ action: 'up' }))
+              .catch(() => undefined)
+              .finally(() => setSimulating(false))
+          }}
+          title="Development builds only — runs the real pipeline without the event tap"
+        >
+          Simulate
+        </Button>
+      ) : null}
     </div>
   )
 }

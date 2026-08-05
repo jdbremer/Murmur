@@ -27,7 +27,7 @@ export const PERMISSIONS: readonly PermissionCopy[] = [
     title: 'Microphone',
     why: 'To hear what you dictate. The audio is transcribed on this machine and discarded straight afterwards unless you turn on retention.',
     notDone:
-      'The microphone is opened when you press your key and released when you stop — never in the background, never recorded to disk by default.',
+      'The stream stays warm for a few minutes around dictations so the first syllable is never clipped, then closes. Warm audio lives in a rolling ~300 ms buffer that is continuously overwritten — nothing is recorded to disk by default, and nothing ever leaves this machine.',
     ifSkipped: 'Without it Murmur cannot hear you, and dictation does nothing at all.',
   },
   {

@@ -9,6 +9,7 @@ import type {
 
 import { Badge, Banner, Button, Card, InlineError, Row, Section } from '../../components/Section'
 import { useCaptureStatus } from '../../hooks/useCaptureStatus'
+import { useDevMode } from '../../hooks/useDevMode'
 import { useEngines } from '../../hooks/useEngines'
 import { engineLabel } from '../../format'
 import { dataLocation, isMacPlatform } from '../../lib/platform'
@@ -29,6 +30,7 @@ export function HelpSection(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const engines = useEngines()
   const capture = useCaptureStatus()
+  const dev = useDevMode()
   const mac = isMacPlatform()
 
   const refresh = useCallback(() => {
@@ -126,20 +128,22 @@ export function HelpSection(): React.JSX.Element {
         >
           <Badge tone="positive">Downloads only</Badge>
         </Row>
-        <Row
-          label="Simulate a dictation"
-          hint="Runs the Bar through every state without a microphone or a model. Development builds only."
-        >
-          <Button
-            onClick={() => {
-              void window.murmur.debug.simulateDictation().catch((cause: unknown) => {
-                setError(messageOf(cause))
-              })
-            }}
+        {dev ? (
+          <Row
+            label="Simulate a dictation"
+            hint="Runs the Bar through every state without a microphone or a model. Development builds only."
           >
-            Run
-          </Button>
-        </Row>
+            <Button
+              onClick={() => {
+                void window.murmur.debug.simulateDictation().catch((cause: unknown) => {
+                  setError(messageOf(cause))
+                })
+              }}
+            >
+              Run
+            </Button>
+          </Row>
+        ) : null}
       </Card>
     </Section>
   )

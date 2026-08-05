@@ -20,6 +20,7 @@ const ipc = createRendererIpc(ipcRenderer)
 const api: MurmurApi = {
   app: {
     version: () => ipc.invoke('app.version'),
+    devMode: () => ipc.invoke('app.devMode'),
     quit: () => ipc.invoke('app.quit'),
     openHub: () => ipc.invoke('app.openHub'),
   },

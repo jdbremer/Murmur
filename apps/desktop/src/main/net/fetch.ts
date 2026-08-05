@@ -214,7 +214,12 @@ export async function loopbackFetch(
   if (token) headers.set('authorization', `Bearer ${token}`)
 
   const doFetch: FetchLike = fetchImpl ?? ((u, i) => globalThis.fetch(u, i))
-  return doFetch(url, { ...init, headers })
+  // `redirect: 'error'`, unconditionally — a caller-supplied value is ignored.
+  // fetch's default is to follow up to 20 hops, and hop #2 can leave loopback:
+  // whatever answers on the port could 307 the body — audio, a prompt —
+  // straight off the machine. A sidecar has no business redirecting at all, so
+  // any redirect is treated as the attack it would be.
+  return doFetch(url, { ...init, headers, redirect: 'error' })
 }
 
 /**

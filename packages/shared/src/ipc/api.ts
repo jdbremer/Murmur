@@ -25,6 +25,8 @@ type Msg<K extends IpcMessageChannel> = MessageInput<K>
 export interface MurmurApi {
   readonly app: {
     version(): Promise<Res<'app.version'>>
+    /** True in unpackaged builds; gates the Simulate widgets. */
+    devMode(): Promise<Res<'app.devMode'>>
     quit(): Promise<void>
     openHub(): Promise<void>
   }

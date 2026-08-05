@@ -144,12 +144,18 @@ export function Bar(): React.JSX.Element | null {
         (hits(pillRef.current, moveEvent.clientX, moveEvent.clientY) ||
           hits(panelRef.current, moveEvent.clientX, moveEvent.clientY))
       setHovered(inside)
-      setInteractive(inside || menuOpen)
+      // Moving off the pill+menu closes the menu — there is no other way out:
+      // this window is focusable:false, so it never gets a blur or an outside
+      // click, and holding the whole 360×200 window interactive while a menu
+      // sits open would swallow clicks meant for the app underneath.
+      if (menuOpen && !inside) setMenuOpen(false)
+      setInteractive(inside)
     }
 
     const onLeave = (): void => {
       setHovered(false)
-      if (!menuOpen) setInteractive(false)
+      setMenuOpen(false)
+      setInteractive(false)
     }
 
     window.addEventListener('mousemove', onMove)
@@ -164,13 +170,6 @@ export function Bar(): React.JSX.Element | null {
   useEffect(() => {
     if (!visible) setInteractive(false)
   }, [setInteractive, visible])
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const close = (): void => setMenuOpen(false)
-    window.addEventListener('blur', close)
-    return () => window.removeEventListener('blur', close)
-  }, [menuOpen])
 
   if (!visible) return null
 

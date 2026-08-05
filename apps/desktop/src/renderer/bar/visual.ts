@@ -210,6 +210,12 @@ export class BarPresenter {
     const hold = holdMsFor(event)
     if (hold > 0) {
       this.#momentary = { event, until: now + hold }
+      // The machine settles to idle when it emits a momentary event, but it
+      // does NOT emit that idle — `RESTING_STATE` moves silently. Without this
+      // line the presenter would fall back to the stale pre-momentary event
+      // (`inserting`, usually) when the hold expires, and the pill would say
+      // "Inserting…" forever after every successful dictation.
+      this.#latest = { state: 'idle' }
       return
     }
     this.#latest = event

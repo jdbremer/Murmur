@@ -250,3 +250,20 @@ describe('loopbackFetch', () => {
     expect(fetchImpl).toHaveBeenCalledOnce()
   })
 })
+
+describe('loopbackFetch redirect policy', () => {
+  it('forces redirect: "error" so a hop can never leave loopback', async () => {
+    const fetchImpl = vi.fn((_url: string, init?: RequestInit) => {
+      expect(init?.redirect).toBe('error')
+      return Promise.resolve(new Response('ok'))
+    })
+    await loopbackFetch('http://127.0.0.1:9000/inference', { fetchImpl })
+    // Even a caller who asks for 'follow' is overruled — the guarantee is not
+    // configurable.
+    await loopbackFetch('http://127.0.0.1:9000/inference', {
+      fetchImpl,
+      redirect: 'follow',
+    })
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+})

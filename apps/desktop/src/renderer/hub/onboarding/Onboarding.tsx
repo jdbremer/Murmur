@@ -11,6 +11,7 @@ import {
   ProgressBar,
   TextArea,
 } from '../../components/Section'
+import { useDevMode } from '../../hooks/useDevMode'
 import { useDictationState } from '../../hooks/useDictationState'
 import { useModels } from '../../hooks/useModels'
 import { downloadPercent, formatBytes } from '../../format'
@@ -261,10 +262,18 @@ function ModelStep({ settings }: { settings: Settings }): React.JSX.Element {
         const installed = (models?.installed ?? []).some(
           (candidate) => candidate.modelId === entry.id,
         )
-        if (!installed) void download(entry.id)
+        // Also skip anything already in flight: main dedupes too, but the UI
+        // should not fire requests it can see are redundant.
+        const progress = downloads[entry.id]
+        const inFlight =
+          progress &&
+          progress.status !== 'complete' &&
+          progress.status !== 'cancelled' &&
+          progress.status !== 'error'
+        if (!installed && !inFlight) void download(entry.id)
       }
     },
-    [models, options, download],
+    [models, options, downloads, download],
   )
 
   return (
@@ -322,6 +331,7 @@ function ModelStep({ settings }: { settings: Settings }): React.JSX.Element {
                   <div className="mt-2">
                     <Button
                       variant={active ? 'secondary' : 'primary'}
+                      disabled={active}
                       onClick={() => choose(option.id)}
                     >
                       {active ? 'Downloading' : 'Download this pair'}
@@ -380,6 +390,7 @@ function statusLabel(status: string, percent: number): string {
 
 function TutorialStep(): React.JSX.Element {
   const event = useDictationState()
+  const dev = useDevMode()
   const [practice, setPractice] = useState('')
   const [simulating, setSimulating] = useState(false)
 
@@ -430,9 +441,11 @@ function TutorialStep(): React.JSX.Element {
                   ? event.message
                   : 'Waiting for your key.'}
         </p>
-        <Button variant="secondary" onClick={simulate} disabled={simulating}>
-          Simulate a hotkey
-        </Button>
+        {dev ? (
+          <Button variant="secondary" onClick={simulate} disabled={simulating}>
+            Simulate a hotkey
+          </Button>
+        ) : null}
       </div>
 
       <p className="mt-3 text-[12px] leading-relaxed text-ink-faint">

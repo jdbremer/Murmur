@@ -55,6 +55,7 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
 
   // -- app -----------------------------------------------------------------
   ipc.handle('app.version', () => app.getVersion())
+  ipc.handle('app.devMode', () => context.isDev)
   ipc.handle('app.quit', () => {
     context.quit()
   })
@@ -160,8 +161,15 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   // `audio.captureChanged`.
   let captureStatus: AudioCaptureStatus = { status: 'idle' }
   ipc.receive('audio.status', (status) => {
-    captureStatus = status
-    ipc.broadcast(windows.uiWebContents(), 'audio.captureChanged', status)
+    // An error is sticky until the mic *proves itself* with a 'ready': the
+    // warm-idle timer releases the stream a few minutes after startup, and the
+    // resulting 'idle' must not wash away a "permission denied" the user has
+    // never seen. Only working hardware clears the banner.
+    const keepError = captureStatus.status === 'error' && status.status === 'idle'
+    if (!keepError) {
+      captureStatus = status
+      ipc.broadcast(windows.uiWebContents(), 'audio.captureChanged', status)
+    }
     if (status.status === 'error') orchestrator.reportAudioError(status.message)
   })
   ipc.handle('audio.captureStatus', () => captureStatus)

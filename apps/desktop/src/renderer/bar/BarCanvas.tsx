@@ -74,6 +74,16 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
     let previous = 0
 
     const draw = (timestamp: number): void => {
+      // Idle dots are static: paint them once and stop scheduling. A 60 fps
+      // loop repainting an unchanging frame is pure battery drain, and the
+      // shape-change effect below re-arms this loop when animation resumes.
+      if (shapeRef.current === 'dots') {
+        context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+        paintDots(context)
+        previous = 0
+        return
+      }
+
       frame = requestAnimationFrame(draw)
       if (startRef.current === 0) startRef.current = timestamp
       const dt = previous === 0 ? 16 : Math.min(100, timestamp - previous)
@@ -94,9 +104,6 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
         case 'shimmer':
           paintShimmer(context, elapsed)
           break
-        case 'dots':
-          paintDots(context)
-          break
         default:
           break
       }
@@ -104,7 +111,7 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
 
     frame = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(frame)
-  }, [levelRef])
+  }, [levelRef, shape])
 
   return (
     <canvas

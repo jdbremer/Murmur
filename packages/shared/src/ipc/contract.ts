@@ -115,6 +115,12 @@ export type DebugHotkeyRequest = z.infer<typeof DebugHotkeyRequestSchema>
 export const invokeContract = {
   // --- app ---------------------------------------------------------------
   'app.version': { request: z.void(), response: z.string().min(1) },
+  /**
+   * True in unpackaged builds. UI that fronts a dev-only channel (the three
+   * Simulate widgets) renders only when this is true — a button whose backing
+   * handler does not exist in a packaged build must not exist either.
+   */
+  'app.devMode': { request: z.void(), response: z.boolean() },
   'app.quit': { request: z.void(), response: z.void() },
   'app.openHub': { request: z.void(), response: z.void() },
 

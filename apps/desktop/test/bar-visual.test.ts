@@ -130,6 +130,21 @@ describe('BarPresenter', () => {
     expect(presenter.present(120)).toEqual(listening)
   })
 
+  it('settles to idle after the hold even though main never emits the idle', () => {
+    // Regression: the machine's RESTING_STATE moves to idle silently when it
+    // emits `inserted`/`error` — no trailing idle event arrives. The presenter
+    // must not fall back to the stale pre-momentary event, or the pill reads
+    // "Inserting…" forever after every successful dictation.
+    const presenter = new BarPresenter()
+    presenter.receive(listening, 0)
+    presenter.receive({ state: 'processing', stage: 'transcribing' }, 100)
+    presenter.receive({ state: 'inserting' }, 200)
+    presenter.receive(inserted, 300)
+
+    expect(presenter.present(400).state).toBe('inserted')
+    expect(presenter.present(300 + BAR.insertedHoldMs + 1).state).toBe('idle')
+  })
+
   it('reports when it will next change on its own', () => {
     const presenter = new BarPresenter()
     expect(presenter.expiresAt()).toBeNull()
