@@ -26,6 +26,9 @@ export interface MurmurApi {
   readonly app: {
     version(): Promise<Res<'app.version'>>
     info(): Promise<Res<'app.info'>>
+    /** User-pressed only; there is no background check (PLAN §10.2). */
+    checkForUpdate(): Promise<Res<'app.checkForUpdate'>>
+    openReleasePage(request: Req<'app.openReleasePage'>): Promise<void>
     /** True in unpackaged builds; gates the Simulate widgets. */
     devMode(): Promise<Res<'app.devMode'>>
     quit(): Promise<void>

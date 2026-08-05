@@ -5,6 +5,7 @@ import type {
   PermissionKind,
   PermissionState,
   PermissionsStatus,
+  UpdateCheckResult,
 } from '@murmur/shared'
 
 import { Badge, Banner, Button, Card, InlineError, Row, Section } from '../../components/Section'
@@ -122,6 +123,7 @@ export function HelpSection(): React.JSX.Element {
         <Row label="Version">
           <span className="select-text font-mono text-[12px] text-ink-muted">{version}</span>
         </Row>
+        <UpdateRow />
         <Row
           label="Where your data lives"
           hint="History, settings, dictionary and downloaded models."
@@ -130,9 +132,9 @@ export function HelpSection(): React.JSX.Element {
         </Row>
         <Row
           label="Network activity"
-          hint="Model downloads from Hugging Face, started by you. Nothing else — no telemetry, no accounts, no update pings."
+          hint="Model downloads from Hugging Face, and the update check when you press it. Nothing else — no telemetry, no accounts, nothing on a timer."
         >
-          <Badge tone="positive">Downloads only</Badge>
+          <Badge tone="positive">Only when you ask</Badge>
         </Row>
         {dev ? (
           <Row
@@ -155,6 +157,64 @@ export function HelpSection(): React.JSX.Element {
       {showDevTools ? <DevToolsCard /> : null}
     </Section>
   )
+}
+
+/**
+ * "Check for updates" — a button, never a background poll.
+ *
+ * Reporting rather than installing is a limitation worth stating plainly in
+ * the UI: macOS will not let an app that is not Developer-ID signed replace
+ * itself, so offering an "Install" button here would download an update and
+ * then fail at the last step.
+ */
+function UpdateRow(): React.JSX.Element {
+  const [result, setResult] = useState<UpdateCheckResult | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  const check = useCallback(() => {
+    setChecking(true)
+    void window.murmur.app
+      .checkForUpdate()
+      .then(setResult)
+      .catch(() => undefined)
+      .finally(() => setChecking(false))
+  }, [])
+
+  return (
+    <Row label="Updates" hint={updateHint(result)}>
+      <div className="flex items-center gap-2">
+        {result?.status === 'available' ? (
+          <Button
+            variant="primary"
+            onClick={() => {
+              void window.murmur.app.openReleasePage({ url: result.url })
+            }}
+          >
+            Get {result.latestVersion}
+          </Button>
+        ) : null}
+        <Button disabled={checking} onClick={check}>
+          {checking ? 'Checking…' : 'Check for updates'}
+        </Button>
+      </div>
+    </Row>
+  )
+}
+
+function updateHint(result: UpdateCheckResult | null): string {
+  if (!result) {
+    return 'Asks GitHub whether a newer release exists. Nothing is sent until you press it, and nothing checks on its own.'
+  }
+  switch (result.status) {
+    case 'available':
+      return `Version ${result.latestVersion} is available — you have ${result.currentVersion}. Opens the release page; installing is a manual download for now.`
+    case 'current':
+      return `You have the latest release (${result.currentVersion}).`
+    case 'none':
+      return 'No release has been published yet, so there is nothing to compare against.'
+    case 'error':
+      return result.message ?? 'The update check did not succeed.'
+  }
 }
 
 const PERMISSION_LABELS: Record<

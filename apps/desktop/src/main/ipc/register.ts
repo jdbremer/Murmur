@@ -1,4 +1,4 @@
-import { app, dialog } from 'electron'
+import { app, dialog, shell } from 'electron'
 
 import type { MainIpc } from '@murmur/shared'
 
@@ -20,7 +20,9 @@ import type { AudioCaptureStatus, AudioDeviceList } from '@murmur/shared'
 import { AUDIO } from '../config'
 import { framePcm } from '../audio/buffer'
 import { describeNative, native } from '../native'
+import { createLogger } from '../logging'
 import { checkPermissions, requestPermission } from '../permissions'
+import { checkForUpdate, isUpdateReleaseUrl } from '../updates'
 import { simulateDictation } from '../dictation/simulator'
 import { installSidecarBinary } from '../engines/install-sidecar'
 import { setBarInteractive } from '../windows/bar'
@@ -59,6 +61,8 @@ export interface IpcContext {
   quit: () => void
 }
 
+const log = createLogger('ipc')
+
 export function registerIpcHandlers(context: IpcContext): MainIpc {
   const { ipc, windows, settings, machine, orchestrator, engines, models } = context
   /** Last capture lifecycle, for `debug.snapshot` and Hub Dev tools. */
@@ -75,6 +79,18 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     showDevTools: context.isDev && process.env['MURMUR_DEV_TOOLS'] === '1',
     native: describeNative(),
   }))
+  ipc.handle('app.checkForUpdate', () => checkForUpdate())
+  ipc.handle('app.openReleasePage', async ({ url }) => {
+    // Only ever the URL this app's own update check produced, and only after
+    // re-checking the host: `shell.openExternal` hands a string to the OS, so
+    // an unvalidated one is an arbitrary-URL-open primitive reachable from the
+    // renderer.
+    if (!isUpdateReleaseUrl(url)) {
+      log.warn(`refusing to open a non-release URL: ${url}`)
+      return
+    }
+    await shell.openExternal(url)
+  })
   ipc.handle('app.devMode', () => context.isDev)
   ipc.handle('app.quit', () => {
     context.quit()

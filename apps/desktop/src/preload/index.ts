@@ -21,6 +21,8 @@ const api: MurmurApi = {
   app: {
     version: () => ipc.invoke('app.version'),
     info: () => ipc.invoke('app.info'),
+    checkForUpdate: () => ipc.invoke('app.checkForUpdate'),
+    openReleasePage: (request) => ipc.invoke('app.openReleasePage', request),
     devMode: () => ipc.invoke('app.devMode'),
     quit: () => ipc.invoke('app.quit'),
     openHub: () => ipc.invoke('app.openHub'),

@@ -18,6 +18,7 @@ import { EnginesStatusSchema } from '../domain/engine'
 import { HardwareReportSchema } from '../domain/hardware'
 import { PermissionKindSchema, PermissionsStatusSchema } from '../domain/permissions'
 import { SettingsPatchSchema, SettingsSchema } from '../domain/settings'
+import { UpdateCheckResultSchema } from '../domain/updates'
 import { StyleProfilePatchSchema, StyleProfileSetSchema } from '../domain/style'
 import {
   ImportedModelSchema,
@@ -138,6 +139,13 @@ export const invokeContract = {
   'app.version': { request: z.void(), response: z.string().min(1) },
   /** Platform + native status for Help / Windows-mode UI branching. */
   'app.info': { request: z.void(), response: AppInfoSchema },
+  /**
+   * User-pressed update check. Never fires on a timer — see `updates.ts` and
+   * the "Network activity" row in Help, which both promise as much.
+   */
+  'app.checkForUpdate': { request: z.void(), response: UpdateCheckResultSchema },
+  /** Open the release page in the user's browser — the only "install" path. */
+  'app.openReleasePage': { request: z.object({ url: z.string() }), response: z.void() },
   /**
    * True in unpackaged builds. UI that fronts a dev-only channel (the three
    * Simulate widgets) renders only when this is true — a button whose backing
