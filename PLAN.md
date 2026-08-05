@@ -25,7 +25,7 @@
 - Windows/Linux (Electron keeps the door open; macOS-only integrations are isolated behind an interface).
 - Mobile, sync, accounts, teams.
 - Real-time streaming captions (arrives in M5 as an upgrade; v1 transcribes on key-release).
-- Cloning Wispr Flow pixel-for-pixel. We mirror the *interaction model and layout*, with our own name, icon, visual styling, and copy — same UX shape, distinct trade dress.
+- Reusing anything *from* Wispr Flow itself. The UI is a deliberate, close recreation of Flow's (§2), but built entirely from our own code and artwork — nothing extracted from their app bundle, and their name/logo stay out.
 
 ---
 
@@ -33,30 +33,41 @@
 
 Wispr Flow's desktop app lives in two places: the **Flow Bar** (floating pill at the bottom of the screen) and the **Hub** (main window for history/personalization/settings), plus a menu-bar item. Murmur adopts the same triad.
 
-### 2.1 The Bar (floating recording pill)
+**Fidelity decision:** the UI is a *close copy* of Flow's — same layout, same components, same geometry and motion, recreated by eye from the real product. Two hard limits keep that clean: (1) nothing is ever extracted from Wispr Flow's app bundle — every icon, animation, and stylesheet here is written from scratch; (2) their name and logo are never used — the product is Murmur, with its own mark. Within those limits, matching their look and feel as closely as we can is an explicit goal, not a risk to minimize.
 
-A small, frameless, always-on-top, non-activating window centered at the bottom of the active display.
+### 2.1 The Bar (floating dictation pill — faithful recreation of the Flow Bar)
 
-States:
+The signature element: a small dark capsule floating at the bottom-center of the screen that expands with a live waveform while you speak. Recreate it closely.
+
+**Geometry & look**
+
+- Anchored bottom-center of the display containing the focused window, ~10 px above the screen edge; floats above the Dock and full-screen apps (`screen-saver` window level, all Spaces, `visibleOnFullScreen`).
+- Idle: a ~64 × 22 px capsule; near-black background (≈ `rgba(20,20,24,0.92)`) with subtle backdrop blur, 1 px hairline border `rgba(255,255,255,0.08)`, soft drop shadow; a few dim static waveform dots hint at the mic.
+- Visibility modes matching Flow: **Show while dictating** (default) · Always show · Hidden (hotkey still works).
+- Every state change animates width/opacity with a ~150 ms ease-out spring — the pill morphs, never jumps or reflows.
+
+**States**
 
 | State | Visual | Trigger |
 |---|---|---|
-| Hidden | — | default |
-| Listening | pill expands, live waveform bars, mic name tooltip | hotkey down |
-| Hands-free listening | same + pinned indicator | double-tap hotkey (exit: tap again or Esc) |
-| Processing | waveform collapses to spinner/shimmer | hotkey up |
-| Inserted | brief ✓ flash, then hide | text injected |
-| Error | red tint + short message ("No speech detected", "Mic in use", "Secure field — can't type here") | failure |
+| Idle | small capsule, dim dots | per visibility mode |
+| Listening | expands to ~160 px; 24–32 thin vertical bars (~2 px wide, 2 px gap) dancing with live mic amplitude at 60 fps, white-on-dark | hotkey down |
+| Hands-free | same + small persistent indicator dot for the latched mode | double-tap hotkey (exit: tap again or Esc) |
+| Processing | bars collapse into a left→right shimmer sweep | hotkey up |
+| Inserted | quick ✓ pulse, then contracts to idle or hides | text injected |
+| Error | warm-red tint, pill expands to fit a short message ("Didn't catch that", "Mic in use", "Secure field — can't type here"), auto-dismiss ~2.5 s | failure |
 
-Behavior details:
+**Interaction**
 
-- Visible on all Spaces and over full-screen apps (`visibleOnFullScreen`), never steals focus (`acceptsFirstMouse` off, panel-style window).
-- Click-through except for a small hover area exposing: cancel (Esc), mic picker, and "open Hub".
-- While listening, show input level meter driven by the audio worklet (no transcript preview in v1; streaming preview arrives M5).
+- Non-activating panel: never steals focus from the app being dictated into.
+- Click-through everywhere except the pill itself; hovering expands it slightly to reveal cancel (×), mic picker, and "open Hub"; Esc cancels while listening.
+- Follows the active display; optional pin-to-one-display setting.
+
+**Implementation** — one frameless transparent window sized to the largest state; the pill is drawn by the Bar renderer (React + a canvas waveform fed ~30 Hz amplitude frames over IPC, interpolated to 60 fps). No transcript preview in v1; streaming partial text lands in the pill in M5, as in Flow.
 
 ### 2.2 The Hub (main window)
 
-Left sidebar navigation, content pane right — Wispr Flow's layout:
+Left sidebar navigation, content pane right — Wispr Flow's layout, tracked closely in visual language too: system font (SF Pro), warm neutral light theme + near-black dark theme, large-radius cards, generous whitespace, icon-labeled sidebar items, stats as friendly headline numbers. Sections:
 
 1. **Home / History** — reverse-chronological feed of dictations: polished text (primary), expandable raw transcript, target app icon, duration, copy button, delete. Header stats like Flow's: total words dictated, average WPM, daily streak. Full-text search.
 2. **Dictionary** — user-managed vocabulary: proper nouns, jargon, acronyms + optional "replace X with Y" rules (e.g., "murmer → Murmur", "eta → ETA"). Fed to both STT biasing and the polish prompt (§7.4). "Add from correction" flow later (M4).
@@ -401,7 +412,7 @@ RAM guardrail: warn before loading a combo whose working set exceeds ~60% of phy
 | Small-LLM polish quality (hallucinated edits) | Medium | Tight system prompt + few-shots, length-divergence guard with raw fallback, eval suite gating catalog entries |
 | Model licensing/compliance concerns from employer | Low | Origin + license surfaced in UI; region filter; catalog only lists redistributable-weight models; SBOM |
 | Electron mic capture edge cases (device switching, AirPods handoff) | Low | Device-change listener re-opens stream; mic picker in Bar; fallback plan: native AVAudioEngine capture |
-| Wispr Flow trade-dress proximity | Low | Same interaction patterns, original visual design/name/assets; no use of their marks or copy |
+| Wispr Flow trade-dress proximity | Accepted | Close visual recreation is a deliberate choice for this personal/internal tool (§2). Kept clean by construction: recreated by eye in our own code/artwork, nothing extracted from their bundle, no use of their name/logo/marketing copy. Revisit only if Murmur is ever distributed commercially |
 
 ---
 
