@@ -57,6 +57,8 @@ asarUnpack:
   - node_modules/@murmur/native/**
 
 mac:
+  # Regenerated from buildResources/icon.svg by scripts/make-icons.sh.
+  icon: buildResources/icon.icns
   category: public.app-category.productivity
   target:
     - target: dmg
@@ -89,6 +91,8 @@ dmg:
 # above; the same Authenticode gap applies here and SmartScreen will warn until
 # a certificate is configured.
 win:
+  # Regenerated from buildResources/icon.svg by scripts/make-icons.sh.
+  icon: buildResources/icon.ico
   target:
     - target: nsis
       arch: [x64]

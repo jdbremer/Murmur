@@ -1,4 +1,4 @@
-import { type BrowserWindow, screen, type WebContents } from 'electron'
+import { app, type BrowserWindow, screen, type WebContents } from 'electron'
 
 import { createAudioWindow } from './audio'
 import { createBarWindow, repositionBar } from './bar'
@@ -30,8 +30,15 @@ export class WindowManager {
   hub(): BrowserWindow {
     if (!this.#hub || this.#hub.isDestroyed()) {
       this.#hub = createHubWindow()
+      // Packaged macOS builds are LSUIElement: no Dock icon by default. Give
+      // the app one for as long as the Hub is open — with it come the app menu
+      // (⌘Q, Edit shortcuts) and the Dock's own Quit, so even a user whose
+      // menu-bar icon is hidden behind the notch can always leave. The Bar
+      // stays Dock-less: it is chrome, not a window the user "has open".
+      if (process.platform === 'darwin') void app.dock?.show()
       this.#hub.on('closed', () => {
         this.#hub = null
+        if (process.platform === 'darwin') app.dock?.hide()
       })
     }
     return this.#hub
