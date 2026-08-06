@@ -8,6 +8,13 @@ import { barHeights } from './level'
 import { BAR, BAR_SHADOW, BarPresenter, describeBar, isBarVisible, type BarVisual } from './visual'
 
 /**
+ * How long the exit animation gets before the pill unmounts. Must stay inside
+ * the ~250 ms grace main leaves between a momentary hold expiring and the
+ * window being hidden (see applyBarVisibility in main/index.ts).
+ */
+const EXIT_MS = 170
+
+/**
  * The floating dictation pill (PLAN §2.1).
  *
  * A faithful recreation of the reference product's bar, built from our own code
@@ -126,6 +133,19 @@ export function Bar(): React.JSX.Element | null {
   const visual = useMemo(() => describeBar(event, hovered || menuOpen), [event, hovered, menuOpen])
   const visible = isBarVisible(visibility, event)
 
+  // -- entrance / exit -------------------------------------------------------
+  // `visible` flips instantly; `present` lingers for EXIT_MS so the capsule can
+  // sink away instead of vanishing. Main keeps the window up long enough.
+  const [present, setPresent] = useState(visible)
+  // Becoming visible again is adopted during render, not in an effect, so a new
+  // utterance interrupting the exit never paints a dead frame.
+  if (visible && !present) setPresent(true)
+  useEffect(() => {
+    if (visible) return
+    const timer = setTimeout(() => setPresent(false), reducedMotion ? 120 : EXIT_MS)
+    return () => clearTimeout(timer)
+  }, [visible, reducedMotion])
+
   // -- click-through hit-testing --------------------------------------------
   const pillRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -171,12 +191,15 @@ export function Bar(): React.JSX.Element | null {
     if (!visible) setInteractive(false)
   }, [setInteractive, visible])
 
-  if (!visible) return null
+  if (!visible && !present) return null
 
   const showControls = hovered || menuOpen
 
   return (
-    <div className="flex h-full w-full flex-col items-center justify-end">
+    <div
+      className="bar-stage flex h-full w-full flex-col items-center justify-end"
+      data-leaving={visible ? undefined : 'true'}
+    >
       {menuOpen ? (
         <MicMenu
           panelRef={panelRef}
@@ -203,23 +226,37 @@ export function Bar(): React.JSX.Element | null {
           height: visual.height,
           background: visual.background,
           border: `1px solid ${visual.border}`,
-          boxShadow: BAR_SHADOW,
+          boxShadow: visual.glow ? `${BAR_SHADOW}, ${visual.glow}` : BAR_SHADOW,
           backdropFilter: 'blur(14px)',
           color: 'rgba(255,255,255,0.94)',
           transition: reducedMotion
             ? 'opacity 120ms linear, background-color 120ms linear'
             : [
-                `width ${BAR.morphMs}ms cubic-bezier(0.22,1.2,0.36,1)`,
-                `height ${BAR.morphMs}ms cubic-bezier(0.22,1.2,0.36,1)`,
+                `width ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
+                `height ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
                 `background-color ${BAR.morphMs}ms ease-out`,
+                `border-color ${BAR.morphMs}ms ease-out`,
+                // The glow blooms and fades slower than the morph, so a state
+                // change reads as a wash of colour rather than a switch.
+                `box-shadow ${BAR.morphMs * 2}ms ease-out`,
                 `opacity ${BAR.morphMs}ms ease-out`,
               ].join(', '),
         }}
       >
+        {/* Glass: a top-lit sheen over the capsule, under everything else. */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-full"
+          style={{
+            background:
+              'linear-gradient(to bottom, rgba(255,255,255,0.085), rgba(255,255,255,0.015) 55%, rgba(0,0,0,0.06))',
+          }}
+        />
         {/* The interior slides left to make room for the hover controls rather
-            than being overlapped by them. */}
+            than being overlapped by them. min-w-0 keeps a long error message
+            truncating inside the capsule instead of overflowing it. */}
         <div
-          className="flex items-center justify-center"
+          className="relative flex min-w-0 max-w-full items-center justify-center"
           style={{
             transform: showControls ? `translateX(-${BAR.hoverWidth / 2}px)` : 'none',
             transition: reducedMotion ? 'none' : `transform ${BAR.morphMs}ms ease-out`,
@@ -260,7 +297,22 @@ function BarInterior({
 }): React.JSX.Element {
   if (visual.shape === 'message') {
     return (
-      <span className="truncate px-3 text-[11px] font-medium leading-none">{visual.label}</span>
+      <span className="flex min-w-0 items-center gap-1.5 px-3">
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          className="size-[11px] shrink-0"
+          fill="none"
+          stroke="rgba(255,178,160,0.95)"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 8v5M12 16.5h.01" />
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+        <span className="truncate text-[11px] font-medium leading-none">{visual.label}</span>
+      </span>
     )
   }
   if (visual.shape === 'check') {
@@ -326,7 +378,7 @@ function CommandDot(): React.JSX.Element {
   return (
     <span
       title="Editing your selection — speak the instruction"
-      className="absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
+      className="bar-dot-pulse absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
       style={{ background: '#7aa2ff', boxShadow: '0 0 6px rgba(122,162,255,0.85)' }}
     />
   )
@@ -337,7 +389,7 @@ function HandsFreeDot(): React.JSX.Element {
   return (
     <span
       title="Hands-free — tap your key again or press Esc to stop"
-      className="absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
+      className="bar-dot-pulse absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
       style={{ background: '#6ee7a8', boxShadow: '0 0 6px rgba(110,231,168,0.8)' }}
     />
   )
@@ -356,7 +408,7 @@ function Controls({
   menuOpen: boolean
 }): React.JSX.Element {
   return (
-    <div className="absolute right-[6px] top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
+    <div className="bar-controls absolute right-[6px] top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
       <ControlButton label="Cancel dictation" onClick={onCancel}>
         <path d="M6 6l12 12M18 6L6 18" />
       </ControlButton>
@@ -388,7 +440,11 @@ function ControlButton({
       title={label}
       aria-pressed={pressed}
       onClick={onClick}
-      className="grid size-[18px] place-items-center rounded-full text-white/70 transition-colors hover:bg-white/15 hover:text-white"
+      className={[
+        'grid size-[18px] cursor-pointer place-items-center rounded-full transition-all duration-150',
+        'hover:bg-white/15 hover:text-white active:scale-90 active:bg-white/20',
+        pressed ? 'bg-white/15 text-white' : 'text-white/70',
+      ].join(' ')}
     >
       <svg
         viewBox="0 0 24 24"
@@ -426,14 +482,17 @@ function MicMenu({
       ref={panelRef}
       role="menu"
       aria-label="Microphone"
-      className="bar-pill mb-2 max-h-[150px] w-[240px] overflow-y-auto rounded-xl p-1 text-[11px] text-white/90"
+      className="bar-pill bar-menu mb-2 max-h-[150px] w-[240px] overflow-y-auto rounded-xl p-1 text-[11px] text-white/90"
       style={{
-        background: 'rgba(20,20,24,0.96)',
+        background: 'rgba(19,19,24,0.96)',
         border: '1px solid rgba(255,255,255,0.10)',
         boxShadow: BAR_SHADOW,
         backdropFilter: 'blur(14px)',
       }}
     >
+      <p className="px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">
+        Microphone
+      </p>
       <MicOption label="System default" active={selected === null} onClick={() => onSelect(null)} />
       {devices.map((device, index) => (
         <MicOption
@@ -468,11 +527,22 @@ function MicOption({
       aria-checked={active}
       onClick={onClick}
       className={[
-        'flex w-full items-center gap-1.5 truncate rounded-lg px-2 py-1.5 text-left',
-        active ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10',
+        'flex w-full cursor-pointer items-center gap-1.5 truncate rounded-lg px-2 py-1.5 text-left transition-colors duration-100',
+        active ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10 active:bg-white/15',
       ].join(' ')}
     >
-      <span className="w-2 shrink-0">{active ? '•' : ''}</span>
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        className={`size-[10px] shrink-0 ${active ? 'opacity-100' : 'opacity-0'}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="m5 12.5 4.5 4.5L19 7" />
+      </svg>
       <span className="truncate">{label}</span>
     </button>
   )

@@ -91,6 +91,15 @@ describe('describeBar', () => {
     expect(describeBar(long, true).width).toBeLessThanOrEqual(360)
   })
 
+  it('glows only in the states that earn it', () => {
+    expect(describeBar({ state: 'idle' }).glow).toBeNull()
+    expect(describeBar(processing).glow).toBeNull()
+    expect(describeBar({ state: 'inserting' }).glow).toBeNull()
+    expect(describeBar(listening).glow).toContain('rgba(129,140,248')
+    expect(describeBar(inserted).glow).toContain('rgba(110,231,168')
+    expect(describeBar(failed).glow).toContain('rgba(248,113,113')
+  })
+
   it('keeps the idle state silent for screen readers, and announces the rest', () => {
     expect(describeBar({ state: 'idle' }).announce).toBe(false)
     for (const event of [listening, processing, inserted, failed]) {

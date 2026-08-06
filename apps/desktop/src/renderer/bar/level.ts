@@ -146,12 +146,20 @@ export function barHeights(
   })
 }
 
-/** The shimmer sweep's highlight centre, 0..1 across the pill (PLAN §2.1). */
+/**
+ * The shimmer sweep's highlight centre, 0..1 across the pill (PLAN §2.1).
+ *
+ * The sweep is eased, not linear: it accelerates out of the left edge, glides
+ * through the middle and decelerates off the right, which reads as a gesture
+ * rather than a scanner.
+ */
 export function shimmerPosition(elapsedMs: number, periodMs: number = BAR.shimmerPeriodMs): number {
   const period = Math.max(1, periodMs)
+  const t = (((elapsedMs % period) + period) % period) / period
+  const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
   // -0.25..1.25 so the highlight enters and leaves off-pill rather than
   // appearing at the edges.
-  return ((elapsedMs % period) / period) * 1.5 - 0.25
+  return eased * 1.5 - 0.25
 }
 
 /** Where the ✓ starts, peaks and settles (PLAN §2.1 "quick ✓ pulse"). */
