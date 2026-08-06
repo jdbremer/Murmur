@@ -2,7 +2,7 @@
 //
 // Everything Electron cannot do, in one small, defensive N-API module:
 //
-//   * a listen-only CGEventTap for the configured hotkey, including `fn`
+//   * a CGEventTap for the configured hotkey, including `fn`
 //     (which only ever arrives as a flagsChanged event);
 //   * synthetic ⌘V for text insertion, plus an AXUIElement fallback;
 //   * secure-input detection, so we never type into a password field;
@@ -14,14 +14,15 @@
 // This code runs inside the user's login session with Input Monitoring and
 // Accessibility granted. That is a lot of trust, so it is written to be boring:
 //
-//  1. **Listen-only, and only for the hotkey.** The tap callback compares the
-//     event against the configured key and returns immediately for everything
-//     else. No key content is copied, buffered, logged or forwarded — PLAN
-//     §10.5 states that in-app, and this is the code a reviewer checks.
-//  2. **Suppression is targeted.** The tap swallows an event only for a custom
-//     ordinary-key binding, so holding it does not also type a character or fire
-//     the app's own shortcut. `fn` and the right-hand modifiers are never
-//     suppressed — swallowing them system-wide would break the keyboard.
+//  1. **Only for the hotkey.** The tap callback compares the event against the
+//     configured key and returns immediately for everything else. No key
+//     content is copied, buffered, logged or forwarded — PLAN §10.5 states
+//     that in-app, and this is the code a reviewer checks.
+//  2. **Suppression is targeted.** The tap swallows an event only when the
+//     event *is* the hotkey: a custom ordinary-key binding (holding it must
+//     not type a character), and the bare fn transition (a double-press is
+//     also Apple Dictation's trigger). The right-hand modifiers are never
+//     suppressed, and fn+<key> chords pass through untouched.
 //  3. **Never block the tap thread.** The callback does the minimum and hands
 //     off through a thread-safe function; JS runs on the main thread. A full
 //     queue drops the edge rather than stalling every keystroke on the system.
@@ -230,8 +231,13 @@ CGEventRef TapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event
     const int64_t keyCode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
     if (keyCode != kVK_Function) return event;
     HandleEdge(FnIsDown(CGEventGetFlags(event)));
-    // Never suppressed: `fn` also drives F-key behaviour and the emoji picker.
-    return event;
+    // Consume the bare fn transition: macOS's own globe-key actions — the
+    // emoji picker, input-source switching and above all "press fn twice to
+    // start Dictation" — must not fire alongside Murmur's, and a double-tap
+    // (our hands-free latch) is exactly Apple Dictation's trigger. fn+<key>
+    // chords are untouched: those arrive as their own key events carrying the
+    // fn flag, and hardware modifier state lives upstream of a session tap.
+    return nullptr;
   }
 
   if (gConfig.kind == HotkeyKind::RightCmd || gConfig.kind == HotkeyKind::RightOpt) {
@@ -370,12 +376,15 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
   const CGEventMask mask = CGEventMaskBit(kCGEventFlagsChanged) |
                            CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp);
 
-  // kCGEventTapOptionDefault is required for the Custom case, because only a
-  // non-listen-only tap may suppress. The modifier cases are listen-only, which
-  // is both the stronger privacy guarantee and what PLAN §4 promises.
-  const CGEventTapOptions option = gConfig.kind == HotkeyKind::Custom
-                                       ? kCGEventTapOptionDefault
-                                       : kCGEventTapOptionListenOnly;
+  // kCGEventTapOptionDefault is required wherever the tap must suppress: the
+  // Custom case (holding the key must not type a character) and the fn case
+  // (a bare fn press must not also fire macOS's globe-key actions — Apple
+  // Dictation's trigger is the same double-press as our hands-free latch).
+  // The right-hand modifiers stay listen-only, the stronger privacy guarantee.
+  const CGEventTapOptions option =
+      (gConfig.kind == HotkeyKind::Custom || gConfig.kind == HotkeyKind::Fn)
+          ? kCGEventTapOptionDefault
+          : kCGEventTapOptionListenOnly;
 
   gEventTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, option, mask, TapCallback,
                                nullptr);
