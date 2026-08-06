@@ -53,7 +53,21 @@ export function Sidebar({
       <div className="h-11 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
 
       <div className="px-3 pb-2">
-        <p className="px-3 pb-3 text-[13px] font-semibold tracking-tight text-ink">Murmur</p>
+        <p className="flex items-center gap-2 px-3 pb-3 text-[13px] font-semibold tracking-tight text-ink">
+          {/* The wordmark's glyph is the pill's own waveform, at rest. */}
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className="size-[16px] text-accent"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          >
+            <path d="M4 10.5v3M8 8v8M12 5v14M16 8v8M20 10.5v3" />
+          </svg>
+          Murmur
+        </p>
         <ul className="space-y-0.5">
           {SECTIONS.map((section) => {
             const isActive = section.id === active
@@ -64,16 +78,16 @@ export function Sidebar({
                   onClick={() => onSelect(section.id)}
                   aria-current={isActive ? 'page' : undefined}
                   className={[
-                    'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition-colors',
+                    'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition-colors duration-150',
                     isActive
                       ? 'bg-accent-soft font-medium text-accent'
-                      : 'text-ink-muted hover:bg-canvas hover:text-ink',
+                      : 'text-ink-muted hover:bg-canvas hover:text-ink active:bg-accent-soft/60',
                   ].join(' ')}
                 >
                   <svg
                     viewBox="0 0 24 24"
                     aria-hidden="true"
-                    className="size-[17px] shrink-0"
+                    className={`size-[17px] shrink-0 ${isActive ? '' : 'opacity-80'}`}
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="1.6"

@@ -8,6 +8,7 @@ import {
   Card,
   EmptyState,
   ErrorCard,
+  LoadingState,
   Section,
   TextInput,
   Toggle,
@@ -125,7 +126,7 @@ export function DictionarySection(): React.JSX.Element {
       </Card>
 
       {entries === null ? (
-        <EmptyState>Loading…</EmptyState>
+        <LoadingState label="Loading your dictionary…" />
       ) : entries.length === 0 ? (
         <EmptyState>
           Your dictionary is empty. Terms here feed both stages: the speech model’s prompt for

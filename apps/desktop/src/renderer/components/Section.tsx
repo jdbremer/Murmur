@@ -50,15 +50,78 @@ export function Card({
 export function EmptyState({ children }: { children: ReactNode }): React.JSX.Element {
   return (
     <Card className="border-dashed">
-      <p className="text-[13px] leading-relaxed text-ink-muted">{children}</p>
+      <p className="mx-auto max-w-md py-4 text-center text-[13px] leading-relaxed text-ink-muted">
+        {children}
+      </p>
     </Card>
+  )
+}
+
+/** Loading, honestly: a quiet spinner instead of a fake empty state. */
+export function LoadingState({ label = 'Loading…' }: { label?: string }): React.JSX.Element {
+  return (
+    <Card className="border-dashed">
+      <div className="flex items-center justify-center gap-2.5 py-4" role="status">
+        <Spinner />
+        <p className="text-[13px] text-ink-muted">{label}</p>
+      </div>
+    </Card>
+  )
+}
+
+export function Spinner(): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className="size-4 animate-spin text-ink-faint motion-reduce:hidden"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+    >
+      <path d="M12 3a9 9 0 1 1-6.4 2.6" />
+    </svg>
+  )
+}
+
+/** A small stroked glyph, shared by the error/banner components. */
+function ToneIcon({ tone }: { tone: 'danger' | 'warning' | 'accent' }): React.JSX.Element {
+  const color =
+    tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-warning'
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      className={`mt-px size-[15px] shrink-0 ${color}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {tone === 'accent' ? (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5M12 7.5h.01" />
+        </>
+      ) : (
+        <>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7.5v5.5M12 16.5h.01" />
+        </>
+      )}
+    </svg>
   )
 }
 
 export function ErrorCard({ children }: { children: ReactNode }): React.JSX.Element {
   return (
-    <Card className="mb-5 border-warning/40">
-      <p className="text-[13px] leading-relaxed text-warning">{children}</p>
+    <Card className="mb-5 border-danger/40">
+      <div className="flex items-start gap-2.5" role="alert">
+        <ToneIcon tone="danger" />
+        <p className="text-[13px] leading-relaxed text-danger">{children}</p>
+      </div>
     </Card>
   )
 }
@@ -66,9 +129,9 @@ export function ErrorCard({ children }: { children: ReactNode }): React.JSX.Elem
 type ButtonVariant = 'primary' | 'secondary' | 'danger'
 
 const BUTTON_STYLES: Record<ButtonVariant, string> = {
-  primary: 'border-accent bg-accent text-surface hover:opacity-90',
-  secondary: 'border-line bg-surface text-ink hover:border-ink-faint',
-  danger: 'border-line bg-surface text-warning hover:border-warning/60',
+  primary: 'border-accent bg-accent text-surface shadow-xs hover:opacity-90',
+  secondary: 'border-line bg-surface text-ink hover:border-ink-faint hover:bg-canvas',
+  danger: 'border-line bg-surface text-danger hover:border-danger/50 hover:bg-danger/5',
 }
 
 export function Button({
@@ -93,8 +156,8 @@ export function Button({
       disabled={disabled}
       title={title}
       className={[
-        'rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-colors',
-        'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line',
+        'rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-[background-color,border-color,transform,opacity] duration-150',
+        'active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line disabled:active:scale-100',
         BUTTON_STYLES[variant],
       ].join(' ')}
     >
@@ -106,11 +169,11 @@ export function Button({
 type BadgeTone = 'neutral' | 'positive' | 'warning' | 'accent' | 'danger'
 
 const BADGE_TONES: Record<BadgeTone, string> = {
-  neutral: 'border-line text-ink-muted',
-  positive: 'border-positive/40 text-positive',
-  warning: 'border-warning/40 text-warning',
-  accent: 'border-accent/40 text-accent',
-  danger: 'border-danger/40 text-danger',
+  neutral: 'border-line bg-canvas text-ink-muted',
+  positive: 'border-positive/30 bg-positive/8 text-positive',
+  warning: 'border-warning/30 bg-warning/8 text-warning',
+  accent: 'border-accent/30 bg-accent/8 text-accent',
+  danger: 'border-danger/30 bg-danger/8 text-danger',
 }
 
 export function Badge({
@@ -132,7 +195,7 @@ export function Badge({
   )
 }
 
-/** Determinate when `value` is a 0..1 fraction; indeterminate-ish when null. */
+/** Determinate when `value` is a 0..1 fraction; indeterminate when null. */
 export function ProgressBar({ value }: { value: number | null }): React.JSX.Element {
   const pct = value === null ? 100 : Math.round(Math.min(1, Math.max(0, value)) * 100)
   return (
@@ -143,12 +206,15 @@ export function ProgressBar({ value }: { value: number | null }): React.JSX.Elem
       aria-valuemax={100}
       className="h-1.5 w-full overflow-hidden rounded-full bg-line"
     >
-      <div
-        className={`h-full rounded-full bg-accent transition-[width] duration-200 ${
-          value === null ? 'animate-pulse' : ''
-        }`}
-        style={{ width: `${pct}%` }}
-      />
+      {value === null ? (
+        // No number to show, so show movement: a segment sweeping the track.
+        <div className="progress-sweep h-full w-1/3 rounded-full bg-accent/70" />
+      ) : (
+        <div
+          className="h-full rounded-full bg-accent transition-[width] duration-200"
+          style={{ width: `${pct}%` }}
+        />
+      )}
     </div>
   )
 }
@@ -174,7 +240,7 @@ export function TextInput({
       placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
-      className="w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+      className="w-full rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
     />
   )
 }
@@ -237,7 +303,7 @@ export function Select<T extends string>({
       aria-label={label}
       value={value}
       onChange={(event) => onChange(event.target.value as T)}
-      className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+      className="rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none transition-[border-color,box-shadow] duration-150 hover:border-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
     >
       {options.map((option) => (
         <option key={option.value} value={option.value}>
@@ -269,11 +335,16 @@ export function Banner({
     tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-warning'
   return (
     <div className={`rounded-card border ${border} bg-surface p-4`} role="status">
-      <p className={`text-[13px] font-medium ${text}`}>{title}</p>
-      {children ? (
-        <div className="mt-1 text-[12px] leading-relaxed text-ink-muted">{children}</div>
-      ) : null}
-      {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
+      <div className="flex items-start gap-2.5">
+        <ToneIcon tone={tone} />
+        <div className="min-w-0 flex-1">
+          <p className={`text-[13px] font-medium ${text}`}>{title}</p>
+          {children ? (
+            <div className="mt-1 text-[12px] leading-relaxed text-ink-muted">{children}</div>
+          ) : null}
+          {actions ? <div className="mt-3 flex flex-wrap gap-2">{actions}</div> : null}
+        </div>
+      </div>
     </div>
   )
 }
@@ -301,7 +372,7 @@ export function TextArea({
       aria-label={label}
       placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
-      className="w-full select-text resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent"
+      className="w-full select-text resize-y rounded-lg border border-line bg-surface px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none transition-[border-color,box-shadow] duration-150 placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/15"
     />
   )
 }
@@ -310,8 +381,24 @@ export function TextArea({
 export function InlineError({ children }: { children: ReactNode }): React.JSX.Element | null {
   if (!children) return null
   return (
-    <p role="alert" className="mb-4 text-[12px] leading-relaxed text-warning">
-      {children}
+    <p
+      role="alert"
+      className="mb-4 flex items-start gap-1.5 text-[12px] leading-relaxed text-danger"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        className="mt-px size-[13px] shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7.5v5.5M12 16.5h.01" />
+      </svg>
+      <span>{children}</span>
     </p>
   )
 }
@@ -337,14 +424,14 @@ export function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
-        'h-[22px] w-[38px] rounded-full border transition-colors',
-        checked ? 'border-accent bg-accent' : 'border-line bg-canvas',
+        'h-[22px] w-[38px] rounded-full border transition-colors duration-200',
+        checked ? 'border-accent bg-accent' : 'border-line bg-canvas hover:border-ink-faint',
         disabled ? 'cursor-not-allowed opacity-40' : '',
       ].join(' ')}
     >
       <span
         className={[
-          'block size-[16px] rounded-full bg-surface transition-transform',
+          'block size-[16px] rounded-full bg-surface shadow-sm ring-1 ring-black/5 transition-transform duration-200 ease-out',
           checked ? 'translate-x-[18px]' : 'translate-x-[2px]',
         ].join(' ')}
       />

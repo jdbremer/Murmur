@@ -43,7 +43,10 @@ export function App(): React.JSX.Element {
     <div className="relative flex h-full bg-canvas text-ink">
       <Sidebar active={section} onSelect={setSection} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-10 py-9">{renderSection(section)}</div>
+        {/* Keyed on the section so switching drifts the new content in. */}
+        <div key={section} className="hub-section mx-auto max-w-3xl px-10 py-9">
+          {renderSection(section)}
+        </div>
       </main>
       <DictationToast />
     </div>

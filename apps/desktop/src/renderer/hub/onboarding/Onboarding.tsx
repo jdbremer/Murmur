@@ -100,7 +100,8 @@ export function Onboarding({
         </div>
       </header>
 
-      <div className="flex-1">
+      {/* Keyed on the step so each screen drifts in instead of snapping. */}
+      <div key={step} className="hub-section flex-1">
         <InlineError>{error}</InlineError>
 
         {step === 'welcome' ? <Welcome /> : null}
@@ -469,8 +470,9 @@ function DictationConflictStep(): React.JSX.Element {
       </h1>
       <p className="mt-2 max-w-lg text-[14px] leading-relaxed text-ink-muted">
         macOS has its own dictation, and by default it is triggered by pressing <kbd>fn</kbd> twice
-        — the same key Murmur listens for. If both are on, you will sometimes get Apple’s dictation
-        instead of ours.
+        — the same key Murmur listens for. While Murmur is running it claims the key, so the two
+        never fight; but when Murmur is paused or closed, that double-press summons Apple’s
+        dictation instead, which can be confusing.
       </p>
 
       <Card className="mt-6">
