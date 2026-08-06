@@ -40,3 +40,105 @@ body {
   user-select: none;
   -webkit-user-drag: none;
 }
+
+/*
+ * Entrance and exit. The stage (the whole window's content) rises out of the
+ * bottom edge with a small overshoot, and sinks back when dictation ends. The
+ * exit must finish inside the ~250 ms grace main leaves before hiding the
+ * window (EXIT_MS in Bar.tsx).
+ */
+.bar-stage {
+  transform-origin: 50% 100%;
+  animation: bar-rise 260ms cubic-bezier(0.34, 1.45, 0.6, 1) both;
+}
+
+.bar-stage[data-leaving='true'] {
+  animation: bar-sink 170ms cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+@keyframes bar-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.86);
+  }
+}
+
+@keyframes bar-sink {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+}
+
+/* The hover controls and the mic menu pop in rather than blinking on. */
+.bar-controls {
+  animation: bar-fade-scale 140ms ease-out both;
+}
+
+.bar-menu {
+  transform-origin: 50% 100%;
+  animation: bar-menu-rise 160ms cubic-bezier(0.3, 1.2, 0.5, 1) both;
+}
+
+@keyframes bar-fade-scale {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+@keyframes bar-menu-rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px) scale(0.97);
+  }
+}
+
+/* The hands-free / command-mode status dots breathe gently. */
+.bar-dot-pulse {
+  animation: bar-dot-breathe 2200ms ease-in-out infinite;
+}
+
+@keyframes bar-dot-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Reduce Motion: no travel, no scaling — a plain crossfade (PLAN §15.5). */
+@media (prefers-reduced-motion: reduce) {
+  .bar-stage,
+  .bar-stage[data-leaving='true'],
+  .bar-controls,
+  .bar-menu {
+    animation-name: bar-fade;
+    animation-duration: 120ms;
+    animation-timing-function: linear;
+  }
+
+  .bar-stage[data-leaving='true'] {
+    animation-direction: reverse;
+  }
+
+  .bar-dot-pulse {
+    animation: none;
+  }
+}
+
+@keyframes bar-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, Menu } from 'electron'
 
 import {
   createMainIpc,
@@ -96,6 +96,29 @@ async function bootstrap(): Promise<void> {
   app.on('second-instance', () => windows.showHub())
 
   await app.whenReady()
+
+  // macOS ships as an LSUIElement (menu-bar) app: no Dock icon means no
+  // default menu bar, and without an application menu an accessory app loses
+  // ⌘Q *and* the Edit shortcuts (⌘C/⌘V/⌘A) inside the Hub. Install a real one.
+  // Windows/Linux keep Electron's default in dev and drop the stock File/View
+  // menu bar in packaged builds, where it is pure noise on the Hub window.
+  if (process.platform === 'darwin') {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]),
+    )
+    // Unpackaged runs otherwise show Electron's own Dock icon; packaged builds
+    // get theirs from the bundle.
+    if (isDev) {
+      const devIcon = join(app.getAppPath(), 'buildResources', 'icon.png')
+      try {
+        app.dock?.setIcon(devIcon)
+      } catch {
+        /* purely cosmetic in dev */
+      }
+    }
+  } else if (!isDev) {
+    Menu.setApplicationMenu(null)
+  }
 
   // Before any window exists, so every renderer is covered from its first load.
   installSecurityPolicies(isDev)
@@ -268,7 +291,16 @@ async function bootstrap(): Promise<void> {
     isPaused: () => paused,
     quit,
   })
-  tray.start()
+  // The tray is the app's only permanent handle, so its absence must never be
+  // silent: log where macOS actually placed it (a crowded menu bar on a
+  // notched MacBook can hide it entirely), and survive if creation fails —
+  // the Hub's Dock presence still offers a way to quit.
+  try {
+    const trayHandle = tray.start()
+    log.info(`tray created at ${JSON.stringify(trayHandle.getBounds())}`)
+  } catch (cause) {
+    log.warn(`tray failed to start: ${cause instanceof Error ? cause.message : String(cause)}`)
+  }
 
   // -- fan-out -------------------------------------------------------------
 

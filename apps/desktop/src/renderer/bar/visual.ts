@@ -29,7 +29,7 @@ export const BAR = {
   insertedWidth: 96,
   /** Error pills size to their message, within these bounds. */
   errorMinWidth: 180,
-  errorMaxWidth: 260,
+  errorMaxWidth: 300,
   /** The window is 360 px wide; nothing may exceed it (see windows/bar.ts). */
   maxWidth: 344,
   /** Every state change morphs over this, ease-out (PLAN §2.1). */
@@ -50,12 +50,31 @@ export const BAR = {
 } as const
 
 /** Near-black, per PLAN §2.1. */
-export const BAR_BACKGROUND = 'rgba(20,20,24,0.92)'
+export const BAR_BACKGROUND = 'rgba(17,17,22,0.92)'
 /** Warm red for the error state. */
-export const BAR_ERROR_BACKGROUND = 'rgba(74,26,26,0.94)'
-export const BAR_BORDER = 'rgba(255,255,255,0.08)'
-export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.30)'
-export const BAR_SHADOW = '0 8px 24px rgba(0,0,0,0.42)'
+export const BAR_ERROR_BACKGROUND = 'rgba(70,22,22,0.94)'
+export const BAR_BORDER = 'rgba(255,255,255,0.09)'
+/** The capsule's edge brightens while it is actually hearing something. */
+export const BAR_LISTENING_BORDER = 'rgba(255,255,255,0.16)'
+export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.32)'
+/**
+ * Two layers: a tight contact shadow that seats the capsule on the screen, and
+ * a wide ambient one that lifts it off whatever is behind it. The inset line
+ * is the glass highlight along the top edge.
+ */
+export const BAR_SHADOW =
+  '0 2px 6px rgba(0,0,0,0.30), 0 12px 32px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.07)'
+
+/**
+ * A soft state-coloured halo layered onto {@link BAR_SHADOW}: cool while
+ * listening, green for the ✓, warm for an error. Transitioned by the renderer,
+ * so states bleed into each other instead of snapping.
+ */
+export const BAR_GLOW = {
+  listening: '0 0 24px rgba(129,140,248,0.30)',
+  inserted: '0 0 22px rgba(110,231,168,0.26)',
+  error: '0 0 24px rgba(248,113,113,0.24)',
+} as const
 
 // ---------------------------------------------------------------------------
 // Presentation
@@ -82,6 +101,8 @@ export interface BarVisual {
   border: string
   /** Message text for `shape: 'message'`, otherwise empty. */
   label: string
+  /** Extra state-coloured halo layered onto the base shadow, or null. */
+  glow: string | null
   /** The latched hands-free indicator dot (PLAN §2.1 "Hands-free"). */
   handsFree: boolean
   /** True while this utterance is editing a selection (command mode). */
@@ -114,6 +135,7 @@ function describeBase(event: DictationEvent): BarVisual {
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
+        glow: null,
         handsFree: false,
         command: false,
         ariaLabel: 'Murmur is idle. Hold your dictation key to speak.',
@@ -125,8 +147,9 @@ function describeBase(event: DictationEvent): BarVisual {
         width: BAR.listeningWidth,
         height: BAR.height,
         background: BAR_BACKGROUND,
-        border: BAR_BORDER,
+        border: BAR_LISTENING_BORDER,
         label: '',
+        glow: BAR_GLOW.listening,
         handsFree: event.handsFree,
         command: event.command,
         ariaLabel: event.command
@@ -144,6 +167,7 @@ function describeBase(event: DictationEvent): BarVisual {
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
+        glow: null,
         handsFree: false,
         command: event.command,
         ariaLabel: event.command
@@ -161,6 +185,7 @@ function describeBase(event: DictationEvent): BarVisual {
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
+        glow: null,
         handsFree: false,
         command: false,
         ariaLabel: 'Inserting text',
@@ -174,6 +199,7 @@ function describeBase(event: DictationEvent): BarVisual {
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
+        glow: BAR_GLOW.inserted,
         handsFree: false,
         command: false,
         ariaLabel: `Inserted ${event.charCount} characters`,
@@ -187,6 +213,7 @@ function describeBase(event: DictationEvent): BarVisual {
         background: BAR_ERROR_BACKGROUND,
         border: BAR_ERROR_BORDER,
         label: event.message,
+        glow: BAR_GLOW.error,
         handsFree: false,
         command: false,
         ariaLabel: event.message,
@@ -195,9 +222,9 @@ function describeBase(event: DictationEvent): BarVisual {
   }
 }
 
-/** Roughly 6.2 px per character at the pill's 11 px type size, plus padding. */
+/** ~6.2 px per character at 11 px type, plus padding and the warning glyph. */
 export function errorWidth(message: string): number {
-  const measured = Math.round(56 + message.length * 6.2)
+  const measured = Math.round(70 + message.length * 6.2)
   return Math.min(BAR.errorMaxWidth, Math.max(BAR.errorMinWidth, measured))
 }
 

@@ -92,3 +92,109 @@ body {
   user-select: none;
   cursor: default;
 }
+
+/* Anything clickable looks clickable. Disabled controls opt out per-component. */
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+/*
+ * One focus treatment everywhere: a two-tone ring that reads on both themes.
+ * Only for keyboard focus — pointer clicks stay clean.
+ */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+/* Slim, theme-following scrollbars instead of the OS-default gutter. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-ink-faint) 45%, transparent);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-ink-faint) 70%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Keyboard keys named in copy ("press fn twice") read as keys, not words. */
+kbd {
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+  font-weight: 500;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0.1em 0.45em;
+}
+
+/* Section and step content drifts in on navigation instead of snapping. */
+.hub-section {
+  animation: hub-section-in 240ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@keyframes hub-section-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Toasts rise from the bottom edge they anchor to. */
+.hub-toast {
+  animation: hub-toast-in 260ms cubic-bezier(0.3, 1.3, 0.5, 1) both;
+}
+
+@keyframes hub-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+/* The indeterminate progress bar sweeps instead of pulsing at 100%. */
+.progress-sweep {
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  from {
+    transform: translateX(-140%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hub-section,
+  .hub-toast {
+    animation-duration: 1ms;
+  }
+
+  .progress-sweep {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}

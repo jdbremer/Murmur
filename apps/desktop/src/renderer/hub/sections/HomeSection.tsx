@@ -8,6 +8,7 @@ import {
   Card,
   EmptyState,
   ErrorCard,
+  LoadingState,
   Section,
   Stat,
   TextInput,
@@ -79,6 +80,8 @@ export function HomeSection(): React.JSX.Element {
   }
 
   const clear = async (): Promise<void> => {
+    // The one action here that cannot be undone row-by-row: make sure.
+    if (!window.confirm(`Delete all ${total} dictations? This cannot be undone.`)) return
     await window.murmur.history.clear()
     await load('', PAGE_SIZE)
     setSearch('')
@@ -119,7 +122,7 @@ export function HomeSection(): React.JSX.Element {
       </div>
 
       {records === null ? (
-        <EmptyState>Loading…</EmptyState>
+        <LoadingState label="Loading your history…" />
       ) : records.length === 0 ? (
         <EmptyState>
           {search
@@ -168,12 +171,14 @@ function HistoryRow({
   const text = record.polishedText ?? record.rawText
 
   return (
-    <Card>
+    <Card className="group transition-colors duration-150 hover:border-ink-faint/50">
       <div className="flex items-start justify-between gap-4">
         <p className="min-w-0 select-text whitespace-pre-wrap text-[13px] leading-relaxed text-ink">
           {text}
         </p>
-        <div className="flex shrink-0 items-center gap-2">
+        {/* Quiet until the row is hovered or focused — a wall of Copy/Delete
+            buttons down the page is noise; they surface when relevant. */}
+        <div className="flex shrink-0 items-center gap-2 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
           <Button onClick={onCopy}>{copied ? 'Copied' : 'Copy'}</Button>
           <Button onClick={onDelete} variant="danger">
             Delete

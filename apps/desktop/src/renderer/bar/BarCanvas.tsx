@@ -25,8 +25,10 @@ import { BAR, type BarShape } from './visual'
  *    `ResizeObserver` fires 60 times a second during a 150 ms morph.
  *  - The level arrives through a ref, not through props: a 30 Hz prop update
  *    would re-render React for something only the canvas can see.
+ *  - The idle dots are static — painted once, no scheduled frames. An idle
+ *    pill must be perfectly still (and cost nothing while it is).
  *  - Under Reduce Motion nothing animates. The component is not even mounted
- *    then — see `ReducedBarVisual` in Bar.tsx.
+ *    then — see `StaticLevel` in Bar.tsx.
  */
 
 export const CANVAS_WIDTH = 120
@@ -74,9 +76,9 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
     let previous = 0
 
     const draw = (timestamp: number): void => {
-      // Idle dots are static: paint them once and stop scheduling. A 60 fps
-      // loop repainting an unchanging frame is pure battery drain, and the
-      // shape-change effect below re-arms this loop when animation resumes.
+      // Idle dots are static: paint them once and stop scheduling. A loop
+      // repainting an unchanging frame is pure battery drain, and the
+      // shape-change effect above re-arms this loop when animation resumes.
       if (shapeRef.current === 'dots') {
         context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
         paintDots(context)
@@ -128,18 +130,36 @@ function paintWaveform(context: CanvasRenderingContext2D, levels: readonly numbe
   const totalWidth = levels.length * pitch - BAR.waveformBarGap
   const left = (CANVAS_WIDTH - totalWidth) / 2
   const middle = CANVAS_HEIGHT / 2
+  const last = Math.max(1, heights.length - 1)
 
-  context.fillStyle = 'rgba(255,255,255,0.92)'
+  // A cool cast at the tips fading to pure white at the centreline gives the
+  // bars a lit-from-within depth that flat white lacks.
+  const gradient = context.createLinearGradient(
+    0,
+    middle - BAR.waveformMaxHeight / 2,
+    0,
+    middle + BAR.waveformMaxHeight / 2,
+  )
+  gradient.addColorStop(0, 'rgba(205,213,255,0.9)')
+  gradient.addColorStop(0.5, 'rgba(255,255,255,1)')
+  gradient.addColorStop(1, 'rgba(205,213,255,0.9)')
+  context.fillStyle = gradient
+
   for (let index = 0; index < heights.length; index += 1) {
     const height = heights[index] ?? BAR.waveformMinHeight
     const x = left + index * pitch
+    // Older bars fade as they scroll away; the leading edge stays brightest,
+    // which is what makes the waveform read as *moving* rather than wiggling.
+    context.globalAlpha = 0.38 + 0.6 * (index / last)
     roundedBar(context, x, middle - height / 2, BAR.waveformBarWidth, height)
   }
+  context.globalAlpha = 1
 }
 
 /**
  * Processing: the bars have collapsed into a single hairline, and a highlight
- * sweeps along it left → right (PLAN §2.1).
+ * sweeps along it left → right (PLAN §2.1). The baseline fades out at its ends
+ * so it appears to condense out of the capsule rather than being clipped by it.
  */
 function paintShimmer(context: CanvasRenderingContext2D, elapsedMs: number): void {
   const height = 2
@@ -147,15 +167,20 @@ function paintShimmer(context: CanvasRenderingContext2D, elapsedMs: number): voi
   const left = (CANVAS_WIDTH - width) / 2
   const top = (CANVAS_HEIGHT - height) / 2
 
-  context.fillStyle = 'rgba(255,255,255,0.18)'
+  const base = context.createLinearGradient(left, 0, left + width, 0)
+  base.addColorStop(0, 'rgba(255,255,255,0)')
+  base.addColorStop(0.12, 'rgba(255,255,255,0.20)')
+  base.addColorStop(0.88, 'rgba(255,255,255,0.20)')
+  base.addColorStop(1, 'rgba(255,255,255,0)')
+  context.fillStyle = base
   roundedBar(context, left, top, width, height)
 
   const centre = left + shimmerPosition(elapsedMs) * width
-  const gradient = context.createLinearGradient(centre - 26, 0, centre + 26, 0)
-  gradient.addColorStop(0, 'rgba(255,255,255,0)')
-  gradient.addColorStop(0.5, 'rgba(255,255,255,0.95)')
-  gradient.addColorStop(1, 'rgba(255,255,255,0)')
-  context.fillStyle = gradient
+  const highlight = context.createLinearGradient(centre - 30, 0, centre + 30, 0)
+  highlight.addColorStop(0, 'rgba(255,255,255,0)')
+  highlight.addColorStop(0.5, 'rgba(255,255,255,0.95)')
+  highlight.addColorStop(1, 'rgba(255,255,255,0)')
+  context.fillStyle = highlight
   roundedBar(context, left, top, width, height)
 }
 
@@ -163,10 +188,10 @@ function paintDots(context: CanvasRenderingContext2D): void {
   const totalWidth = (IDLE_DOTS - 1) * IDLE_DOT_GAP
   const left = (CANVAS_WIDTH - totalWidth) / 2
   const middle = CANVAS_HEIGHT / 2
-  context.fillStyle = 'rgba(255,255,255,0.34)'
+  context.fillStyle = 'rgba(255,255,255,0.38)'
   for (let index = 0; index < IDLE_DOTS; index += 1) {
     context.beginPath()
-    context.arc(left + index * IDLE_DOT_GAP, middle, 1.1, 0, Math.PI * 2)
+    context.arc(left + index * IDLE_DOT_GAP, middle, 1.2, 0, Math.PI * 2)
     context.fill()
   }
 }
@@ -186,7 +211,8 @@ function roundedBar(
 
 /**
  * The ✓ pulse (PLAN §2.1 "Inserted"). Small enough to be an SVG with an
- * animated transform rather than another canvas.
+ * animated transform rather than another canvas. Tinted the same green as the
+ * capsule's success glow, with a soft halo of its own.
  */
 export function CheckPulse({ reducedMotion }: { reducedMotion: boolean }): React.JSX.Element {
   const ref = useRef<SVGSVGElement | null>(null)
@@ -218,7 +244,11 @@ export function CheckPulse({ reducedMotion }: { reducedMotion: boolean }): React
       strokeWidth="3"
       strokeLinecap="round"
       strokeLinejoin="round"
-      style={{ transformOrigin: 'center' }}
+      style={{
+        transformOrigin: 'center',
+        color: '#86efac',
+        filter: 'drop-shadow(0 0 5px rgba(110,231,168,0.55))',
+      }}
     >
       <path d="m5 12.5 4.5 4.5L19 7" />
     </svg>

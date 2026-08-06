@@ -17,6 +17,7 @@ import {
   Card,
   EmptyState,
   ErrorCard,
+  LoadingState,
   ProgressBar,
   Row,
   Section,
@@ -80,7 +81,14 @@ export function ModelsSection(): React.JSX.Element {
   const { settings } = useSettings()
 
   if (!models) {
-    return <Section title="Models" description="Loading the catalog…" />
+    return (
+      <Section
+        title="Models"
+        description="Choose the speech-to-text and polishing models Murmur runs locally."
+      >
+        <LoadingState label="Loading the catalog…" />
+      </Section>
+    )
   }
 
   const selectedFor = (kind: ModelKind): string | null =>

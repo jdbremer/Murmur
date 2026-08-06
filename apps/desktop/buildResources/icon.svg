@@ -1,0 +1,41 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    The Murmur mark: the dictation pill's waveform, at rest, on the same
+    near-black glass the pill is made of. Rendered to icon.icns by
+    scripts/make-icons.sh — edit this file, not the PNGs.
+  -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262f"/>
+      <stop offset="0.55" stop-color="#17171d"/>
+      <stop offset="1" stop-color="#0f0f14"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8b3ff"/>
+      <stop offset="0.5" stop-color="#f4f3ff"/>
+      <stop offset="1" stop-color="#b8b3ff"/>
+    </linearGradient>
+    <clipPath id="squircle">
+      <rect x="100" y="100" width="824" height="824" rx="186"/>
+    </clipPath>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#sheen)"/>
+  <rect x="103" y="103" width="818" height="818" rx="183" fill="none"
+        stroke="#ffffff" stroke-opacity="0.08" stroke-width="6" clip-path="url(#squircle)"/>
+
+  <!-- Waveform: the wordmark's five bars, tallest in the centre. -->
+  <g fill="url(#bar)">
+    <rect x="286" y="459" width="60" height="106" rx="30"/>
+    <rect x="391" y="384" width="60" height="256" rx="30"/>
+    <rect x="496" y="292" width="60" height="440" rx="30"/>
+    <rect x="601" y="384" width="60" height="256" rx="30"/>
+    <rect x="706" y="459" width="60" height="106" rx="30"/>
+  </g>
+</svg>

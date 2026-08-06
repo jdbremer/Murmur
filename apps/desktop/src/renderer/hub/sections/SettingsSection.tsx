@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   InlineError,
+  LoadingState,
   Row,
   Section,
   Select,
@@ -89,7 +90,14 @@ export function SettingsSection(): React.JSX.Element {
   const capture = useCaptureStatus()
 
   if (!settings) {
-    return <Section title="Settings" description="Loading…" />
+    return (
+      <Section
+        title="Settings"
+        description="How dictation starts, which microphone it uses, and how long anything is kept."
+      >
+        <LoadingState />
+      </Section>
+    )
   }
 
   const historyValue =
@@ -118,7 +126,7 @@ export function SettingsSection(): React.JSX.Element {
           label="Key"
           hint={
             isMac
-              ? 'fn is the default. The right-hand modifiers exist for external keyboards that have no fn key.'
+              ? 'fn is the default — while Murmur is running it owns this key, so macOS globe actions (emoji, Apple Dictation) will not fire from it. The right-hand modifiers exist for external keyboards that have no fn key.'
               : isWindows
                 ? 'Right Ctrl is the Windows default. Space chords are disabled until key-latch is rock-solid.'
                 : 'The key listener is macOS- and Windows-only; on this platform the key is stored but never fires.'
