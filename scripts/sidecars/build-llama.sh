@@ -72,6 +72,15 @@ for arch in ${ARCHS}; do
   # resolves to `apple-m1` when cross-compiling x86_64 on an arm64 host and
   # clang rejects it, and a shipped binary must not be tuned to whichever
   # machine happened to build it.
+  #
+  # LLAMA_OPENSSL defaults to ON upstream, which makes CMake link cpp-httplib
+  # against whatever OpenSSL it finds — on an arm64 runner that is Homebrew's
+  # arm64-only dylib, so the x86_64 link dies on undefined SSL_/X509_ symbols.
+  #
+  # Turning it off is right on the merits, not just as a build workaround:
+  # llama-server is only ever reached over loopback (see `loopbackFetch`, which
+  # refuses any non-loopback host), and TLS to 127.0.0.1 buys nothing. It also
+  # drops an OpenSSL dependency from a binary we ship.
 
   cmake -S "${WORK_DIR}" -B "${build_dir}" \
     -DCMAKE_BUILD_TYPE=Release \
@@ -82,6 +91,7 @@ for arch in ${ARCHS}; do
     -DLLAMA_BUILD_EXAMPLES=OFF \
     -DLLAMA_BUILD_TESTS=OFF \
     -DLLAMA_CURL=OFF \
+    -DLLAMA_OPENSSL=OFF \
     -DGGML_METAL="${metal}" \
     -DGGML_METAL_EMBED_LIBRARY="${metal}" \
     -DGGML_NATIVE=OFF \
