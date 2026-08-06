@@ -147,6 +147,24 @@ jobs:
       # the ones the README has to apologise for.
       # `pack:*`, not `release:*` — these scripts pass `--publish never`. The
       # release job below is the only thing that talks to GitHub.
+      # @electron/notarize wants APPLE_API_KEY to be a *path to the .p8 file*,
+      # not its contents — a secret passed straight through would be read as a
+      # filename and fail. So the key travels as base64 and is written to disk
+      # here. The runner is ephemeral, but 0600 anyway: it is a credential that
+      # can notarise software as this team.
+      - name: Materialise the notarisation key (macOS)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          if [ -z "$APPLE_API_KEY_P8" ]; then
+            echo "No notarisation key configured — this build will be signed but not notarised."
+            exit 0
+          fi
+          printf '%s' "$APPLE_API_KEY_P8" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
       - name: Build the installers
         run: npm run ${{ matrix.script }} --workspace @murmur/desktop
         env:
@@ -156,7 +174,8 @@ jobs:
           # electron-builder hunts a keychain the runner does not have. This
           # expression is the switch: it reads "true" once CSC_LINK is set.
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          # APPLE_API_KEY is deliberately absent here — the step above puts the
+          # file path into GITHUB_ENV, and naming it again would override it.
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
