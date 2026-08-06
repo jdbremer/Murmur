@@ -11,7 +11,7 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "test": "vitest run",
-    "sidecars:dir": "node -e \"require('node:fs').mkdirSync('../../.sidecars/bin',{recursive:true})\"",
+    "sidecars:dir": "node ../../scripts/sidecars/check.mjs",
     "pack:mac": "npm run sidecars:dir && electron-vite build && electron-builder --mac --config electron-builder.yml --publish never",
     "pack:win": "npm run sidecars:dir && electron-vite build && electron-builder --win --config electron-builder.yml --publish never",
     "release:mac": "npm run sidecars:dir && electron-vite build && electron-builder --mac --config electron-builder.yml --publish always",
