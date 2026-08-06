@@ -35,6 +35,8 @@ export interface MurmurApi {
     installUpdate(): Promise<void>
     onUpdateChanged(listener: (state: Evt<'app.updateChanged'>) => void): Unsubscribe
     openReleasePage(request: Req<'app.openReleasePage'>): Promise<void>
+    /** Quit and reopen — how a permission grant becomes visible to the app. */
+    relaunch(): Promise<void>
     /** True in unpackaged builds; gates the Simulate widgets. */
     devMode(): Promise<Res<'app.devMode'>>
     quit(): Promise<void>

@@ -115,6 +115,12 @@ export function HelpSection(): React.JSX.Element {
             why={permission.why}
             notDone={permission.notDone}
             state={permissions?.[permission.kind]}
+            // Microphone is read live from getMediaAccessStatus, so it updates
+            // without a restart. These two are answered by the OS once per
+            // process and cannot.
+            needsRelaunch={
+              permission.kind === 'accessibility' || permission.kind === 'inputMonitoring'
+            }
             onRequest={() => request(permission.kind)}
             onOpenSettings={() => openSettings(permission.kind)}
           />
@@ -282,6 +288,7 @@ export function PermissionCard({
   why,
   notDone,
   state,
+  needsRelaunch,
   onRequest,
   onOpenSettings,
 }: {
@@ -289,10 +296,17 @@ export function PermissionCard({
   why: string
   notDone: string
   state: PermissionState | undefined
+  /**
+   * True for the permissions macOS decides once per process (Accessibility,
+   * Input Monitoring). Granting one while Murmur runs changes nothing it can
+   * see, so re-checking is the wrong offer — restarting is the right one.
+   */
+  needsRelaunch: boolean
   onRequest: () => void
   onOpenSettings: () => void
 }): React.JSX.Element {
   const badge = state ? PERMISSION_LABELS[state] : null
+  const stale = needsRelaunch && state === 'denied'
 
   return (
     <Card>
@@ -304,16 +318,30 @@ export function PermissionCard({
           </p>
           <p className="mt-1 max-w-lg text-[12px] leading-relaxed text-ink-muted">{why}</p>
           <p className="mt-1 max-w-lg text-[12px] leading-relaxed text-ink-faint">{notDone}</p>
+          {stale ? (
+            <p className="mt-2 max-w-lg text-[12px] leading-relaxed text-warning">
+              Already switched this on in System Settings? macOS decides this one when the app
+              starts, so Murmur cannot see the change until it restarts — checking again will keep
+              saying denied.
+            </p>
+          ) : null}
         </div>
-        <div className="flex shrink-0 gap-2">
-          {state !== 'granted' && state !== 'unavailable' ? (
-            <Button variant="primary" onClick={onRequest}>
-              Allow
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <div className="flex gap-2">
+            {state !== 'granted' && state !== 'unavailable' ? (
+              <Button variant="primary" onClick={onRequest}>
+                Allow
+              </Button>
+            ) : null}
+            <Button onClick={onOpenSettings} disabled={state === 'unavailable'}>
+              Open System Settings
+            </Button>
+          </div>
+          {stale ? (
+            <Button onClick={() => void window.murmur.app.relaunch().catch(() => undefined)}>
+              Quit and reopen
             </Button>
           ) : null}
-          <Button onClick={onOpenSettings} disabled={state === 'unavailable'}>
-            Open System Settings
-          </Button>
         </div>
       </div>
     </Card>

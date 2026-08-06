@@ -103,6 +103,15 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     }
     await shell.openExternal(url)
   })
+  ipc.handle('app.relaunch', () => {
+    // `relaunch` only schedules; `quit` is what makes it happen. Deferred a
+    // tick so this IPC call can return before the app goes away, otherwise the
+    // renderer sees a rejected promise on a button that worked perfectly.
+    app.relaunch()
+    setImmediate(() => {
+      context.quit()
+    })
+  })
   ipc.handle('app.devMode', () => context.isDev)
   ipc.handle('app.quit', () => {
     context.quit()

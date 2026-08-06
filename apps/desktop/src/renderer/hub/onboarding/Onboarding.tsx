@@ -201,6 +201,10 @@ function PermissionStep({
           why={copy.why}
           notDone={copy.notDone}
           state={state}
+          // Same trap as in Help, and worse here: someone granting Accessibility
+          // mid-onboarding would watch it stay "Denied" and reasonably conclude
+          // setup is broken.
+          needsRelaunch={kind === 'accessibility' || kind === 'inputMonitoring'}
           onRequest={() => {
             void window.murmur.permissions
               .request({ kind })

@@ -156,6 +156,12 @@ export const invokeContract = {
   /** Open the release page — the fallback when self-update is unsupported. */
   'app.openReleasePage': { request: z.object({ url: z.string() }), response: z.void() },
   /**
+   * Quit and start again. Accessibility and Input Monitoring are decided for
+   * the life of a process, so a grant made while Murmur is running is not
+   * visible to it until it restarts — no amount of re-checking helps.
+   */
+  'app.relaunch': { request: z.void(), response: z.void() },
+  /**
    * True in unpackaged builds. UI that fronts a dev-only channel (the three
    * Simulate widgets) renders only when this is true — a button whose backing
    * handler does not exist in a packaged build must not exist either.
