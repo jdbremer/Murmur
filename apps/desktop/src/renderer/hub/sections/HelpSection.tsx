@@ -5,10 +5,19 @@ import type {
   PermissionKind,
   PermissionState,
   PermissionsStatus,
-  UpdateCheckResult,
+  UpdateState,
 } from '@murmur/shared'
 
-import { Badge, Banner, Button, Card, InlineError, Row, Section } from '../../components/Section'
+import {
+  Badge,
+  Banner,
+  Button,
+  Card,
+  InlineError,
+  ProgressBar,
+  Row,
+  Section,
+} from '../../components/Section'
 import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDevMode } from '../../hooks/useDevMode'
 import { useEngines } from '../../hooks/useEngines'
@@ -132,7 +141,7 @@ export function HelpSection(): React.JSX.Element {
         </Row>
         <Row
           label="Network activity"
-          hint="Model downloads from Hugging Face, and the update check when you press it. Nothing else — no telemetry, no accounts, nothing on a timer."
+          hint="Model downloads from Hugging Face, and updates from GitHub when you press the button. Nothing else — no telemetry, no accounts, nothing on a timer."
         >
           <Badge tone="positive">Only when you ask</Badge>
         </Row>
@@ -160,60 +169,101 @@ export function HelpSection(): React.JSX.Element {
 }
 
 /**
- * "Check for updates" — a button, never a background poll.
+ * Check → download → restart, each a button the user presses.
  *
- * Reporting rather than installing is a limitation worth stating plainly in
- * the UI: macOS will not let an app that is not Developer-ID signed replace
- * itself, so offering an "Install" button here would download an update and
- * then fail at the last step.
+ * Split into three deliberately. Nothing polls, so Help's "nothing on a timer"
+ * stays true; and finding out an update exists is separate from pulling a few
+ * hundred megabytes, which is not a decision to make on someone's behalf.
  */
 function UpdateRow(): React.JSX.Element {
-  const [result, setResult] = useState<UpdateCheckResult | null>(null)
-  const [checking, setChecking] = useState(false)
+  const [state, setState] = useState<UpdateState | null>(null)
 
-  const check = useCallback(() => {
-    setChecking(true)
+  useEffect(() => {
     void window.murmur.app
-      .checkForUpdate()
-      .then(setResult)
+      .updateState()
+      .then(setState)
       .catch(() => undefined)
-      .finally(() => setChecking(false))
+    // Download progress is pushed, so the bar animates without polling.
+    return window.murmur.app.onUpdateChanged(setState)
   }, [])
 
+  const status = state?.status ?? 'idle'
+  const busy = status === 'checking' || status === 'downloading'
+
   return (
-    <Row label="Updates" hint={updateHint(result)}>
+    <Row label="Updates" hint={updateHint(state)}>
       <div className="flex items-center gap-2">
-        {result?.status === 'available' ? (
+        {status === 'downloading' ? (
+          <div className="w-28">
+            <ProgressBar value={(state?.percent ?? 0) / 100} />
+          </div>
+        ) : null}
+
+        {status === 'available' ? (
           <Button
             variant="primary"
-            onClick={() => {
-              void window.murmur.app.openReleasePage({ url: result.url })
-            }}
+            onClick={() => void window.murmur.app.downloadUpdate().catch(() => undefined)}
           >
-            Get {result.latestVersion}
+            Download {state?.latestVersion}
           </Button>
         ) : null}
-        <Button disabled={checking} onClick={check}>
-          {checking ? 'Checking…' : 'Check for updates'}
-        </Button>
+
+        {status === 'downloaded' ? (
+          <Button
+            variant="primary"
+            onClick={() => void window.murmur.app.installUpdate().catch(() => undefined)}
+          >
+            Restart to install
+          </Button>
+        ) : null}
+
+        {/* Self-update is impossible here, so send them somewhere it works. */}
+        {status === 'unsupported' ? (
+          <Button
+            onClick={() =>
+              void window.murmur.app
+                .openReleasePage({ url: state?.url ?? '' })
+                .catch(() => undefined)
+            }
+          >
+            Open releases
+          </Button>
+        ) : null}
+
+        {status === 'downloaded' ? null : (
+          <Button
+            disabled={busy}
+            onClick={() => void window.murmur.app.checkForUpdate().catch(() => undefined)}
+          >
+            {status === 'checking' ? 'Checking…' : 'Check for updates'}
+          </Button>
+        )}
       </div>
     </Row>
   )
 }
 
-function updateHint(result: UpdateCheckResult | null): string {
-  if (!result) {
+function updateHint(state: UpdateState | null): string {
+  if (!state || state.status === 'idle') {
     return 'Asks GitHub whether a newer release exists. Nothing is sent until you press it, and nothing checks on its own.'
   }
-  switch (result.status) {
+  switch (state.status) {
+    case 'checking':
+      return 'Asking GitHub…'
     case 'available':
-      return `Version ${result.latestVersion} is available — you have ${result.currentVersion}. Opens the release page; installing is a manual download for now.`
+      return `Version ${state.latestVersion} is available — you have ${state.currentVersion}. Downloading is a separate step, because it is a few hundred megabytes.`
+    case 'downloading':
+      return `Downloading ${state.latestVersion}… ${state.percent ?? 0}%. You can keep using Murmur; it installs when you restart.`
+    case 'downloaded':
+      return `Version ${state.latestVersion} is ready. Restarting replaces this copy and reopens Murmur.`
     case 'current':
-      return `You have the latest release (${result.currentVersion}).`
+      return `You have the latest release (${state.currentVersion}).`
     case 'none':
       return 'No release has been published yet, so there is nothing to compare against.'
+    case 'unsupported':
+      return `${state.message ?? 'This build cannot update itself.'} You can still download a new version by hand.`
     case 'error':
-      return result.message ?? 'The update check did not succeed.'
+      return state.message ?? 'The update check did not succeed.'
   }
 }
 

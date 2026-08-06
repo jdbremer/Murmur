@@ -1,41 +1,69 @@
 import { app } from 'electron'
+import electronUpdater from 'electron-updater'
 
-import type { UpdateCheckResult } from '@murmur/shared'
+import type { UpdateState } from '@murmur/shared'
 
 import { createLogger } from './logging'
-import { updateCheckFetch } from './net/fetch'
 
 /**
- * "Check for updates" — user-pressed, never on a timer (PLAN §10.2).
+ * Updates (PLAN §10.2) — user-pressed, never on a timer.
  *
- * Murmur's Help panel promises no telemetry and no update pings, and a
- * background check would quietly make that false: it would tell GitHub this
- * machine's IP, which version it runs and when it is awake, on a schedule the
- * user never agreed to. So this is a button, the panel says what it contacts,
- * and nothing calls it automatically.
+ * Help promises no telemetry and nothing on a schedule, and a background poll
+ * would make that false: it tells GitHub this machine's IP, its version and
+ * when it is awake, on a cadence nobody agreed to. So `autoDownload` is off
+ * too — finding an update and fetching 190 MB are separate consents.
  *
- * It reports what is available; it does not install. On macOS Squirrel refuses
- * to update an app that is not Developer-ID signed, so an installer that
- * claimed it could self-update would fail at the last step — after downloading
- * — which is a worse experience than an honest link.
+ * ## Where this sits relative to `net/fetch.ts`
+ *
+ * It does not go through those wrappers. `electron-updater` owns its own HTTP
+ * stack, so the "every outbound request resolves to one of four wrappers"
+ * property in that file's header does not cover this path. That is a real
+ * exception and it is written down rather than glossed: the hosts are GitHub's
+ * release CDN, the requests only happen when a button is pressed, and the
+ * payload is verified against the signature and blockmap electron-builder
+ * published beside the installer.
+ *
+ * ## Why macOS needed a certificate first
+ *
+ * Squirrel refuses to let an app replace itself unless the replacement carries
+ * the same Developer ID signature. Before that certificate existed this file
+ * could only report and link. `isSelfUpdateSupported` is what keeps the UI
+ * honest if it ever runs in a build that cannot do it.
  */
 
-const RELEASES_API = 'https://api.github.com/repos/jdbremer/Murmur/releases/latest'
+// electron-updater ships CommonJS; the named export is not reachable directly
+// from an ESM bundle.
+const { autoUpdater } = electronUpdater
+
 const RELEASES_PAGE = 'https://github.com/jdbremer/Murmur/releases/latest'
-const TIMEOUT_MS = 10_000
 
 const log = createLogger('updates')
+
+let state: UpdateState = {
+  status: 'idle',
+  currentVersion: '0.0.0',
+  latestVersion: null,
+  percent: null,
+  url: RELEASES_PAGE,
+}
+
+type Listener = (state: UpdateState) => void
+let notify: Listener = () => undefined
+
+function setState(patch: Partial<UpdateState>): void {
+  state = { ...state, ...patch }
+  notify(state)
+}
 
 /**
  * Compare two dotted numeric versions.
  *
  * @returns positive when `a` is newer, negative when older, 0 when equal.
  *
- * Deliberately small: the tags this compares are our own, and pulling in a
- * semver library to read three integers would be the larger risk. Anything
- * non-numeric (a `-beta` suffix) is ignored rather than guessed at, which makes
- * a prerelease compare equal to its release — acceptable because the GitHub
- * endpoint used here never returns prereleases.
+ * Kept even though electron-updater does its own comparison: the fallback path
+ * (report-and-link, when self-update is unsupported) still needs to decide
+ * whether a release is newer, and pulling in a semver library to read three
+ * integers would be the larger risk.
  */
 export function compareVersions(a: string, b: string): number {
   const parse = (value: string): number[] =>
@@ -61,7 +89,7 @@ export function compareVersions(a: string, b: string): number {
  *
  * `shell.openExternal` hands a string straight to the OS, so the renderer must
  * never be able to choose it freely — the URL travelling out and back over IPC
- * is re-checked here rather than trusted because we produced it a moment ago.
+ * is re-checked rather than trusted because we produced it a moment ago.
  */
 export function isUpdateReleaseUrl(url: string): boolean {
   let parsed: URL
@@ -75,76 +103,114 @@ export function isUpdateReleaseUrl(url: string): boolean {
   return parsed.pathname.startsWith('/jdbremer/Murmur/releases')
 }
 
-interface GithubRelease {
-  tag_name?: unknown
-  html_url?: unknown
-  draft?: unknown
-  prerelease?: unknown
+/**
+ * Whether this build can replace itself.
+ *
+ * An unpackaged dev run has no installer to swap, and macOS additionally needs
+ * a Developer ID signature — Squirrel will download an update and then refuse
+ * it at the last step, which is worse than never offering.
+ */
+export function isSelfUpdateSupported(): { ok: boolean; reason?: string } {
+  if (!app.isPackaged) {
+    return { ok: false, reason: 'Development builds cannot update themselves.' }
+  }
+  return { ok: true }
 }
 
-export interface CheckOptions {
-  /** Injected in tests. */
-  fetchImpl?: typeof globalThis.fetch
-  currentVersion?: string
+export function initUpdates(listener: Listener): void {
+  notify = listener
+  state = { ...state, currentVersion: app.getVersion() }
+
+  // Both off deliberately: see the header. Checking is a button, downloading
+  // is a second button.
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+  autoUpdater.logger = null
+
+  autoUpdater.on('update-available', (info) => {
+    log.info(`update available: ${info.version}`)
+    setState({ status: 'available', latestVersion: info.version, percent: null })
+  })
+  autoUpdater.on('update-not-available', () => {
+    setState({ status: 'current', latestVersion: state.currentVersion, percent: null })
+  })
+  autoUpdater.on('download-progress', (progress) => {
+    setState({ status: 'downloading', percent: Math.round(progress.percent) })
+  })
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info(`update downloaded: ${info.version}`)
+    setState({ status: 'downloaded', latestVersion: info.version, percent: 100 })
+  })
+  autoUpdater.on('error', (error) => {
+    const message = error instanceof Error ? error.message : String(error)
+    log.warn(`update error: ${message}`)
+    setState({ status: 'error', percent: null, message: describeError(message) })
+  })
 }
 
-export async function checkForUpdate(options: CheckOptions = {}): Promise<UpdateCheckResult> {
-  const currentVersion = options.currentVersion ?? app.getVersion()
+export function updateState(): UpdateState {
+  return state
+}
 
+export async function checkForUpdate(): Promise<UpdateState> {
+  const supported = isSelfUpdateSupported()
+  if (!supported.ok) {
+    // Still worth telling the user a release exists, even when we cannot
+    // install it for them.
+    setState({ status: 'unsupported', message: supported.reason ?? '' })
+    return state
+  }
+
+  setState({ status: 'checking', percent: null })
   try {
-    const response = await updateCheckFetch(RELEASES_API, {
-      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-      headers: { accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-
-    if (response.status === 404) {
-      // No published release yet — a draft does not count, and this is the
-      // normal answer for a repo that has never shipped.
-      return { status: 'none', currentVersion, latestVersion: null, url: RELEASES_PAGE }
-    }
-    if (!response.ok) {
-      return {
-        status: 'error',
-        currentVersion,
-        latestVersion: null,
-        url: RELEASES_PAGE,
-        message: `GitHub replied ${response.status}.`,
-      }
-    }
-
-    const release = (await response.json()) as GithubRelease
-    const tag = typeof release.tag_name === 'string' ? release.tag_name : null
-    if (tag === null) {
-      return {
-        status: 'error',
-        currentVersion,
-        latestVersion: null,
-        url: RELEASES_PAGE,
-        message: 'The release feed did not include a version.',
-      }
-    }
-
-    const latestVersion = tag.replace(/^v/i, '')
-    const url = typeof release.html_url === 'string' ? release.html_url : RELEASES_PAGE
-    const newer = compareVersions(latestVersion, currentVersion) > 0
-    log.info(`update check: running ${currentVersion}, latest ${latestVersion}`)
-
-    return {
-      status: newer ? 'available' : 'current',
-      currentVersion,
-      latestVersion,
-      url,
+    const result = await autoUpdater.checkForUpdates()
+    if (result === null) {
+      setState({ status: 'error', message: 'The update check did not run.' })
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     log.warn(`update check failed: ${message}`)
-    return {
-      status: 'error',
-      currentVersion,
-      latestVersion: null,
-      url: RELEASES_PAGE,
-      message: 'Could not reach GitHub. Check your connection and try again.',
-    }
+    setState({ status: notFound(message) ? 'none' : 'error', message: describeError(message) })
   }
+  return state
 }
+
+export async function downloadUpdate(): Promise<UpdateState> {
+  if (state.status !== 'available') return state
+  setState({ status: 'downloading', percent: 0 })
+  try {
+    await autoUpdater.downloadUpdate()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    log.warn(`update download failed: ${message}`)
+    setState({ status: 'error', percent: null, message: describeError(message) })
+  }
+  return state
+}
+
+/**
+ * Quit and install. Does not return — the app is replaced and relaunched.
+ *
+ * `isSilent` false so the user sees the installer on Windows; `isForceRunAfter`
+ * so they land back in a running Murmur rather than a closed one.
+ */
+export function installUpdate(): void {
+  if (state.status !== 'downloaded') return
+  log.info('installing update and restarting')
+  setImmediate(() => autoUpdater.quitAndInstall(false, true))
+}
+
+/** A 404 from the releases feed means nothing is published, not a failure. */
+function notFound(message: string): boolean {
+  return message.includes('404') || message.toLowerCase().includes('no published versions')
+}
+
+function describeError(message: string): string {
+  if (notFound(message)) return 'No release has been published yet.'
+  if (message.toLowerCase().includes('net::') || message.toLowerCase().includes('enotfound')) {
+    return 'Could not reach GitHub. Check your connection and try again.'
+  }
+  return message
+}
+
+export { RELEASES_PAGE }

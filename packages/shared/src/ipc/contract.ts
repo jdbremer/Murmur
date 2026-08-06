@@ -18,7 +18,7 @@ import { EnginesStatusSchema } from '../domain/engine'
 import { HardwareReportSchema } from '../domain/hardware'
 import { PermissionKindSchema, PermissionsStatusSchema } from '../domain/permissions'
 import { SettingsPatchSchema, SettingsSchema } from '../domain/settings'
-import { UpdateCheckResultSchema } from '../domain/updates'
+import { UpdateStateSchema } from '../domain/updates'
 import { StyleProfilePatchSchema, StyleProfileSetSchema } from '../domain/style'
 import {
   ImportedModelSchema,
@@ -143,8 +143,17 @@ export const invokeContract = {
    * User-pressed update check. Never fires on a timer — see `updates.ts` and
    * the "Network activity" row in Help, which both promise as much.
    */
-  'app.checkForUpdate': { request: z.void(), response: UpdateCheckResultSchema },
-  /** Open the release page in the user's browser — the only "install" path. */
+  'app.checkForUpdate': { request: z.void(), response: UpdateStateSchema },
+  /** Current update state, for a Hub that opened mid-flow. */
+  'app.updateState': { request: z.void(), response: UpdateStateSchema },
+  /**
+   * Fetch the update. Separate from checking on purpose: finding out a release
+   * exists and pulling ~190 MB are two different consents.
+   */
+  'app.downloadUpdate': { request: z.void(), response: UpdateStateSchema },
+  /** Quit, swap the app, relaunch. Does not return. */
+  'app.installUpdate': { request: z.void(), response: z.void() },
+  /** Open the release page — the fallback when self-update is unsupported. */
   'app.openReleasePage': { request: z.object({ url: z.string() }), response: z.void() },
   /**
    * True in unpackaged builds. UI that fronts a dev-only channel (the three
@@ -341,6 +350,11 @@ export const eventContract = {
   'audio.level': AudioLevelEventSchema,
   /** Broadcast after any successful `settings.set`, to all windows. */
   'settings.changed': SettingsSchema,
+  /**
+   * Update flow progress. Pushed rather than polled because a download reports
+   * continuously, and the Hub should not have to ask repeatedly to draw a bar.
+   */
+  'app.updateChanged': UpdateStateSchema,
   'models.downloadProgress': ModelDownloadProgressSchema,
   /**
    * Engine lifecycle changed — model swapped, sidecar died, runtime missing.

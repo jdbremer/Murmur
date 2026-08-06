@@ -28,6 +28,12 @@ export interface MurmurApi {
     info(): Promise<Res<'app.info'>>
     /** User-pressed only; there is no background check (PLAN §10.2). */
     checkForUpdate(): Promise<Res<'app.checkForUpdate'>>
+    updateState(): Promise<Res<'app.updateState'>>
+    /** A second, separate consent: checking does not pull ~190 MB. */
+    downloadUpdate(): Promise<Res<'app.downloadUpdate'>>
+    /** Quits and relaunches into the new version. */
+    installUpdate(): Promise<void>
+    onUpdateChanged(listener: (state: Evt<'app.updateChanged'>) => void): Unsubscribe
     openReleasePage(request: Req<'app.openReleasePage'>): Promise<void>
     /** True in unpackaged builds; gates the Simulate widgets. */
     devMode(): Promise<Res<'app.devMode'>>

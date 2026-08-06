@@ -9,10 +9,6 @@
  *    install. Same redirect discipline, against its own GitHub-releases host
  *    list, so "we only talk to Hugging Face" stays a true statement about
  *    *model* traffic rather than quietly covering an executable download.
- *  - {@link updateCheckFetch} — the user-pressed "Check for updates", against
- *    the GitHub API alone. Separate again because it is the one request that
- *    describes the *user* (an IP, a version, a moment) rather than a file they
- *    asked for.
  *  - {@link loopbackFetch} — the sidecar clients. Refuses any host that is
  *    *not* loopback, so a request that thinks it is going to our local
  *    `whisper-server` or `llama-server` can never end up on the internet.
@@ -23,6 +19,14 @@
  * bundled llama-server, the plain global when the user configured their own
  * endpoint (allowed by PLAN §7.1, and loudly warned about in the engine status
  * when it is not loopback).
+ *
+ * **One documented exception.** `updates.ts` uses `electron-updater`, which
+ * owns its own HTTP stack and therefore does not pass through here. Grepping
+ * for `fetch(` will not surface it, so it is written down instead: it reaches
+ * GitHub's release CDN, only when the user presses a button, and the payload
+ * is checked against the signature and blockmap published beside it. Keeping
+ * that exception explicit is the point — an unstated one would make the
+ * paragraph above quietly false.
  *
  * Redirects are followed manually so every hop is re-checked; `fetch`'s own
  * `redirect: 'follow'` would let hop #2 land anywhere. Hugging Face always
@@ -226,65 +230,6 @@ export async function sidecarReleaseFetch(
   }
 
   throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting at ${scrubSecrets(url)}`)
-}
-
-// ---------------------------------------------------------------------------
-// Update check
-// ---------------------------------------------------------------------------
-
-/**
- * The single host the update check may touch — its own list again, for the
- * same reason the sidecar hosts are separate: an update check is the one
- * request that says something about *this user* rather than about a file they
- * asked for. It reveals an IP, a version and a moment in time, so it must never
- * be able to hide inside "model downloads from Hugging Face".
- *
- * Nothing calls this on a timer. It runs when the user presses the button, and
- * the Help panel says so.
- */
-const UPDATE_HOSTS: readonly string[] = Object.freeze(['api.github.com'])
-
-export function isUpdateHost(host: string): boolean {
-  return UPDATE_HOSTS.includes(host.toLowerCase())
-}
-
-/** The update host list, for the Help panel's "what we contact" disclosure. */
-export function updateHosts(): readonly string[] {
-  return [...UPDATE_HOSTS]
-}
-
-function assertUpdateUrl(url: string): URL {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw new BlockedHostError(url, '<unparseable>')
-  }
-  if (parsed.protocol !== 'https:') {
-    throw new BlockedHostError(url, `${parsed.hostname} (${parsed.protocol})`)
-  }
-  if (!isUpdateHost(parsed.hostname)) {
-    throw new BlockedHostError(url, parsed.hostname)
-  }
-  return parsed
-}
-
-/**
- * `fetch` for the release metadata behind "Check for updates".
- *
- * Redirects are refused outright rather than followed: the API answers
- * directly, so a redirect here is an anomaly, not a CDN hop.
- *
- * @throws {BlockedHostError} when the URL is not the GitHub API.
- */
-export async function updateCheckFetch(
-  url: string,
-  options: AllowlistedFetchOptions = {},
-): Promise<Response> {
-  const { fetchImpl, ...init } = options
-  const doFetch: FetchLike = fetchImpl ?? ((u, i) => globalThis.fetch(u, i))
-  const target = assertUpdateUrl(url).toString()
-  return doFetch(target, { ...init, redirect: 'error' })
 }
 
 // ---------------------------------------------------------------------------

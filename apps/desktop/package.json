@@ -19,7 +19,8 @@
   },
   "dependencies": {
     "@murmur/shared": "*",
-    "better-sqlite3": "^13.0.2"
+    "better-sqlite3": "^13.0.2",
+    "electron-updater": "^6.8.9"
   },
   "optionalDependencies": {
     "@murmur/native": "file:../../packages/native",

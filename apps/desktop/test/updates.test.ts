@@ -1,21 +1,42 @@
-import { describe, expect, it } from 'vitest'
-
-import { checkForUpdate, compareVersions, isUpdateReleaseUrl } from '../src/main/updates'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * The update check (PLAN §10.2).
+ * The update flow (PLAN §10.2).
  *
- * Two things carry real risk here. A version comparison that says "up to date"
- * when it is not silently strands users on an old build, and `openReleasePage`
- * feeds a string to `shell.openExternal` — an arbitrary-URL-open primitive if
- * the renderer can choose it.
+ * Two things carry real risk. `openReleasePage` feeds a string to
+ * `shell.openExternal`, which is an arbitrary-URL-open primitive if the
+ * renderer can choose it. And the state machine decides whether the user is
+ * shown "up to date" — a claim that must never be made on a failure, because
+ * silently stranding someone on an old build is the one outcome an update
+ * feature exists to prevent.
+ *
+ * The network itself belongs to electron-updater and is not re-tested here;
+ * what is tested is everything we decide on top of it.
  */
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
+const emitters = new Map<string, (payload?: unknown) => void>()
+const autoUpdater = {
+  autoDownload: true,
+  autoInstallOnAppQuit: true,
+  logger: undefined as unknown,
+  on: (event: string, cb: (payload?: unknown) => void) => emitters.set(event, cb),
+  checkForUpdates: vi.fn(async () => ({})),
+  downloadUpdate: vi.fn(async () => []),
+  quitAndInstall: vi.fn(),
+}
+
+vi.mock('electron', () => ({
+  app: { getVersion: () => '0.1.1', isPackaged: true },
+}))
+vi.mock('electron-updater', () => ({ default: { autoUpdater } }))
+
+const { checkForUpdate, compareVersions, initUpdates, isUpdateReleaseUrl, updateState } =
+  await import('../src/main/updates')
+
+function emit(event: string, payload?: unknown): void {
+  const cb = emitters.get(event)
+  if (!cb) throw new Error(`nothing listening for "${event}"`)
+  cb(payload)
 }
 
 describe('compareVersions', () => {
@@ -23,8 +44,8 @@ describe('compareVersions', () => {
     // The lexical trap: "0.10.0" < "0.9.0" as strings.
     expect(compareVersions('0.10.0', '0.9.0')).toBeGreaterThan(0)
     expect(compareVersions('1.0.0', '0.99.99')).toBeGreaterThan(0)
-    expect(compareVersions('0.1.0', '0.1.0')).toBe(0)
     expect(compareVersions('0.1.0', '0.1.1')).toBeLessThan(0)
+    expect(compareVersions('0.1.0', '0.1.0')).toBe(0)
   })
 
   it('ignores a leading v, since tags carry one and package.json does not', () => {
@@ -60,86 +81,67 @@ describe('isUpdateReleaseUrl', () => {
   })
 })
 
-describe('checkForUpdate', () => {
-  it('reports an available update when the release is newer', async () => {
-    const result = await checkForUpdate({
-      currentVersion: '0.1.0',
-      fetchImpl: async () =>
-        jsonResponse({
-          tag_name: 'v0.2.0',
-          html_url: 'https://github.com/jdbremer/Murmur/releases/tag/v0.2.0',
-        }),
-    })
-    expect(result.status).toBe('available')
-    expect(result.latestVersion).toBe('0.2.0')
-    expect(result.currentVersion).toBe('0.1.0')
+describe('the update state machine', () => {
+  let seen: string[]
+
+  beforeEach(() => {
+    seen = []
+    autoUpdater.checkForUpdates.mockClear()
+    autoUpdater.downloadUpdate.mockClear()
+    initUpdates((s) => seen.push(s.status))
   })
 
-  it('reports current when the running build matches', async () => {
-    const result = await checkForUpdate({
-      currentVersion: '0.2.0',
-      fetchImpl: async () => jsonResponse({ tag_name: 'v0.2.0' }),
-    })
-    expect(result.status).toBe('current')
+  it('never downloads on its own — that is a second, separate consent', () => {
+    expect(autoUpdater.autoDownload).toBe(false)
+    expect(autoUpdater.autoInstallOnAppQuit).toBe(false)
   })
 
-  it('never reports an older release as an update', async () => {
-    const result = await checkForUpdate({
-      currentVersion: '0.3.0',
-      fetchImpl: async () => jsonResponse({ tag_name: 'v0.2.0' }),
-    })
-    expect(result.status).toBe('current')
+  it('reports an available update with its version', async () => {
+    await checkForUpdate()
+    emit('update-available', { version: '0.2.0' })
+    expect(updateState().status).toBe('available')
+    expect(updateState().latestVersion).toBe('0.2.0')
+    expect(seen).toContain('checking')
   })
 
-  it('distinguishes "nothing published" from "you are up to date"', async () => {
-    // A 404 means no published release. Saying "up to date" there would be a
-    // claim we cannot support — there is nothing to compare against.
-    const result = await checkForUpdate({
-      currentVersion: '0.1.0',
-      fetchImpl: async () => new Response('', { status: 404 }),
-    })
-    expect(result.status).toBe('none')
-    expect(result.latestVersion).toBeNull()
+  it('tracks download progress and then readiness', async () => {
+    await checkForUpdate()
+    emit('update-available', { version: '0.2.0' })
+    emit('download-progress', { percent: 42.7 })
+    expect(updateState().status).toBe('downloading')
+    expect(updateState().percent).toBe(43)
+
+    emit('update-downloaded', { version: '0.2.0' })
+    expect(updateState().status).toBe('downloaded')
+    expect(updateState().percent).toBe(100)
   })
 
-  it('surfaces a network failure as an error, not as up to date', async () => {
-    const result = await checkForUpdate({
-      currentVersion: '0.1.0',
-      fetchImpl: async () => {
-        throw new Error('getaddrinfo ENOTFOUND')
-      },
-    })
-    expect(result.status).toBe('error')
-    expect(result.message).toBeTruthy()
+  it('reports current when nothing is newer', async () => {
+    await checkForUpdate()
+    emit('update-not-available')
+    expect(updateState().status).toBe('current')
   })
 
-  it('errors rather than guessing when the feed has no version', async () => {
-    const result = await checkForUpdate({
-      currentVersion: '0.1.0',
-      fetchImpl: async () => jsonResponse({ name: 'no tag here' }),
-    })
-    expect(result.status).toBe('error')
+  it('distinguishes "nothing published" from a real failure', async () => {
+    autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error('HttpError: 404 Not Found'))
+    await checkForUpdate()
+    // A repo with no published release must not be reported as confirmation
+    // that the running build is newest.
+    expect(updateState().status).toBe('none')
   })
 
-  it('falls back to the releases page when the feed omits a url', async () => {
-    const result = await checkForUpdate({
-      currentVersion: '0.1.0',
-      fetchImpl: async () => jsonResponse({ tag_name: 'v9.9.9' }),
-    })
-    expect(result.status).toBe('available')
-    expect(isUpdateReleaseUrl(result.url)).toBe(true)
+  it('surfaces a network failure as an error, never as up to date', async () => {
+    autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error('net::ERR_INTERNET_DISCONNECTED'))
+    await checkForUpdate()
+    expect(updateState().status).toBe('error')
+    expect(updateState().message).toBeTruthy()
+    expect(seen).not.toContain('current')
   })
 
-  it('only ever contacts the GitHub API', async () => {
-    const seen: string[] = []
-    await checkForUpdate({
-      currentVersion: '0.1.0',
-      fetchImpl: async (input) => {
-        seen.push(String(input))
-        return jsonResponse({ tag_name: 'v0.1.0' })
-      },
-    })
-    expect(seen).toHaveLength(1)
-    expect(new URL(seen[0]!).hostname).toBe('api.github.com')
+  it('surfaces an updater error event', async () => {
+    await checkForUpdate()
+    emit('error', new Error('code signature did not match'))
+    expect(updateState().status).toBe('error')
+    expect(updateState().message).toContain('signature')
   })
 })

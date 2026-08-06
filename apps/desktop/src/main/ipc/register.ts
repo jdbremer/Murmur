@@ -22,7 +22,14 @@ import { framePcm } from '../audio/buffer'
 import { describeNative, native } from '../native'
 import { createLogger } from '../logging'
 import { checkPermissions, requestPermission } from '../permissions'
-import { checkForUpdate, isUpdateReleaseUrl } from '../updates'
+import {
+  checkForUpdate,
+  downloadUpdate,
+  initUpdates,
+  installUpdate,
+  isUpdateReleaseUrl,
+  updateState,
+} from '../updates'
 import { simulateDictation } from '../dictation/simulator'
 import { installSidecarBinary } from '../engines/install-sidecar'
 import { setBarInteractive } from '../windows/bar'
@@ -80,6 +87,11 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     native: describeNative(),
   }))
   ipc.handle('app.checkForUpdate', () => checkForUpdate())
+  ipc.handle('app.updateState', () => updateState())
+  ipc.handle('app.downloadUpdate', () => downloadUpdate())
+  ipc.handle('app.installUpdate', () => {
+    installUpdate()
+  })
   ipc.handle('app.openReleasePage', async ({ url }) => {
     // Only ever the URL this app's own update check produced, and only after
     // re-checking the host: `shell.openExternal` hands a string to the OS, so
@@ -97,6 +109,12 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   })
   ipc.handle('app.openHub', () => {
     windows.showHub()
+  })
+
+  // Download progress arrives continuously; pushing it beats having the Hub
+  // poll just to animate a bar.
+  initUpdates((next) => {
+    ipc.broadcast(windows.uiWebContents(), 'app.updateChanged', next)
   })
 
   // -- settings ------------------------------------------------------------
