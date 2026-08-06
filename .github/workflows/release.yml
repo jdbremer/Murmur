@@ -10,6 +10,13 @@
 #
 # Linux is absent on purpose: `@murmur/native` is darwin + win32 only, so a
 # Linux artifact would be a UI that can never dictate.
+#
+# The build jobs do **not** publish. They upload artifacts, and one final job
+# assembles the release. Letting each platform publish for itself produced
+# duplicate drafts for the same tag: electron-builder does a non-atomic
+# "find the draft for this tag, else create one", so two jobs running in
+# parallel both find nothing and both create. Re-running a tag compounded it.
+# One publisher, running once, cannot race itself.
 
 name: Release
 
@@ -31,9 +38,6 @@ jobs:
     # Generous: a cold cache builds whisper.cpp and llama.cpp universal from
     # source, which dominates everything else in this job.
     timeout-minutes: 120
-    permissions:
-      # electron-builder creates the draft release and uploads to it.
-      contents: write
     strategy:
       # One platform failing must not bin the other's artifacts.
       fail-fast: false
@@ -41,10 +45,10 @@ jobs:
         include:
           - os: macos-14
             name: macOS (arm64 + x64 DMG)
-            script: release:mac
+            script: pack:mac
           - os: windows-latest
             name: Windows (NSIS x64)
-            script: release:win
+            script: pack:win
 
     steps:
       # The repo is LF; stop the Windows runner's autocrlf from rewriting it.
@@ -135,18 +139,17 @@ jobs:
       # electron-builder picks all of these up from the environment, and
       # `hardenedRuntime` + the entitlements are already declared in
       # electron-builder.yml, so no further config change is needed.
-      - name: Build and attach installers
+      # `pack:*`, not `release:*` — these scripts pass `--publish never`. The
+      # release job below is the only thing that talks to GitHub.
+      - name: Build the installers
         run: npm run ${{ matrix.script }} --workspace @murmur/desktop
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
           # APPLE_ID: ${{ secrets.APPLE_ID }}
           # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      # Kept for the case where publishing fails but the build succeeded, so a
-      # tag never leaves you with nothing to hand out.
-      - name: Keep the installers as artifacts
+      - name: Upload the installers
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -158,3 +161,54 @@ jobs:
             apps/desktop/release/*.exe
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest*.yml
+
+  # The single publisher. Runs once, after both platforms, so there is exactly
+  # one draft per tag no matter how many times the tag is re-cut.
+  release:
+    name: Draft release
+    needs: build
+    # Only for a tag: a workflow_dispatch rehearsal builds and uploads
+    # artifacts, but must not invent a release for whatever tag came last.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: installers
+
+      - name: Show what will be attached
+        run: ls -la installers
+
+      - name: Replace any existing draft for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Deleting first makes a re-run idempotent: one draft, always, rather
+          # than a second one accumulating beside the first. `|| true` because
+          # the usual case is that no release exists yet. The tag itself is
+          # left alone — only the release object goes.
+          gh release delete "$TAG" --yes || true
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --draft \
+            --title "${TAG#v}" \
+            --notes 'Speech and polishing servers are bundled, so a fresh install can transcribe once you download a model from the Hub.
+
+          **macOS builds are unsigned.** Gatekeeper will report the app as damaged — it is not. See the README for how to open it, and prefer building from source if you would rather not override that warning.
+
+          **Windows** SmartScreen will warn for the same reason: More info → Run anyway.' \
+            installers/*
