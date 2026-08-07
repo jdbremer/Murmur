@@ -12,11 +12,11 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 Installers are attached to each [release](https://github.com/jdbremer/Murmur/releases):
 
-| OS      | File                             | Notes                                                             |
-| ------- | -------------------------------- | ----------------------------------------------------------------- |
-| macOS   | `.dmg`, separate arm64 and Intel | macOS 13 Ventura or newer                                         |
-| Windows | NSIS `.exe`, x64                 | Windows 10 / 11                                                   |
-| Linux   | `.AppImage` and `.deb`, x64      | **X11 sessions only** — see [Platform support](#platform-support) |
+| OS      | File                             | Notes                                                                                                                        |
+| ------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| macOS   | `.dmg`, separate arm64 and Intel | macOS 13 Ventura or newer                                                                                                    |
+| Windows | NSIS `.exe`, x64                 | Windows 10 / 11                                                                                                              |
+| Linux   | `.AppImage` and `.deb`, x64      | **X11 sessions only** — see [Platform support](#platform-support). Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) |
 
 **They are all currently unsigned**, which each OS will tell you about in its
 own alarming way:
@@ -189,12 +189,12 @@ through the IPC channel or `scripts/agent/` instead.
 
 ### Platform support
 
-| Platform           | Dictation           | Default key | Installer            |
-| ------------------ | ------------------- | ----------- | -------------------- |
-| macOS 13+          | yes — field-proven  | `fn`        | `.dmg` (arm64 + x64) |
-| Windows 10/11 x64  | yes — gates G0–G10  | Right Ctrl  | NSIS `.exe`          |
-| Linux x64, **X11** | yes — new, unproven | Right Ctrl  | AppImage + `.deb`    |
-| Linux, **Wayland** | **no** — see below  | —           | (same package)       |
+| Platform           | Dictation           | Default key | Installer                      |
+| ------------------ | ------------------- | ----------- | ------------------------------ |
+| macOS 13+          | yes — field-proven  | `fn`        | `.dmg` (arm64 + x64)           |
+| Windows 10/11 x64  | yes — gates G0–G10  | Right Ctrl  | NSIS `.exe`                    |
+| Linux x64, **X11** | yes — new, unproven | Right Ctrl  | AppImage + `.deb`, glibc 2.39+ |
+| Linux, **Wayland** | **no** — see below  | —           | (same package)                 |
 
 Everything platform-specific — the key listener, clipboard-swap text insertion,
 secure-input detection, the permission prompts — is isolated in

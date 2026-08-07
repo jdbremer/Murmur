@@ -49,12 +49,22 @@ jobs:
           - os: windows-latest
             name: Windows (NSIS x64)
             script: pack:win
-          # Pinned to the oldest supported runner on purpose, and only here.
-          # A Linux binary links the glibc it was built against and will not
-          # start on anything older, so building on ubuntu-latest would quietly
-          # restrict the AppImage to the newest distros. The other two jobs
-          # have no equivalent concern.
-          - os: ubuntu-22.04
+          # Pinned to a version rather than ubuntu-latest, and only here. A
+          # Linux binary links the glibc it was built against and will not start
+          # on anything older, so this line is what sets the oldest distro the
+          # AppImage and .deb can run on. `ubuntu-latest` would move that floor
+          # silently under us the day GitHub repoints the label; naming the
+          # version makes it a decision. The other two jobs have no equivalent
+          # concern.
+          #
+          # 24.04 means glibc 2.39: Ubuntu 24.04+, Debian 13+, Fedora 40+.
+          # Ubuntu 22.04 LTS (glibc 2.35) is deliberately out of scope — it was
+          # the previous pin, dropped because the 22.04 runner image begins
+          # deprecation on 2026-09-17 and brownouts fail jobs during the window.
+          # If older distros need supporting again, the fix is to build inside
+          # an older-base container on a supported runner, not to re-pin to a
+          # retiring image.
+          - os: ubuntu-24.04
             name: Linux (AppImage + deb x64)
             script: pack:linux
 
