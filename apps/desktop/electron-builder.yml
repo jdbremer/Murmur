@@ -49,6 +49,13 @@ extraResources:
       - whisper-server.exe
       - llama-server.exe
       - '*.dll'
+  # The system-audio tap helper for meeting capture (PLAN §18.2), landing in
+  # `Contents/Resources/macos-audio-tap`. Built by
+  # scripts/sidecars/build-audio-tap.sh; absent on non-macOS builds, where
+  # meetings fall back to microphone-only.
+  - from: resources
+    to: .
+    filter: ['macos-audio-tap']
 
 asar: true
 # The compiled N-API addon must stay outside the archive to be dlopen-able.
@@ -73,6 +80,16 @@ mac:
     NSMicrophoneUsageDescription: >-
       Murmur listens only while you hold your dictation key. Audio is transcribed
       on this Mac and never leaves it.
+    # Meeting capture (PLAN §18.2). macOS 14.2+ treats system audio as its own
+    # consent, separate from screen recording — which is the whole reason a
+    # CoreAudio process tap is used instead of ScreenCaptureKit: no purple
+    # recording indicator, no "your screen is being observed", no screen access
+    # requested or granted. Without this key the OS cannot present the prompt
+    # at all and the tap silently yields digital silence.
+    NSAudioCaptureUsageDescription: >-
+      Murmur records the other participants in a call so it can transcribe the
+      meeting. It captures audio only, never your screen, and only while you
+      have asked it to record.
     # Menu-bar app: no Dock icon by default (PLAN §2.3).
     LSUIElement: true
 

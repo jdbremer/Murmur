@@ -100,6 +100,37 @@ describe('openDatabase', () => {
     db.pragma(`user_version = ${LATEST_SCHEMA_VERSION + 5}`)
     expect(() => migrate(db)).toThrow(/newer than this build supports/)
   })
+
+  it('backfills lifetime stats from a v1 history rather than resetting them', () => {
+    // A user upgrading into the lifetime-stats migration has a history but no
+    // counters. Zeroing their word count on upgrade would look exactly like the
+    // bug the migration exists to fix.
+    // Rewind to a genuine v1 shape: everything migrations 2 and 3 introduced
+    // has to go, or replaying them collides with tables that already exist.
+    db.exec(`
+      DELETE FROM lifetime_stats;
+      DELETE FROM dictation_days;
+      DROP TABLE lifetime_stats;
+      DROP TABLE dictation_days;
+      DROP TABLE meetings;
+    `)
+    const ts = Date.parse('2026-08-01T12:00:00')
+    db.prepare(
+      `INSERT INTO dictations
+         (id, ts, raw_text, polished_text, app_category, duration_ms, stt_model, timings_json)
+       VALUES (?, ?, ?, ?, 'work', ?, 'whisper-small-en', '{}')`,
+    ).run('a', ts, 'um so we should uh ship it wednesday', 'We should ship it on Wednesday.', 6_000)
+    db.pragma('user_version = 1')
+
+    expect(migrate(db).applied).toEqual(['2:lifetime-stats', '3:meetings'])
+
+    // The polished text's 6 words, at 6 words / 6 s = 60 wpm, on one day.
+    expect(new DictationsRepository(db).stats(ts)).toEqual({
+      totalWords: 6,
+      avgWpm: 60,
+      streakDays: 1,
+    })
+  })
 })
 
 describe('DictationsRepository', () => {
@@ -202,6 +233,116 @@ describe('DictationsRepository', () => {
 
     expect(repository.pruneOlderThan(now - 90 * 86_400_000)).toBe(1)
     expect(repository.count()).toBe(1)
+  })
+
+  describe('lifetime stats (PLAN §2.2.1)', () => {
+    // Midday, so a local-timezone day key lands on the same date the fixture
+    // names no matter which zone the test runner is in.
+    const at = (iso: string): number => Date.parse(`${iso}T12:00:00`)
+
+    it('is all zeros before anything has been dictated', () => {
+      expect(repository.stats()).toEqual({ totalWords: 0, avgWpm: 0, streakDays: 0 })
+    })
+
+    it('counts the polished text rather than both texts', () => {
+      // Raw is 8 words, polished is 6. Counting both would give 14.
+      repository.insert(
+        draft({
+          rawText: 'um so we should uh ship it wednesday',
+          polishedText: 'We should ship it on Wednesday.',
+          durationMs: 6_000,
+        }),
+      )
+      // 6 words in 6 s = 60 wpm exactly.
+      expect(repository.stats()).toMatchObject({ totalWords: 6, avgWpm: 60 })
+    })
+
+    it('counts an untimed dictation’s words but keeps it out of the rate', () => {
+      repository.insert(draft({ rawText: 'one two three', polishedText: null, durationMs: 6_000 }))
+      repository.insert(draft({ rawText: 'four five six', polishedText: null, durationMs: 0 }))
+
+      // All 6 words count towards the headline. The rate uses only the timed
+      // dictation — 3 words in 6 s = 30 wpm. Charging the untimed words against
+      // the timed seconds would report 60, which is a lie.
+      expect(repository.stats()).toMatchObject({ totalWords: 6, avgWpm: 30 })
+    })
+
+    it('counts a streak of consecutive local days', () => {
+      for (const iso of ['2026-07-30', '2026-07-31', '2026-08-01']) {
+        repository.insert(draft({ ts: at(iso) }))
+      }
+      expect(repository.stats(at('2026-08-01')).streakDays).toBe(3)
+    })
+
+    it('counts a day once however many times it was dictated on', () => {
+      repository.insert(draft({ ts: at('2026-08-01') }))
+      repository.insert(draft({ ts: at('2026-08-01') }))
+      expect(repository.stats(at('2026-08-01')).streakDays).toBe(1)
+    })
+
+    // The bug this table exists for: the totals used to be an aggregate over
+    // `dictations`, so the retention sweep silently deducted words the user had
+    // really dictated — and shortening the window subtracted thousands at once.
+    it('survives the retention sweep untouched', () => {
+      const now = at('2026-08-01')
+      repository.insert(
+        draft({ ts: now - 100 * 86_400_000, rawText: 'one two three', polishedText: null }),
+      )
+      repository.insert(
+        draft({ ts: now - 10 * 86_400_000, rawText: 'four five six', polishedText: null }),
+      )
+      const before = repository.stats(now)
+      expect(before.totalWords).toBe(6)
+
+      expect(repository.pruneOlderThan(now - 90 * 86_400_000)).toBe(1)
+
+      // The row is gone from history; the words it contributed are not.
+      expect(repository.count()).toBe(1)
+      expect(repository.stats(now)).toEqual(before)
+    })
+
+    it('keeps a streak whose earlier days have been pruned away', () => {
+      const now = at('2026-08-01')
+      for (const iso of ['2026-07-30', '2026-07-31', '2026-08-01']) {
+        repository.insert(draft({ ts: at(iso) }))
+      }
+      repository.pruneOlderThan(at('2026-07-31'))
+
+      expect(repository.count()).toBe(2)
+      expect(repository.stats(now).streakDays).toBe(3)
+    })
+
+    it('resets on an explicit clear, which the sweep is not', () => {
+      repository.insert(draft({ ts: at('2026-08-01') }))
+      expect(repository.stats(at('2026-08-01')).totalWords).toBeGreaterThan(0)
+
+      repository.clear()
+      expect(repository.stats(at('2026-08-01'))).toEqual({
+        totalWords: 0,
+        avgWpm: 0,
+        streakDays: 0,
+      })
+    })
+
+    it('keeps counting from zero after a clear', () => {
+      repository.insert(draft({ ts: at('2026-08-01') }))
+      repository.clear()
+      repository.insert(
+        draft({ ts: at('2026-08-01'), rawText: 'one two three', polishedText: null }),
+      )
+      expect(repository.stats(at('2026-08-01'))).toMatchObject({ totalWords: 3, streakDays: 1 })
+    })
+
+    it('leaves the totals alone when a single row is deleted', () => {
+      // Deleting one transcript is a request to forget the text, not a claim
+      // that the words were never spoken. Only "clear all" resets.
+      const record = repository.insert(
+        draft({ ts: at('2026-08-01'), rawText: 'one two three', polishedText: null }),
+      )
+      expect(repository.delete(record.id)).toBe(true)
+      expect(repository.count()).toBe(0)
+      expect(repository.stats(at('2026-08-01')).totalWords).toBe(3)
+    })
   })
 
   it('handles 1000 rows quickly (PLAN §13 M4: <50 ms search)', () => {

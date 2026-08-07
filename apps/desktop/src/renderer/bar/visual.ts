@@ -125,6 +125,17 @@ export interface BarVisual {
   ariaLabel: string
   /** True while the state is one an assistive tech should be told about. */
   announce: boolean
+  /**
+   * A meeting is being recorded right now (PLAN §18.2).
+   *
+   * Rendered as a steady red dot rather than folded into `shape`, because it
+   * is orthogonal to what the pill is doing: dictation still owns the pill and
+   * cycles through its own states, while this stays lit underneath the whole
+   * time. It is also the only always-visible sign that a recording is running,
+   * which makes it a consent surface rather than decoration — the pill is
+   * forced visible while it is set.
+   */
+  recording: boolean
 }
 
 /**
@@ -133,10 +144,10 @@ export interface BarVisual {
  * `hovered` is the only renderer-local input: hovering widens the capsule to
  * fit the cancel / mic / Hub controls without changing what it is showing.
  */
-export function describeBar(event: DictationEvent, hovered = false): BarVisual {
+export function describeBar(event: DictationEvent, hovered = false, recording = false): BarVisual {
   const base = describeBase(event)
   const width = clampWidth(base.width + (hovered ? BAR.hoverWidth : 0))
-  return { ...base, width, height: hovered ? BAR.hoverHeight : BAR.height }
+  return { ...base, width, height: hovered ? BAR.hoverHeight : BAR.height, recording }
 }
 
 function describeBase(event: DictationEvent): BarVisual {
@@ -154,6 +165,7 @@ function describeBase(event: DictationEvent): BarVisual {
         command: false,
         ariaLabel: 'Murmur is idle. Hold your dictation key to speak.',
         announce: false,
+        recording: false,
       }
     case 'listening':
       return {
@@ -172,6 +184,7 @@ function describeBase(event: DictationEvent): BarVisual {
             ? 'Listening, hands-free mode'
             : 'Listening',
         announce: true,
+        recording: false,
       }
     case 'processing':
       return {
@@ -190,6 +203,7 @@ function describeBase(event: DictationEvent): BarVisual {
             ? 'Polishing your words'
             : 'Transcribing',
         announce: true,
+        recording: false,
       }
     case 'inserting':
       return {
@@ -204,6 +218,7 @@ function describeBase(event: DictationEvent): BarVisual {
         command: false,
         ariaLabel: 'Inserting text',
         announce: true,
+        recording: false,
       }
     case 'inserted':
       return {
@@ -218,6 +233,7 @@ function describeBase(event: DictationEvent): BarVisual {
         command: false,
         ariaLabel: `Inserted ${event.charCount} characters`,
         announce: true,
+        recording: false,
       }
     case 'error':
       return {
@@ -232,6 +248,7 @@ function describeBase(event: DictationEvent): BarVisual {
         command: false,
         ariaLabel: event.message,
         announce: true,
+        recording: false,
       }
   }
 }
@@ -307,7 +324,16 @@ export function holdMsFor(event: DictationEvent): number {
  * so a Bar that is visible for any other reason (a stale window, a dev build
  * with the window forced open) still respects the user's choice.
  */
-export function isBarVisible(mode: BarVisibility, event: DictationEvent): boolean {
+export function isBarVisible(
+  mode: BarVisibility,
+  event: DictationEvent,
+  recording = false,
+): boolean {
+  // A recording in progress overrides every visibility preference, including
+  // Hidden. Someone else is being recorded, and the person who started it must
+  // be able to see that at a glance without opening anything — a silent
+  // recorder with no indicator is the behaviour this feature must never have.
+  if (recording) return true
   switch (mode) {
     case 'always':
       return true

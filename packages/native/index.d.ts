@@ -71,6 +71,8 @@ export interface MurmurNative {
   insertTextViaAccessibility(text: string): NativeActionResult
   /** The focused element's selection; ok:true with empty text = no selection. */
   getSelectedText(): { ok: boolean; text?: string; error?: string }
+  /** Frontmost window title of a given pid; macOS-only, meeting detection. */
+  getWindowTitle?(pid: number): { ok: boolean; title?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null
   isSecureInputActive(): boolean
   /** Windows UIPI: frontmost app elevated while Murmur is not. */

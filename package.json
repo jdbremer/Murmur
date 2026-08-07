@@ -3,7 +3,7 @@
   "version": "0.1.6",
   "private": true,
   "license": "MIT",
-  "description": "Local-first dictation for macOS — hold a key, speak, release, polished text appears.",
+  "description": "Local-first dictation for macOS \u2014 hold a key, speak, release, polished text appears.",
   "type": "commonjs",
   "engines": {
     "node": ">=22.12.0"
@@ -23,7 +23,8 @@
     "format:check": "prettier --check .",
     "native:build": "npm --prefix packages/native run build",
     "agent:server": "node scripts/agent/server.mjs",
-    "agent": "node scripts/agent/cli.mjs"
+    "agent": "node scripts/agent/cli.mjs",
+    "audio-tap:build": "bash scripts/sidecars/build-audio-tap.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

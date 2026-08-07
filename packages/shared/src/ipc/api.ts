@@ -60,10 +60,32 @@ export interface MurmurApi {
     stopHandsFree(): Promise<void>
   }
 
+  /** Long-form meeting capture (PLAN §18.2). Inert unless enabled in settings. */
+  readonly meetings: {
+    start(request: Req<'meeting.start'>): Promise<Res<'meeting.start'>>
+    stop(): Promise<Res<'meeting.stop'>>
+    /** Current state, for a window that opened mid-meeting. */
+    getState(): Promise<Res<'meeting.state'>>
+    subscribe(listener: (event: Evt<'meeting.changed'>) => void): Unsubscribe
+    /** Answer a detection prompt. */
+    respondToOffer(response: Req<'meeting.respondToOffer'>): Promise<Res<'meeting.respondToOffer'>>
+    list(): Promise<Res<'meeting.list'>>
+    /** Removes the row *and* the transcript file. */
+    delete(request: Req<'meeting.delete'>): Promise<Res<'meeting.delete'>>
+    reveal(request: Req<'meeting.reveal'>): Promise<void>
+    openFolder(): Promise<void>
+    /** Whether the far side can be captured, and whether we are allowed to. */
+    systemAudioAccess(): Promise<Res<'meeting.systemAudioAccess'>>
+    /** Attempting a tap *is* the request — macOS has no way to merely ask. */
+    requestSystemAudio(): Promise<Res<'meeting.requestSystemAudio'>>
+  }
+
   /** Only the hidden capture renderer uses this half of the bridge. */
   readonly audio: {
     /** Capture renderer only: one ~100 ms chunk of 16 kHz mono Float32 PCM. */
     sendFrame(frame: Msg<'audio.frame'>): void
+    /** Capture renderer only: the Windows loopback stream, when running. */
+    sendSystemFrame(frame: Msg<'audio.systemFrame'>): void
     /** Capture renderer only. */
     reportStatus(status: Msg<'audio.status'>): void
     /** Capture renderer only: the ~30 Hz meter main relays as `audio.level`. */
@@ -110,6 +132,8 @@ export interface MurmurApi {
     remove(request: Req<'history.delete'>): Promise<void>
     clear(): Promise<void>
     stats(): Promise<Res<'history.stats'>>
+    /** Fires after every dictation, carrying the new lifetime totals. */
+    subscribe(listener: (stats: Evt<'history.changed'>) => void): Unsubscribe
   }
 
   readonly dictionary: {
@@ -140,6 +164,8 @@ export interface MurmurApi {
     warmMic(): Promise<void>
     /** Push synthetic PCM frames into the dictation loop (agent mic sim). */
     injectPcm(request?: Req<'debug.injectPcm'>): Promise<Res<'debug.injectPcm'>>
+    /** Push synthetic PCM into a meeting's system-audio track. */
+    injectSystemPcm(request?: Req<'debug.injectSystemPcm'>): Promise<Res<'debug.injectSystemPcm'>>
     /** Machine-readable status for the agent loop. */
     snapshot(): Promise<Res<'debug.snapshot'>>
     /** Paste a fixed phrase via the real injector (Notepad G5). */

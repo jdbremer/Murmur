@@ -190,7 +190,13 @@ export type AudioCaptureStatus = z.infer<typeof AudioCaptureStatusSchema>
  * precisely what pre-roll exists to prevent.
  */
 export const AudioCommandSchema = z.object({
-  action: z.enum(['warm', 'start', 'stop', 'release']),
+  /**
+   * `systemStart` / `systemStop` drive Windows loopback capture for meetings
+   * (PLAN §18.2) — a second, independent stream in the same hidden window.
+   * macOS captures system audio through a helper process instead and never
+   * sends these.
+   */
+  action: z.enum(['warm', 'start', 'stop', 'release', 'systemStart', 'systemStop']),
   /** `MediaDeviceInfo.deviceId`; `null` = system default input. */
   deviceId: z.string().min(1).nullable().default(null),
 })

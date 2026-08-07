@@ -37,6 +37,9 @@ function createStub(reason) {
     getSelectedText() {
       return { ok: false, error: reason }
     },
+    getWindowTitle() {
+      return { ok: false, error: reason }
+    },
     getFrontmostApp() {
       return null
     },
@@ -82,6 +85,7 @@ function fromBinding(binding) {
     sendPasteShortcut: adopt(binding, stub, 'sendPasteShortcut'),
     insertTextViaAccessibility: adopt(binding, stub, 'insertTextViaAccessibility'),
     getSelectedText: adopt(binding, stub, 'getSelectedText'),
+    getWindowTitle: adopt(binding, stub, 'getWindowTitle'),
     getFrontmostApp: adopt(binding, stub, 'getFrontmostApp'),
     isSecureInputActive: adopt(binding, stub, 'isSecureInputActive'),
     isForegroundElevated: adopt(binding, stub, 'isForegroundElevated'),

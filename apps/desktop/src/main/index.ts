@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
-import { app, ipcMain, Menu } from 'electron'
+import { app, ipcMain, Menu, Notification, powerMonitor } from 'electron'
 
 import {
   createMainIpc,
@@ -30,9 +30,21 @@ import { databasePath, openDatabase } from './store/db'
 import {
   DictationsRepository,
   DictionaryRepository,
+  MeetingsRepository,
   StyleRepository,
   applyReplacements,
 } from './store/repositories'
+import { FrameBus } from './audio/frame-bus'
+import {
+  NativeSystemAudio,
+  UnsupportedSystemAudio,
+  systemAudioBinary,
+  type SystemAudioSource,
+} from './audio/system-capture'
+import { LoopbackSystemAudio } from './audio/loopback-capture'
+import { MeetingRecorder } from './meeting/recorder'
+import { MeetingWatcher, listAudioProcessesVia } from './meeting/watcher'
+import { TranscribeQueue } from './engines/stt-queue'
 import { SettingsStore } from './store/settings-store'
 import { TrayController } from './tray'
 import { WindowManager } from './windows/manager'
@@ -154,6 +166,7 @@ async function bootstrap(): Promise<void> {
   const dictations = new DictationsRepository(database.db)
   const dictionary = new DictionaryRepository(database.db)
   const style = new StyleRepository(database.db)
+  const meetingStore = new MeetingsRepository(database.db)
 
   // Retention sweep at boot (PLAN §9). Cheap, and it means a user who lowers
   // the window sees it take effect without waiting for a background job.
@@ -241,6 +254,74 @@ async function bootstrap(): Promise<void> {
     },
   })
 
+  // -- meetings (PLAN §18.2) -----------------------------------------------
+  // Built even when the feature is off: constructing a recorder starts no
+  // timers, spawns no subprocess and takes no lease. Everything it can do is
+  // gated behind `settings.meetings.enabled`, which is false by default.
+
+  const frames = new FrameBus()
+
+  const tapBinary = systemAudioBinary(
+    isDev ? join(app.getAppPath(), 'resources') : process.resourcesPath,
+  )
+  const loopbackAudio =
+    process.platform === 'win32'
+      ? new LoopbackSystemAudio({
+          ipc,
+          target: () => {
+            const window = windows.audio()
+            return window.isDestroyed() ? null : window.webContents
+          },
+        })
+      : null
+
+  const systemAudio: SystemAudioSource =
+    process.platform === 'darwin'
+      ? new NativeSystemAudio({
+          binary: tapBinary,
+          statusPath: join(userDataPath, 'system-audio-permission'),
+        })
+      : (loopbackAudio ??
+        new UnsupportedSystemAudio(
+          'Capturing other participants needs macOS 14.2 or Windows; meetings record your microphone.',
+        ))
+
+  // One queue in front of the engine. Not an optimisation: whisper-server
+  // serialises internally and the ONNX host does not serialise at all, so
+  // overlapping calls are a correctness problem, not just a slow one.
+  // `listening` is the important one: it starts at hotkey-*down*, seconds
+  // before the transcription request actually arrives, which is exactly the
+  // warning the queue needs to stop handing the engine meeting work.
+  // `inserted` and `error` are terminal display states — holding background
+  // work for those would stall the queue until the next dictation.
+  const sttQueue = new TranscribeQueue({
+    isBusy: () => {
+      const state = machine.getState().state
+      return state === 'listening' || state === 'processing' || state === 'inserting'
+    },
+  })
+
+  const meetingsFolder = join(app.getPath('documents'), 'Murmur Meetings')
+
+  const meetings = new MeetingRecorder({
+    capture: audio,
+    frames,
+    systemAudio,
+    queue: sttQueue,
+    stt: () => engines.stt(),
+    settings: () => settings.get(),
+    defaultFolder: meetingsFolder,
+    persist: (record) => {
+      meetingStore.save(record)
+    },
+  })
+
+  const watcher = new MeetingWatcher({
+    recorder: meetings,
+    settings: () => settings.get(),
+    listProcesses: listAudioProcessesVia(tapBinary),
+  })
+
   const hotkeys = new HotkeyBridge({
     native,
     intents: {
@@ -268,6 +349,12 @@ async function bootstrap(): Promise<void> {
     dictations,
     dictionary,
     style,
+    frames,
+    meetings,
+    meetingStore,
+    systemAudio,
+    loopbackAudio,
+    meetingsFolder,
     isDev,
     quit,
   })
@@ -291,6 +378,18 @@ async function bootstrap(): Promise<void> {
     },
     isPaused: () => paused,
     quit,
+    meetings: {
+      enabled: () => settings.get().meetings.enabled,
+      recording: () => meetings.recording,
+      start: () => {
+        void meetings.start('', null).catch((error: unknown) => {
+          log.error(`could not start the meeting: ${String(error)}`)
+        })
+      },
+      stop: () => {
+        void meetings.stop()
+      },
+    },
   })
   // The tray is the app's only permanent handle, so its absence must never be
   // silent: log where macOS actually placed it (a crowded menu bar on a
@@ -303,12 +402,76 @@ async function bootstrap(): Promise<void> {
     log.warn(`tray failed to start: ${cause instanceof Error ? cause.message : String(cause)}`)
   }
 
+  // No-op unless the user has turned meeting detection on.
+  watcher.sync()
+
+  // Sleeping mid-meeting must not look like nobody spoke for two hours: mark
+  // the break in the transcript and rebuild the tap on the way back. Nothing
+  // else in the app cares about power state, which is why this is the only
+  // powerMonitor use.
+  powerMonitor.on('suspend', () => meetings.suspend())
+  powerMonitor.on('resume', () => meetings.resume())
+
   // -- fan-out -------------------------------------------------------------
 
   settings.on('changed', (next: Settings) => {
     ipc.broadcast(windows.allWebContents(), 'settings.changed', next)
     applyBarVisibility(next, machine.getState())
     hotApply(next)
+    // Turning detection off has to actually tear the timer down, not just make
+    // its result unused — "off" means inert.
+    watcher.sync()
+  })
+
+  // A detected meeting has to reach someone who may not have the Hub open —
+  // and it must *ask*, never just start. Other people are in the room and have
+  // not agreed to anything.
+  let offerNotification: Notification | null = null
+  const closeOffer = (): void => {
+    offerNotification?.close()
+    offerNotification = null
+  }
+
+  meetings.on('changed', (event) => {
+    ipc.broadcast(windows.uiWebContents(), 'meeting.changed', event)
+    applyBarVisibility(settings.get(), machine.getState())
+
+    if (event.state === 'offered' && !offerNotification && Notification.isSupported()) {
+      const bundleId = event.appBundleId
+      const notification = new Notification({
+        title: 'Record this meeting?',
+        body: `Murmur can transcribe “${event.title}” as it happens.`,
+        actions: [{ type: 'button', text: 'Record' }],
+        closeButtonText: 'Not now',
+        silent: true,
+      })
+      notification.on('action', () => {
+        void meetings.start(event.title, bundleId).catch((error: unknown) => {
+          log.error(`could not start the offered meeting: ${String(error)}`)
+        })
+      })
+      // Dismissing is a "no": stay quiet about this app for a while rather
+      // than asking again on the next poll.
+      notification.on('close', () => {
+        if (meetings.state().state === 'offered') {
+          meetings.clearOffer()
+          watcher.declined(bundleId)
+        }
+        offerNotification = null
+      })
+      notification.show()
+      offerNotification = notification
+    } else if (event.state !== 'offered') {
+      closeOffer()
+    }
+    // The tray rebuilds its whole menu on refresh, and until now was only
+    // refreshed by start() and the pause toggle — so a recording state would
+    // never have appeared in it.
+    tray.refresh()
+  })
+
+  meetings.on('completed', () => {
+    watcher.declined(null)
   })
 
   machine.on('event', (event: DictationEvent) => {
@@ -330,6 +493,19 @@ async function bootstrap(): Promise<void> {
     ipc.broadcast(windows.uiWebContents(), 'engines.changed', status)
   })
 
+  // The Hub reads its stats when the Home section mounts, so a window left open
+  // on Home while the user dictates would otherwise show the same numbers all
+  // day. Recomputed from the store rather than derived from the record here:
+  // the counters are the source of truth, and reading them back is a couple of
+  // indexed lookups.
+  orchestrator.on('completed', () => {
+    try {
+      ipc.broadcast(windows.uiWebContents(), 'history.changed', dictations.stats())
+    } catch (error) {
+      log.error('could not broadcast the updated history stats:', error)
+    }
+  })
+
   models.on('progress', (progress) => {
     ipc.broadcast(windows.uiWebContents(), 'models.downloadProgress', progress)
     // A finished download may be the model that was selected but missing.
@@ -342,6 +518,14 @@ async function bootstrap(): Promise<void> {
     if (barHideTimer) {
       clearTimeout(barHideTimer)
       barHideTimer = null
+    }
+    // A live recording overrides every visibility preference, Hidden included.
+    // The pill's red dot is the only always-visible sign that other people are
+    // being recorded; letting a setting suppress it would make the app capable
+    // of recording a room with no indication at all.
+    if (meetings.recording) {
+      windows.showBar()
+      return
     }
     switch (current.barVisibility) {
       case 'always':
@@ -520,6 +704,13 @@ async function bootstrap(): Promise<void> {
     tray.destroy()
     escape.dispose()
     hotkeys.stop()
+    // Before the engines: a meeting in progress has to finish transcribing
+    // what it already captured and close its file. Tearing the engines down
+    // first would strand the last minute of a recording the user thought was
+    // being saved.
+    watcher.dispose()
+    await meetings.dispose().catch((error: unknown) => log.error('meeting teardown failed:', error))
+    sttQueue.clear('Murmur is shutting down')
     orchestrator.dispose()
     injector.dispose()
     audio.dispose()

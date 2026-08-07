@@ -1,4 +1,5 @@
-export type SectionId = 'home' | 'dictionary' | 'style' | 'models' | 'settings' | 'help'
+export type SectionId =
+  'home' | 'dictionary' | 'style' | 'meetings' | 'models' | 'settings' | 'help'
 
 interface SectionMeta {
   id: SectionId
@@ -22,6 +23,13 @@ const SECTIONS: readonly SectionMeta[] = [
     id: 'style',
     label: 'Style',
     icon: 'M12 4c4.4 0 8 3.1 8 7 0 3.3-2.7 5-5 5h-1.5a1.5 1.5 0 0 0 0 3H14c0 .6-.9 1-2 1-4.4 0-8-3.6-8-8s3.6-8 8-8z',
+  },
+  {
+    id: 'meetings',
+    label: 'Meetings',
+    // A waveform inside a rounded frame: recording, not a microphone — the mic
+    // glyph already means dictation everywhere else in the app.
+    icon: 'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 10v4M12 8v8M16 11v2',
   },
   {
     id: 'models',

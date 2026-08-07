@@ -48,8 +48,23 @@ const api: MurmurApi = {
     stopHandsFree: () => ipc.invoke('dictation.stopHandsFree'),
   },
 
+  meetings: {
+    start: (request) => ipc.invoke('meeting.start', request),
+    stop: () => ipc.invoke('meeting.stop'),
+    getState: () => ipc.invoke('meeting.state'),
+    subscribe: (listener) => ipc.on('meeting.changed', listener),
+    respondToOffer: (response) => ipc.invoke('meeting.respondToOffer', response),
+    list: () => ipc.invoke('meeting.list'),
+    delete: (request) => ipc.invoke('meeting.delete', request),
+    reveal: (request) => ipc.invoke('meeting.reveal', request),
+    openFolder: () => ipc.invoke('meeting.openFolder'),
+    systemAudioAccess: () => ipc.invoke('meeting.systemAudioAccess'),
+    requestSystemAudio: () => ipc.invoke('meeting.requestSystemAudio'),
+  },
+
   audio: {
     sendFrame: (frame) => ipc.send('audio.frame', frame),
+    sendSystemFrame: (frame) => ipc.send('audio.systemFrame', frame),
     reportStatus: (status) => ipc.send('audio.status', status),
     reportLevel: (level) => ipc.send('audio.meter', level),
     reportDevices: (devices) => ipc.send('audio.devices', devices),
@@ -80,6 +95,7 @@ const api: MurmurApi = {
     remove: (request) => ipc.invoke('history.delete', request),
     clear: () => ipc.invoke('history.clear'),
     stats: () => ipc.invoke('history.stats'),
+    subscribe: (listener) => ipc.on('history.changed', listener),
   },
 
   dictionary: {
@@ -111,6 +127,7 @@ const api: MurmurApi = {
     simulateHotkey: (request) => ipc.invoke('debug.simulateHotkey', request),
     warmMic: () => ipc.invoke('debug.warmMic'),
     injectPcm: (request) => ipc.invoke('debug.injectPcm', request ?? {}),
+    injectSystemPcm: (request) => ipc.invoke('debug.injectSystemPcm', request ?? {}),
     snapshot: () => ipc.invoke('debug.snapshot'),
     insertText: (request) => ipc.invoke('debug.insertText', request ?? {}),
   },

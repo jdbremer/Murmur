@@ -3,7 +3,7 @@
   "version": "0.1.6",
   "private": true,
   "license": "MIT",
-  "description": "Murmur desktop shell — Electron main process, preload bridge and the Hub / Bar / audio-capture renderers.",
+  "description": "Murmur desktop shell \u2014 Electron main process, preload bridge and the Hub / Bar / audio-capture renderers.",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -12,10 +12,10 @@
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "test": "vitest run",
     "sidecars:dir": "node ../../scripts/sidecars/check.mjs",
-    "pack:mac": "npm run sidecars:dir && electron-vite build && electron-builder --mac --config electron-builder.yml --publish never",
+    "pack:mac": "npm run sidecars:dir && bash ../../scripts/sidecars/build-audio-tap.sh && electron-vite build && electron-builder --mac --config electron-builder.yml --publish never",
     "pack:win": "npm run sidecars:dir && electron-vite build && electron-builder --win --config electron-builder.yml --publish never",
     "pack:linux": "npm run sidecars:dir && electron-vite build && electron-builder --linux --config electron-builder.yml --publish never",
-    "release:mac": "npm run sidecars:dir && electron-vite build && electron-builder --mac --config electron-builder.yml --publish always",
+    "release:mac": "npm run sidecars:dir && bash ../../scripts/sidecars/build-audio-tap.sh && electron-vite build && electron-builder --mac --config electron-builder.yml --publish always",
     "release:win": "npm run sidecars:dir && electron-vite build && electron-builder --win --config electron-builder.yml --publish always",
     "release:linux": "npm run sidecars:dir && electron-vite build && electron-builder --linux --config electron-builder.yml --publish always"
   },
