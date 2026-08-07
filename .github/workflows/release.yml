@@ -8,8 +8,10 @@
 # and `@murmur/native` are compiled per platform — there is no honest way to
 # produce a Windows build from a Mac.
 #
-# Linux is absent on purpose: `@murmur/native` is darwin + win32 only, so a
-# Linux artifact would be a UI that can never dictate.
+# Linux joined the matrix with the X11 backend: `@murmur/native` now builds on
+# all three, so a Linux artifact is a UI that can actually dictate. It ships
+# from ubuntu-24.04 rather than ubuntu-latest — see the comment on that entry
+# for why the runner version is the oldest glibc it can run on.
 #
 # The build jobs do **not** publish. They upload artifacts, and one final job
 # assembles the release. Letting each platform publish for itself produced
