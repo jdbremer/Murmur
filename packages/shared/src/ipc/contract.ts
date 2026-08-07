@@ -14,6 +14,7 @@ import {
   DictionaryEntryPatchSchema,
   DictionaryEntrySchema,
 } from '../domain/dictionary'
+import { SnippetDraftSchema, SnippetPatchSchema, SnippetSchema } from '../domain/snippet'
 import { EnginesStatusSchema } from '../domain/engine'
 import {
   MeetingEventSchema,
@@ -265,6 +266,15 @@ export const invokeContract = {
     response: DictionaryEntrySchema,
   },
   'dictionary.delete': { request: IdRequestSchema, response: z.void() },
+
+  // --- snippets (PLAN §2.2.2) --------------------------------------------
+  'snippets.list': { request: z.void(), response: z.array(SnippetSchema) },
+  'snippets.create': { request: SnippetDraftSchema, response: SnippetSchema },
+  'snippets.update': {
+    request: z.object({ id: z.string().min(1), patch: SnippetPatchSchema }),
+    response: SnippetSchema,
+  },
+  'snippets.delete': { request: IdRequestSchema, response: z.void() },
 
   // --- style (PLAN §2.2.3) -----------------------------------------------
   'style.get': { request: z.void(), response: StyleProfileSetSchema },

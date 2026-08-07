@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events'
 
-import type {
-  AppCategory,
-  DictationErrorCode,
-  DictationRecord,
-  DictionaryEntry,
-  PolishingLevel,
-  StyleProfile,
-  Transcript,
+import {
+  expandSnippets,
+  type AppCategory,
+  type DictationErrorCode,
+  type DictationRecord,
+  type DictionaryEntry,
+  type PolishingLevel,
+  type Snippet,
+  type StyleProfile,
+  type Transcript,
 } from '@murmur/shared'
 
 import { AUDIO, TIMEOUTS } from '../config'
@@ -25,6 +27,7 @@ import {
 } from '../engines/polish/prompt'
 import type { PolishEngine, SttEngine } from '../engines/types'
 import { categoryForBundleId, isMessagingApp } from './app-category'
+import { applySentenceCase } from './sentence-case'
 import { stripTrailingPeriod } from './trailing-period'
 import type { InjectionResult, TextInjector } from './injector'
 import type { DictationStateMachine } from './state-machine'
@@ -80,6 +83,12 @@ export interface OrchestratorDeps {
    * polishing, so the polish prompt sees the corrected spelling.
    */
   applyDictionary(text: string): string
+  /**
+   * Enabled voice shortcuts. Expanded *after* polishing (domain/snippet.ts), so
+   * unlike the dictionary this is a list rather than a transform — the
+   * orchestrator owns where it runs.
+   */
+  snippets(): readonly Snippet[]
   /** Tone profile for an app category. */
   styleFor(category: AppCategory): StyleProfile
   /** Frontmost app at hotkey-down. `null` on non-macOS or when unknown. */
@@ -91,6 +100,12 @@ export interface OrchestratorDeps {
    * instruction and the result replaces the selection.
    */
   selection?(): string | null
+  /**
+   * The few characters before the insertion point at hotkey-down, or `null`
+   * when unreadable. Feeds sentence-case.ts, which decides whether the text is
+   * continuing an existing sentence and should not arrive capitalised.
+   */
+  textBeforeCursor?(): string | null
   /** Persists a finished dictation. Failures here must not break the loop. */
   persist(record: Omit<DictationRecord, 'id'>): void
   /** High-rate mic level for the Bar's waveform. */
@@ -242,6 +257,10 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       sttModelId: settings.sttModelId ?? status.modelId ?? 'unknown',
       mode: selection ? 'command' : 'dictate',
       selection,
+      // Read at hotkey-down for the same reason as the frontmost app: by the
+      // time text is ready the cursor may have moved, and the capitalisation
+      // should match where the user was speaking into.
+      textBefore: this.#deps.textBeforeCursor?.() ?? null,
     }
 
     this.#buffer.clear()
@@ -521,7 +540,17 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     // one: "ok." is two words, so it skips polishing entirely (POLISH
     // .skipWordCount) — and a bare "ok." is the single most common message
     // this rule exists for.
-    const finalText = stripTrailingPeriod(polishedText ?? rawText, {
+    // Snippets expand after polishing so the model never sees the expansion —
+    // a URL or an address has a right answer and must arrive verbatim. Before
+    // the trailing-period rule, so a snippet ending in a full stop is judged on
+    // what actually lands in the message.
+    const expanded = expandSnippets(polishedText ?? rawText, this.#deps.snippets())
+
+    // Last, so it judges the text that actually lands — after a snippet may
+    // have replaced the opening words entirely.
+    const cased = applySentenceCase(expanded, context.textBefore)
+
+    const finalText = stripTrailingPeriod(cased, {
       messaging: isMessagingApp(context.frontmostBundleId),
       formality: this.#deps.styleFor(context.category).formality,
     })
@@ -838,6 +867,8 @@ interface UtteranceContext {
   /** `command` when text was selected at hotkey-down (PLAN §18.1). */
   mode: 'dictate' | 'command'
   selection: string | null
+  /** Text before the cursor at hotkey-down; `null` when it could not be read. */
+  textBefore: string | null
 }
 
 export class StageTimeoutError extends Error {

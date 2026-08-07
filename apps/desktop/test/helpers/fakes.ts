@@ -4,6 +4,7 @@ import {
   EngineStatusSchema,
   StyleProfileSchema,
   type DictionaryEntry,
+  type Snippet,
   type EngineStatus,
   type StyleProfile,
   type Transcript,
@@ -131,6 +132,8 @@ export interface OrchestratorHarness {
   persisted: Parameters<OrchestratorDeps['persist']>[0][]
   events: { state: string; code?: string }[]
   insertedText: string[]
+  /** Mutable: push a Snippet and the next utterance expands it. */
+  snippets: Snippet[]
   /** Set to make `persist` throw, so the "history write must not break" path runs. */
   persistThrows: { current: boolean }
 }
@@ -164,6 +167,7 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
   })
 
   const dictionary: DictionaryEntry[] = []
+  const snippets: Snippet[] = []
   const profile: StyleProfile = StyleProfileSchema.parse({ category: 'work' })
 
   const deps: OrchestratorDeps = {
@@ -181,6 +185,8 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
     settings: () => settings,
     dictionary: () => dictionary,
     applyDictionary: (text) => text,
+    // Mutable so a test can push a snippet and re-run an utterance.
+    snippets: () => snippets,
     styleFor: () => profile,
     frontmostApp: () => ({ bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' }),
     persist: (record) => {
@@ -202,6 +208,7 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
     persisted,
     events,
     insertedText,
+    snippets,
     persistThrows,
   }
 }

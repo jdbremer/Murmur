@@ -647,6 +647,139 @@ Napi::Value GetSelectedText(const Napi::CallbackInfo& info) {
   return out;
 }
 
+/**
+ * The few characters immediately before the insertion point (PLAN §18.1).
+ *
+ * Exists so dictation can match the capitalisation of what it is landing in:
+ * text typed into the middle of an existing sentence should not arrive with a
+ * capital. `sentence-case.ts` makes that decision; this only supplies the
+ * evidence.
+ *
+ * A *parameterized* attribute for a short range rather than reading
+ * kAXValueAttribute and slicing it. The focused element may hold an entire
+ * document — a whole file in an editor, a long email — and copying megabytes
+ * across the accessibility bridge at hotkey-down, on the JS thread, to look at
+ * three characters would be a latency bug of our own making.
+ *
+ * Privacy: the range is bounded to `maxChars` (the caller asks for a handful),
+ * it is never logged, and it goes nowhere except the pure function that
+ * decides one boolean. That is a deliberately smaller read than
+ * getSelectedText, which the user has explicitly selected.
+ */
+Napi::Value GetTextBeforeCursor(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object out = Napi::Object::New(env);
+
+  int maxChars = 8;
+  if (info.Length() > 0 && info[0].IsNumber()) {
+    maxChars = info[0].As<Napi::Number>().Int32Value();
+  }
+  if (maxChars <= 0 || maxChars > 256) maxChars = 8;
+
+  if (!AXIsProcessTrusted()) {
+    out.Set("ok", Napi::Boolean::New(env, false));
+    out.Set("error", Napi::String::New(env, "Accessibility permission is not granted"));
+    return out;
+  }
+
+  @autoreleasepool {
+    AXUIElementRef system = AXUIElementCreateSystemWide();
+    if (system == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "no system-wide accessibility element"));
+      return out;
+    }
+    // Same 100 ms budget as GetSelectedText: this runs at hotkey-down on the
+    // JS thread, and an unresponsive target app must not stall the dictation.
+    AXUIElementSetMessagingTimeout(system, 0.1f);
+
+    CFTypeRef focusedApp = nullptr;
+    AXError error =
+        AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute, &focusedApp);
+    if (error != kAXErrorSuccess || focusedApp == nullptr) {
+      CFRelease(system);
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "could not find the focused application"));
+      return out;
+    }
+
+    CFTypeRef focusedElement = nullptr;
+    error = AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(focusedApp),
+                                          kAXFocusedUIElementAttribute, &focusedElement);
+    CFRelease(focusedApp);
+    CFRelease(system);
+
+    if (error != kAXErrorSuccess || focusedElement == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "no focused element"));
+      return out;
+    }
+
+    AXUIElementRef element = static_cast<AXUIElementRef>(focusedElement);
+
+    CFTypeRef rangeValue = nullptr;
+    error = AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute, &rangeValue);
+    if (error != kAXErrorSuccess || rangeValue == nullptr) {
+      CFRelease(element);
+      // Not an error the user can act on: plenty of controls have no text at
+      // all. The caller treats a failure as "unknown" and changes nothing.
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "focused element has no insertion point"));
+      return out;
+    }
+
+    CFRange selection = CFRangeMake(0, 0);
+    const bool gotRange = AXValueGetValue(static_cast<AXValueRef>(rangeValue),
+                                          kAXValueTypeCFRange, &selection);
+    CFRelease(rangeValue);
+
+    if (!gotRange) {
+      CFRelease(element);
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "could not read the insertion point"));
+      return out;
+    }
+
+    // At offset 0 there is nothing before the cursor — an empty field, or the
+    // very top of one. Reported as success with empty text, which is a real
+    // answer ("start a sentence") rather than a failure ("do not touch").
+    if (selection.location <= 0) {
+      CFRelease(element);
+      out.Set("ok", Napi::Boolean::New(env, true));
+      out.Set("text", Napi::String::New(env, ""));
+      return out;
+    }
+
+    const CFIndex wanted = selection.location < maxChars ? selection.location : maxChars;
+    CFRange before = CFRangeMake(selection.location - wanted, wanted);
+
+    AXValueRef beforeValue = AXValueCreate(kAXValueTypeCFRange, &before);
+    CFTypeRef text = nullptr;
+    error = AXUIElementCopyParameterizedAttributeValue(
+        element, kAXStringForRangeParameterizedAttribute, beforeValue, &text);
+    if (beforeValue != nullptr) CFRelease(beforeValue);
+    CFRelease(element);
+
+    if (error != kAXErrorSuccess || text == nullptr ||
+        CFGetTypeID(text) != CFStringGetTypeID()) {
+      if (text != nullptr) CFRelease(text);
+      // Many elements expose a selected range but not the string-for-range
+      // parameterized attribute. Unknown, so the caller leaves the text alone.
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "focused element cannot report text by range"));
+      return out;
+    }
+
+    NSString* value = (__bridge NSString*)text;
+    const char* utf8 = value.UTF8String;
+    out.Set("ok", Napi::Boolean::New(env, true));
+    out.Set("text", Napi::String::New(env, utf8 != nullptr ? utf8 : ""));
+    CFRelease(text);
+  }
+
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // JS: environment queries
 // ---------------------------------------------------------------------------
@@ -886,6 +1019,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("sendPasteShortcut", Napi::Function::New(env, SendPasteShortcut));
   exports.Set("insertTextViaAccessibility", Napi::Function::New(env, InsertTextViaAccessibility));
   exports.Set("getSelectedText", Napi::Function::New(env, GetSelectedText));
+  exports.Set("getTextBeforeCursor", Napi::Function::New(env, GetTextBeforeCursor));
   exports.Set("getWindowTitle", Napi::Function::New(env, GetWindowTitle));
 
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));

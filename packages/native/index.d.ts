@@ -71,6 +71,13 @@ export interface MurmurNative {
   insertTextViaAccessibility(text: string): NativeActionResult
   /** The focused element's selection; ok:true with empty text = no selection. */
   getSelectedText(): { ok: boolean; text?: string; error?: string }
+  /**
+   * Up to `maxChars` of text immediately before the insertion point, for
+   * matching the capitalisation of what the cursor sits in. `ok:false` means
+   * "unknown" — a control with no text, or a platform without the API — and
+   * callers must change nothing rather than guess.
+   */
+  getTextBeforeCursor(maxChars?: number): { ok: boolean; text?: string; error?: string }
   /** Frontmost window title of a given pid; macOS-only, meeting detection. */
   getWindowTitle?(pid: number): { ok: boolean; title?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null

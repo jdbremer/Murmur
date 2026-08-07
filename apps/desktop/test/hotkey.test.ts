@@ -46,6 +46,7 @@ function makeNative(): MurmurNative {
     releaseHotkeyLatch: () => undefined,
     hotkeyPhysicallyDown: () => physicallyDown.current,
     sendPasteShortcut: () => ({ ok: false, error: 'test' }),
+    getTextBeforeCursor: () => ({ ok: false, error: 'test' }),
     insertTextViaAccessibility: () => ({ ok: false, error: 'test' }),
     getSelectedText: () => ({ ok: true, text: '' }),
     getFrontmostApp: () => null,

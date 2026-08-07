@@ -13,6 +13,7 @@ import type { SettingsStore } from '../store/settings-store'
 import type {
   DictationsRepository,
   DictionaryRepository,
+  SnippetsRepository,
   MeetingsRepository,
   StyleRepository,
 } from '../store/repositories'
@@ -70,6 +71,7 @@ export interface IpcContext {
   injector: Pick<TextInjector, 'insert'>
   dictations: DictationsRepository
   dictionary: DictionaryRepository
+  snippets: SnippetsRepository
   style: StyleRepository
   /** Mic frame fan-out — dictation and a meeting can both be listening. */
   frames: FrameBus
@@ -223,6 +225,14 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   ipc.handle('dictionary.update', ({ id, patch }) => context.dictionary.update(id, patch))
   ipc.handle('dictionary.delete', ({ id }) => {
     context.dictionary.delete(id)
+  })
+
+  // -- snippets ------------------------------------------------------------
+  ipc.handle('snippets.list', () => context.snippets.list())
+  ipc.handle('snippets.create', (draft) => context.snippets.create(draft))
+  ipc.handle('snippets.update', ({ id, patch }) => context.snippets.update(id, patch))
+  ipc.handle('snippets.delete', ({ id }) => {
+    context.snippets.delete(id)
   })
 
   // -- style ---------------------------------------------------------------

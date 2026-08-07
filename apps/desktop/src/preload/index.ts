@@ -105,6 +105,13 @@ const api: MurmurApi = {
     remove: (request) => ipc.invoke('dictionary.delete', request),
   },
 
+  snippets: {
+    list: () => ipc.invoke('snippets.list'),
+    create: (snippet) => ipc.invoke('snippets.create', snippet),
+    update: (request) => ipc.invoke('snippets.update', request),
+    remove: (request) => ipc.invoke('snippets.delete', request),
+  },
+
   style: {
     get: () => ipc.invoke('style.get'),
     set: (patch) => ipc.invoke('style.set', patch),

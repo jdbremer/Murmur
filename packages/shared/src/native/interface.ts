@@ -105,6 +105,18 @@ export interface MurmurNative {
    */
   getSelectedText(): { ok: boolean; text?: string; error?: string }
   /**
+   * Up to `maxChars` of text immediately before the insertion point, so
+   * dictation can match the capitalisation of what it lands in
+   * (dictation/sentence-case.ts).
+   *
+   * A much narrower read than getSelectedText: a handful of characters the
+   * user did not select, used to decide one boolean and never logged or
+   * stored. `ok: false` means *unknown* — no text control, no such API on this
+   * platform — and callers must leave the text alone rather than guess.
+   * `{ ok: true, text: '' }` is a real answer: the cursor is at the start.
+   */
+  getTextBeforeCursor(maxChars?: number): { ok: boolean; text?: string; error?: string }
+  /**
    * Frontmost window title of a specific process, for meeting detection
    * (PLAN §18.2). macOS-only and optional — treat a missing implementation as
    * "no title", which degrades detection rather than breaking it.
@@ -157,6 +169,9 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
       return { ok: false, error: reason }
     },
     getSelectedText() {
+      return { ok: false, error: reason }
+    },
+    getTextBeforeCursor() {
       return { ok: false, error: reason }
     },
     getWindowTitle() {

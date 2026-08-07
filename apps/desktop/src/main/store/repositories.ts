@@ -7,6 +7,7 @@ import {
   DictationRecordSchema,
   DictionaryEntrySchema,
   MeetingRecordSchema,
+  SnippetSchema,
   StyleProfileSchema,
   createDefaultStyleProfiles,
   healStyleProfiles,
@@ -18,6 +19,9 @@ import {
   type HistoryQuery,
   type HistoryStats,
   type MeetingRecord,
+  type Snippet,
+  type SnippetDraft,
+  type SnippetPatch,
   type StyleProfile,
   type StyleProfilePatch,
   type StyleProfileSet,
@@ -353,6 +357,90 @@ export class DictionaryRepository {
 
   delete(id: string): boolean {
     return this.#db.prepare(`DELETE FROM dictionary WHERE id = ?`).run(id).changes > 0
+  }
+}
+
+interface SnippetRow {
+  id: string
+  trigger: string
+  expansion: string
+  enabled: number
+}
+
+function toSnippet(row: SnippetRow): Snippet {
+  return SnippetSchema.parse({
+    id: row.id,
+    trigger: row.trigger,
+    expansion: row.expansion,
+    enabled: row.enabled !== 0,
+  })
+}
+
+/**
+ * Stored voice shortcuts (PLAN §2.2.2).
+ *
+ * Deliberately the same shape as {@link DictionaryRepository} — the two are
+ * neighbours in the Hub and behave alike from the user's side — but a separate
+ * table and a separate place in the pipeline. See domain/snippet.ts for why
+ * expansion runs after polishing rather than before.
+ */
+export class SnippetsRepository {
+  readonly #db: Database
+
+  constructor(db: Database) {
+    this.#db = db
+  }
+
+  list(): Snippet[] {
+    const rows = this.#db
+      .prepare(`SELECT * FROM snippets ORDER BY trigger COLLATE NOCASE ASC`)
+      .all() as SnippetRow[]
+    return rows.map(toSnippet)
+  }
+
+  /** Enabled snippets only — what the orchestrator expands against. */
+  enabled(): Snippet[] {
+    return this.list().filter((snippet) => snippet.enabled)
+  }
+
+  create(draft: SnippetDraft): Snippet {
+    const snippet = SnippetSchema.parse({ ...draft, id: randomUUID() })
+    this.#db
+      .prepare(
+        `INSERT INTO snippets (id, trigger, expansion, enabled) VALUES (?, ?, ?, ?)
+         ON CONFLICT(trigger COLLATE NOCASE) DO UPDATE SET
+           expansion = excluded.expansion,
+           enabled = excluded.enabled`,
+      )
+      .run(snippet.id, snippet.trigger, snippet.expansion, snippet.enabled ? 1 : 0)
+
+    // The upsert may have hit an existing row, whose id we must return.
+    const stored = this.#db
+      .prepare(`SELECT * FROM snippets WHERE trigger = ? COLLATE NOCASE`)
+      .get(snippet.trigger) as SnippetRow | undefined
+    return stored ? toSnippet(stored) : snippet
+  }
+
+  update(id: string, patch: SnippetPatch): Snippet {
+    const existing = this.#db.prepare(`SELECT * FROM snippets WHERE id = ?`).get(id) as
+      SnippetRow | undefined
+    if (!existing) throw new Error(`No snippet with id "${id}"`)
+
+    const next = SnippetSchema.parse({
+      id,
+      trigger: patch.trigger ?? existing.trigger,
+      expansion: patch.expansion ?? existing.expansion,
+      enabled: patch.enabled ?? existing.enabled !== 0,
+    })
+
+    this.#db
+      .prepare(`UPDATE snippets SET trigger = ?, expansion = ?, enabled = ? WHERE id = ?`)
+      .run(next.trigger, next.expansion, next.enabled ? 1 : 0, id)
+    return next
+  }
+
+  delete(id: string): boolean {
+    return this.#db.prepare(`DELETE FROM snippets WHERE id = ?`).run(id).changes > 0
   }
 }
 

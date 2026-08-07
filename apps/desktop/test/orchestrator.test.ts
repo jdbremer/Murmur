@@ -70,6 +70,51 @@ describe('happy path', () => {
     expectSettledIdle()
   })
 
+  it('expands a snippet in the text it actually inserts', async () => {
+    // Proves the wiring, not the matcher: expansion has to happen inside the
+    // loop and after polishing, or the model gets to reword a URL.
+    harness.snippets.push({
+      id: 's1',
+      trigger: 'this is a test',
+      expansion: 'https://cal.example/jordan',
+      enabled: true,
+    })
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual(['Hello world, https://cal.example/jordan.'])
+    expectSettledIdle()
+  })
+
+  it('lowercases the opening word when the cursor is mid-sentence', async () => {
+    harness.deps.textBeforeCursor = () => 'I was saying '
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual(['hello world, this is a test.'])
+    expectSettledIdle()
+  })
+
+  it('keeps the capital when the cursor context cannot be read', async () => {
+    // The unknown case must never change the text — this is the guard that
+    // keeps a platform without the API from mangling every dictation.
+    harness.deps.textBeforeCursor = () => null
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual(['Hello world, this is a test.'])
+    expectSettledIdle()
+  })
+
   it('persists a history row with both texts and the timings', async () => {
     orchestrator.begin()
     feed(orchestrator, utterance())

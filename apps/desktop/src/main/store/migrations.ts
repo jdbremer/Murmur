@@ -209,6 +209,31 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       `)
     },
   },
+  {
+    version: 4,
+    name: 'snippets',
+    up(db) {
+      // Snippets sit beside `dictionary` rather than inside it. The columns
+      // would nearly line up — trigger/term, expansion/replacement — but the
+      // constraints do not: an expansion is long and may contain newlines,
+      // while a dictionary replacement is a single word, and the two run at
+      // different points in the pipeline. Sharing a table would mean a nullable
+      // discriminator and every query filtering on it.
+      //
+      // UNIQUE on trigger, NOCASE, for the same reason as the dictionary:
+      // adding the same trigger twice should be a correction, not a second row
+      // that silently never fires because the first one matched.
+      db.exec(`
+        CREATE TABLE snippets (
+          id        TEXT PRIMARY KEY,
+          trigger   TEXT NOT NULL,
+          expansion TEXT NOT NULL,
+          enabled   INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE UNIQUE INDEX idx_snippets_trigger ON snippets (trigger COLLATE NOCASE);
+      `)
+    },
+  },
 ])
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

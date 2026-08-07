@@ -12,6 +12,7 @@ import {
   applyReplacements,
   DictationsRepository,
   DictionaryRepository,
+  SnippetsRepository,
   StyleRepository,
   toFtsQuery,
 } from '../src/main/store/repositories'
@@ -105,7 +106,7 @@ describe('openDatabase', () => {
     // A user upgrading into the lifetime-stats migration has a history but no
     // counters. Zeroing their word count on upgrade would look exactly like the
     // bug the migration exists to fix.
-    // Rewind to a genuine v1 shape: everything migrations 2 and 3 introduced
+    // Rewind to a genuine v1 shape: everything the later migrations introduced
     // has to go, or replaying them collides with tables that already exist.
     db.exec(`
       DELETE FROM lifetime_stats;
@@ -113,6 +114,7 @@ describe('openDatabase', () => {
       DROP TABLE lifetime_stats;
       DROP TABLE dictation_days;
       DROP TABLE meetings;
+      DROP TABLE snippets;
     `)
     const ts = Date.parse('2026-08-01T12:00:00')
     db.prepare(
@@ -122,7 +124,7 @@ describe('openDatabase', () => {
     ).run('a', ts, 'um so we should uh ship it wednesday', 'We should ship it on Wednesday.', 6_000)
     db.pragma('user_version = 1')
 
-    expect(migrate(db).applied).toEqual(['2:lifetime-stats', '3:meetings'])
+    expect(migrate(db).applied).toEqual(['2:lifetime-stats', '3:meetings', '4:snippets'])
 
     // The polished text's 6 words, at 6 words / 6 s = 60 wpm, on one day.
     expect(new DictationsRepository(db).stats(ts)).toEqual({
@@ -394,6 +396,62 @@ describe('toFtsQuery', () => {
   it('returns null for an empty query', () => {
     expect(toFtsQuery('   ')).toBeNull()
     expect(toFtsQuery('"')).toBeNull()
+  })
+})
+
+describe('SnippetsRepository', () => {
+  let snippets: SnippetsRepository
+
+  beforeEach(() => {
+    snippets = new SnippetsRepository(db)
+  })
+
+  it('round-trips a snippet', () => {
+    const created = snippets.create({
+      trigger: 'my calendar link',
+      expansion: 'https://cal.example/jordan',
+      enabled: true,
+    })
+    expect(created.id).toBeTruthy()
+    expect(snippets.list()).toHaveLength(1)
+    expect(snippets.list()[0]!.expansion).toBe('https://cal.example/jordan')
+  })
+
+  it('treats a repeated trigger as a correction, not a second row', () => {
+    // Two rows with the same trigger would mean the second silently never
+    // fires, because the first always matches first.
+    snippets.create({ trigger: 'my address', expansion: '1 Old St', enabled: true })
+    snippets.create({ trigger: 'My Address', expansion: '2 New Ave', enabled: true })
+
+    const all = snippets.list()
+    expect(all).toHaveLength(1)
+    expect(all[0]!.expansion).toBe('2 New Ave')
+  })
+
+  it('keeps a multi-line expansion intact', () => {
+    const address = '1 Example Street\nSpringfield'
+    snippets.create({ trigger: 'my address', expansion: address, enabled: true })
+    expect(snippets.list()[0]!.expansion).toBe(address)
+  })
+
+  it('excludes disabled snippets from enabled()', () => {
+    const off = snippets.create({ trigger: 'off one', expansion: 'x', enabled: false })
+    snippets.create({ trigger: 'on one', expansion: 'y', enabled: true })
+
+    expect(snippets.enabled().map((s) => s.trigger)).toEqual(['on one'])
+    snippets.update(off.id, { enabled: true })
+    expect(snippets.enabled()).toHaveLength(2)
+  })
+
+  it('deletes, and reports whether anything went', () => {
+    const created = snippets.create({ trigger: 'gone', expansion: 'x', enabled: true })
+    expect(snippets.delete(created.id)).toBe(true)
+    expect(snippets.delete(created.id)).toBe(false)
+    expect(snippets.list()).toHaveLength(0)
+  })
+
+  it('refuses an update to a snippet that does not exist', () => {
+    expect(() => snippets.update('nope', { expansion: 'x' })).toThrow(/no snippet/i)
   })
 })
 

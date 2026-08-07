@@ -30,6 +30,7 @@ import { databasePath, openDatabase } from './store/db'
 import {
   DictationsRepository,
   DictionaryRepository,
+  SnippetsRepository,
   MeetingsRepository,
   StyleRepository,
   applyReplacements,
@@ -178,6 +179,7 @@ async function bootstrap(): Promise<void> {
   }
   const dictations = new DictationsRepository(database.db)
   const dictionary = new DictionaryRepository(database.db)
+  const snippets = new SnippetsRepository(database.db)
   const style = new StyleRepository(database.db)
   const meetingStore = new MeetingsRepository(database.db)
 
@@ -242,6 +244,9 @@ async function bootstrap(): Promise<void> {
     // Post-STT replacement rules run before polishing, so the polish prompt
     // sees — and preserves — the corrected spelling (PLAN §6.4).
     applyDictionary: (text) => applyReplacements(text, dictionary.enabled()),
+    // Read per utterance, not captured once: a snippet added in the Hub should
+    // work on the next dictation without a restart.
+    snippets: () => snippets.enabled(),
     styleFor: (category) => style.forCategory(category),
     frontmostApp: () => native().getFrontmostApp(),
     // Command mode (PLAN §18.1): a non-empty selection at hotkey-down flips
@@ -258,6 +263,15 @@ async function bootstrap(): Promise<void> {
       // Treat it as plain dictation instead of a guaranteed failure.
       if (text.length > 6_000) return null
       return text
+    },
+    // A handful of characters before the cursor, so text dictated into the
+    // middle of a sentence does not arrive capitalised. Much narrower than the
+    // selection read above — the user did not select this — so it is bounded
+    // hard, never logged, and only ever reaches the pure decision in
+    // sentence-case.ts. `ok: false` means unknown, which leaves text untouched.
+    textBeforeCursor: () => {
+      const result = native().getTextBeforeCursor(8)
+      return result.ok ? (result.text ?? '') : null
     },
     persist: (record) => {
       dictations.insert(record)
@@ -365,6 +379,7 @@ async function bootstrap(): Promise<void> {
     injector,
     dictations,
     dictionary,
+    snippets,
     style,
     frames,
     meetings,

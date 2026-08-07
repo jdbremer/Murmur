@@ -143,6 +143,13 @@ export interface MurmurApi {
     remove(request: Req<'dictionary.delete'>): Promise<void>
   }
 
+  readonly snippets: {
+    list(): Promise<Res<'snippets.list'>>
+    create(snippet: Req<'snippets.create'>): Promise<Res<'snippets.create'>>
+    update(request: Req<'snippets.update'>): Promise<Res<'snippets.update'>>
+    remove(request: Req<'snippets.delete'>): Promise<void>
+  }
+
   readonly style: {
     get(): Promise<Res<'style.get'>>
     set(patch: Req<'style.set'>): Promise<Res<'style.set'>>

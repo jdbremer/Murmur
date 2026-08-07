@@ -1,5 +1,5 @@
 export type SectionId =
-  'home' | 'dictionary' | 'style' | 'meetings' | 'models' | 'settings' | 'help'
+  'home' | 'dictionary' | 'snippets' | 'style' | 'meetings' | 'models' | 'settings' | 'help'
 
 interface SectionMeta {
   id: SectionId
@@ -18,6 +18,12 @@ const SECTIONS: readonly SectionMeta[] = [
     id: 'dictionary',
     label: 'Dictionary',
     icon: 'M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2zm2 0v12h11',
+  },
+  {
+    id: 'snippets',
+    label: 'Snippets',
+    // A lightning bolt: an expansion, something short becoming something long.
+    icon: 'M13 3 5 14h6l-1 7 8-11h-6z',
   },
   {
     id: 'style',
