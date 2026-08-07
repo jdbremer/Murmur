@@ -74,6 +74,27 @@ export function HomeSection(): React.JSX.Element {
     return () => clearTimeout(timer)
   }, [search, load])
 
+  // Live updates while the Hub sits open (PLAN §2.2.1). Without this the header
+  // and the list below it are both frozen at whatever was true when the section
+  // mounted, which reads as "the stats are broken".
+  //
+  // The event carries the new totals, so the header updates with no round trip;
+  // the list still needs a query, because only the store knows where the new row
+  // sorts under the current search. Both are read through a ref so the
+  // subscription is set up once rather than being torn down on every keystroke.
+  const latest = useRef({ search, count: PAGE_SIZE })
+  useEffect(() => {
+    latest.current = { search, count: records?.length ?? PAGE_SIZE }
+  }, [search, records])
+
+  useEffect(() => {
+    return window.murmur.history.subscribe((nextStats) => {
+      if (!active.current) return
+      setStats(nextStats)
+      void load(latest.current.search, latest.current.count)
+    })
+  }, [load])
+
   const remove = async (id: string): Promise<void> => {
     await window.murmur.history.remove({ id })
     await load(search, records?.length ?? PAGE_SIZE)
