@@ -1,6 +1,6 @@
 import { app, Menu, Tray } from 'electron'
 
-import { createTrayIcon } from './tray-icon'
+import { createTrayIcon, type TrayState } from './tray-icon'
 
 /**
  * The menu-bar item (PLAN §2.3).
@@ -27,11 +27,15 @@ export interface TrayDeps {
     start: () => void
     stop: () => void
   }
+  /** True while an utterance is being captured, for the icon's active state. */
+  isListening?: () => boolean
 }
 
 export class TrayController {
   #tray: Tray | null = null
   readonly #deps: TrayDeps
+  /** What the icon currently shows, so a redraw only happens on a real change. */
+  #iconState: TrayState | null = null
 
   constructor(deps: TrayDeps) {
     this.#deps = deps
@@ -93,6 +97,37 @@ export class TrayController {
 
     this.#tray.setContextMenu(menu)
     this.#tray.setToolTip(meetings?.recording() ? 'Murmur — recording this meeting' : 'Murmur')
+    this.#applyIcon()
+  }
+
+  /**
+   * Repaint the glyph for the current state.
+   *
+   * Recording outranks listening: it is the longer-lived of the two and the
+   * one the user needs to be able to see at any moment, whereas listening is
+   * over in seconds and the pill is already showing it.
+   */
+  #applyIcon(): void {
+    if (!this.#tray || this.#tray.isDestroyed()) return
+    const next: TrayState = this.#deps.meetings?.recording()
+      ? 'recording'
+      : this.#deps.isListening?.()
+        ? 'listening'
+        : 'idle'
+    if (next === this.#iconState) return
+    this.#iconState = next
+    this.#tray.setImage(createTrayIcon(next))
+  }
+
+  /**
+   * Update just the icon, without rebuilding the menu.
+   *
+   * Dictation state changes many times a second while the level moves;
+   * rebuilding a Menu that often would be wasteful and, on macOS, would fight
+   * an open menu.
+   */
+  refreshIcon(): void {
+    this.#applyIcon()
   }
 
   destroy(): void {

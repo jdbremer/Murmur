@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir, tmpdir } from 'node:os'
-import { app, ipcMain, Menu, Notification, powerMonitor } from 'electron'
+import { app, ipcMain, Menu, nativeTheme, Notification, powerMonitor } from 'electron'
 
 import {
   createMainIpc,
@@ -136,6 +136,19 @@ async function bootstrap(): Promise<void> {
   // Before any window exists, so every renderer is covered from its first load.
   installSecurityPolicies(isDev)
 
+  /**
+   * Point Electron's native theme at the user's Appearance choice.
+   *
+   * The renderers already honour it through `data-theme`, but `nativeTheme` is
+   * what decides everything drawn *outside* the page: the window's own
+   * background colour behind and around the web contents, native scrollbars,
+   * and the system dialogs. Leaving it on `system` while the user had chosen
+   * Dark meant a light window frame around a dark app.
+   */
+  function applyAppearance(current: Settings): void {
+    nativeTheme.themeSource = current.appearance
+  }
+
   const userDataPath = app.getPath('userData')
   const settings = SettingsStore.inUserData(userDataPath)
   // Heal hotkey config so native never throws at boot (custom without a code,
@@ -171,6 +184,10 @@ async function bootstrap(): Promise<void> {
   // Retention sweep at boot (PLAN §9). Cheap, and it means a user who lowers
   // the window sees it take effect without waiting for a background job.
   applyHistoryRetention()
+
+  // Before the Hub exists, so its very first frame is painted in the right
+  // theme rather than corrected a moment later.
+  applyAppearance(settings.get())
 
   // -- models + engines ----------------------------------------------------
   const models = new ModelManager({
@@ -378,6 +395,7 @@ async function bootstrap(): Promise<void> {
     },
     isPaused: () => paused,
     quit,
+    isListening: () => machine.getState().state === 'listening',
     meetings: {
       enabled: () => settings.get().meetings.enabled,
       recording: () => meetings.recording,
@@ -487,6 +505,10 @@ async function bootstrap(): Promise<void> {
   machine.on('state', (next) => {
     if (next === 'listening') escape.arm()
     else escape.disarm()
+    // The menu-bar glyph leans into its listening shape. On `state` rather
+    // than `event`: the latter re-fires with every level update, and this only
+    // cares about the transition.
+    tray.refreshIcon()
   })
 
   engines.on('status', (status: EnginesStatus) => {
@@ -580,6 +602,7 @@ async function bootstrap(): Promise<void> {
     }
     if (previous.micDeviceId !== next.micDeviceId) audio.setDevice(next.micDeviceId)
     if (previous.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next)
+    if (previous.appearance !== next.appearance) applyAppearance(next)
     if (
       previous.sttModelId !== next.sttModelId ||
       previous.polishModelId !== next.polishModelId ||
