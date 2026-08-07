@@ -146,6 +146,34 @@ describe('no-speech guards', () => {
     expectSettledIdle()
   })
 
+  it('stays quiet when the press could be the first half of a double-tap', async () => {
+    // The gesture is: tap, tap. The first tap is *always* an empty utterance,
+    // and the second arrives up to 350 ms later — so reporting the first one
+    // flashes "Didn't catch that" at someone who is mid-gesture and did nothing
+    // wrong. It still settles to idle; it just does not accuse them.
+    orchestrator.begin()
+    feed(orchestrator, speechLike(120))
+    orchestrator.end({ fromTap: true })
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.events.at(-1)).toEqual({ state: 'idle' })
+    expect(harness.events.some((event) => event.state === 'error')).toBe(false)
+    expect(harness.stt.transcribeCalls).toHaveLength(0)
+    expectSettledIdle()
+  })
+
+  it('still reports a hold that heard nothing, even with the tap flag absent', async () => {
+    // The quiet path must be reachable only through the flag: an ordinary hold
+    // that produced nothing is a real miss and has to say so.
+    orchestrator.begin()
+    feed(orchestrator, roomTone(2000))
+    orchestrator.end({})
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.events.at(-1)).toEqual({ state: 'error', code: 'no-speech' })
+    expectSettledIdle()
+  })
+
   it('rejects an empty transcript from a model that heard nothing', async () => {
     harness.stt.transcript = { text: '   ', avgLogProb: null, durationMs: 3 }
     orchestrator.begin()

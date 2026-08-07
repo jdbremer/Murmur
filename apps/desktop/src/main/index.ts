@@ -343,7 +343,7 @@ async function bootstrap(): Promise<void> {
     native,
     intents: {
       begin: () => orchestrator.begin(),
-      end: () => orchestrator.end(),
+      end: (options) => orchestrator.end(options),
       toggleHandsFree: () => {
         if (orchestrator.handsFree) orchestrator.stopHandsFree()
         else orchestrator.startHandsFree()

@@ -18,6 +18,8 @@ import { HotkeyBridge, type HotkeyIntents } from '../src/main/dictation/hotkey'
 interface Recorded {
   begins: number
   ends: number
+  /** Ends the bridge flagged as possibly the opening half of a double-tap. */
+  endsFromTap: number
   toggles: number
 }
 
@@ -69,8 +71,9 @@ function makeBridge(
     begin: () => {
       recorded.begins += 1
     },
-    end: () => {
+    end: (options) => {
       recorded.ends += 1
+      recorded.endsFromTap += options?.fromTap === true ? 1 : 0
     },
     toggleHandsFree: () => {
       recorded.toggles += 1
@@ -100,7 +103,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   physicallyDown = { current: false }
   handsFree = { current: false }
-  recorded = { begins: 0, ends: 0, toggles: 0 }
+  recorded = { begins: 0, ends: 0, endsFromTap: 0, toggles: 0 }
   bridge = makeBridge()
 })
 
@@ -240,6 +243,45 @@ describe('the physical-state watchdog', () => {
     vi.advanceTimersByTime(HOTKEY.physicalPollMs * 10)
     // Hands-free survives the release by design; no reconciliation may end it.
     expect(recorded.ends).toBe(0)
+  })
+})
+
+describe('a tap that might open a double-tap', () => {
+  it('flags the end, so an empty first tap stays quiet', () => {
+    // The native tap reports the *second* press as `doubleTap`, not as another
+    // `down`, so there is nothing pending here to wait for — the utterance has
+    // to end now. Flagging it is what lets the orchestrator swallow the
+    // "Didn't catch that" an empty first tap would otherwise flash a fraction
+    // of a second before hands-free latches.
+    press('down')
+    vi.advanceTimersByTime(50)
+    press('up')
+
+    expect(recorded.ends).toBe(1)
+    expect(recorded.endsFromTap).toBe(1)
+  })
+
+  it('does not flag a real hold, whose empty result is worth reporting', () => {
+    press('down')
+    vi.advanceTimersByTime(2_000)
+    press('up')
+
+    expect(recorded.ends).toBe(1)
+    expect(recorded.endsFromTap).toBe(0)
+  })
+
+  it('does not flag a tap when double-tap-to-latch is switched off', () => {
+    // With the gesture disabled a tap is unambiguous, so an empty one is a
+    // genuine miss and the user should be told about it.
+    bridge.stop()
+    bridge = makeBridge(config({ doubleTapHandsFree: false }))
+
+    press('down')
+    vi.advanceTimersByTime(50)
+    press('up')
+
+    expect(recorded.ends).toBe(1)
+    expect(recorded.endsFromTap).toBe(0)
   })
 })
 

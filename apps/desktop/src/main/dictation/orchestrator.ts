@@ -258,10 +258,20 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
   }
 
   /** Hotkey released. In hands-free mode this is a no-op (VAD finalises). */
-  end(): void {
+  /**
+   * Finish the current utterance.
+   *
+   * `fromTap` marks a press short enough to be the first half of a double-tap.
+   * It changes nothing about how the audio is handled — the utterance is still
+   * transcribed, because a 300 ms press carries 300 ms of pre-roll with it and
+   * can genuinely contain a word. It only suppresses the *"Didn't catch that"*
+   * that an empty one would otherwise produce, because the second tap has not
+   * had time to arrive yet and the user is mid-gesture, not mid-mistake.
+   */
+  end(options: { fromTap?: boolean } = {}): void {
     if (this.#phase !== 'listening') return
     if (this.#handsFree) return
-    void this.#finish()
+    void this.#finish({ quietNoSpeech: options.fromTap === true })
   }
 
   /** Latch hands-free mode (double-tap). */
@@ -367,7 +377,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
   // -- the pipeline --------------------------------------------------------
 
-  async #finish(): Promise<void> {
+  async #finish(options: { quietNoSpeech?: boolean } = {}): Promise<void> {
     if (this.#finishing || this.#phase !== 'listening') return
     this.#finishing = true
 
@@ -389,7 +399,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     // Guard 1: nothing was recorded at all.
     if (durationMs < AUDIO.minUtteranceMs) {
       this.#log.debug(`utterance too short (${durationMs} ms)`)
-      this.#fail('no-speech', 'Didn’t catch that')
+      this.#noSpeech(options.quietNoSpeech === true)
       return
     }
 
@@ -397,12 +407,12 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     const trimmed = trimSilence(pcm, AUDIO.sampleRate)
     if (trimmed.silent || trimmed.pcm.length === 0) {
       this.#log.debug('VAD found no speech')
-      this.#fail('no-speech', 'Didn’t catch that')
+      this.#noSpeech(options.quietNoSpeech === true)
       return
     }
     const speechMs = Math.round((trimmed.pcm.length * 1000) / AUDIO.sampleRate)
     if (speechMs < AUDIO.minUtteranceMs) {
-      this.#fail('no-speech', 'Didn’t catch that')
+      this.#noSpeech(options.quietNoSpeech === true)
       return
     }
 
@@ -767,8 +777,32 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
    * adding a `catch` to this file and it does not end here, the state machine
    * has a dead end.
    */
-  #fail(code: DictationErrorCode, message: string): void {
-    this.#log.warn(`failed: ${code} — ${message}`)
+  /**
+   * Nothing was said.
+   *
+   * Normally worth reporting — a hold that produced no text should say so
+   * rather than look like the app ignored the key. But the first tap of a
+   * double-tap is *always* an empty utterance, and reporting it flashes
+   * "Didn't catch that" a fraction of a second before hands-free latches. The
+   * user did nothing wrong and there is nothing to fix, so the pill just closes.
+   */
+  #noSpeech(quiet: boolean): void {
+    if (!quiet) {
+      this.#fail('no-speech', 'Didn’t catch that')
+      return
+    }
+    this.#log.debug('no speech, but the press could be half a double-tap — closing quietly')
+    this.#teardown()
+    this.#deps.machine.reset()
+  }
+
+  /**
+   * Return to rest without announcing anything.
+   *
+   * Shared by the error path and the quiet no-speech path so the two can never
+   * drift: whichever way an utterance ends, the same state is released.
+   */
+  #teardown(): void {
     this.#runId += 1
     this.#abort?.abort()
     this.#abort = null
@@ -786,6 +820,11 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     } catch {
       /* ignore */
     }
+  }
+
+  #fail(code: DictationErrorCode, message: string): void {
+    this.#log.warn(`failed: ${code} — ${message}`)
+    this.#teardown()
     this.#deps.machine.fail(code, message)
   }
 }

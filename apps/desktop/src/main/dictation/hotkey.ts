@@ -27,8 +27,13 @@ import { createLogger, type Logger } from '../logging'
 export interface HotkeyIntents {
   /** Start dictating (push-to-talk down, or toggle-on). */
   begin(): void
-  /** Finish the current utterance (push-to-talk up, or toggle-off). */
-  end(): void
+  /**
+   * Finish the current utterance (push-to-talk up, or toggle-off).
+   *
+   * `fromTap` means the press was short enough to be the opening half of a
+   * double-tap, so an empty result is expected rather than worth reporting.
+   */
+  end(options?: { fromTap?: boolean }): void
   /** Latch hands-free mode (or unlatch it — the intent is a toggle). */
   toggleHandsFree(): void
   /**
@@ -280,7 +285,17 @@ export class HotkeyBridge {
           // is a clearer outcome than silently swallowing the key.
           this.#log.debug(`tap shorter than ${HOTKEY.minHoldMs} ms`)
         }
-        this.#intents.end()
+
+        // A tap while double-tap-to-latch is on is ambiguous *at this moment*:
+        // the second press has up to `doubleTapMs` still to arrive, and the
+        // native tap reports it as `doubleTap` rather than a second `down`, so
+        // there is nothing here to wait on. Ending is still right — the audio
+        // may hold a real word, since a 300 ms press carries 300 ms of pre-roll
+        // — but an *empty* one must not flash "Didn't catch that" a moment
+        // before hands-free latches. Telling the orchestrator the press was a
+        // tap lets it stay quiet in exactly that case and nowhere else.
+        const mightOpenADoubleTap = this.#lastPressWasTap && config?.doubleTapHandsFree !== false
+        this.#intents.end({ fromTap: mightOpenADoubleTap })
         return
       }
     }
