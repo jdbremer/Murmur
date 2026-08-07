@@ -13,15 +13,17 @@ import { POLISH } from '../../config'
  *
  * ## What goes in
  *
- * Five inputs, in a fixed order so the assembled string is stable:
+ * Six sections, in a fixed order so the assembled string is stable:
  *
  *  1. the **role** and the hard rules — never answer, never add, never
  *     translate, output only the edited text;
  *  2. the **level** (Clean or Rewrite) and what it is allowed to change;
- *  3. the **tone profile** for the frontmost app's category (formality, filler
+ *  3. **layout** — one paragraph unless a line break was asked for, the spoken
+ *     punctuation commands, and the list exception;
+ *  4. the **tone profile** for the frontmost app's category (formality, filler
  *     handling, emoji policy, custom instructions);
- *  4. the **dictionary** terms, as spellings to preserve;
- *  5. the **output-language rule**.
+ *  5. the **dictionary** terms, as spellings to preserve;
+ *  6. the **output-language rule**.
  *
  * Few-shot examples follow as real chat turns rather than as prose inside the
  * system prompt: small instruct models copy the *shape* of a conversation far
@@ -66,17 +68,76 @@ const HARD_RULES: readonly string[] = Object.freeze([
   'If the transcript is already clean, output it unchanged.',
 ])
 
+/**
+ * Line breaks are earned, never inherited.
+ *
+ * The transcript arrives as a single line — the STT adapters collapse
+ * whitespace (see stt/transcript.ts), because whisper.cpp emits a newline at
+ * every pause and those are an artifact, not intent. This rule is the other
+ * half of that contract: having removed the accidental breaks, the model must
+ * not reintroduce them on a hunch.
+ *
+ * It mirrors how the reference product behaves. A pause becomes *punctuation*
+ * — a comma, a full stop — and a line break happens only when the speaker
+ * asked for one, either by saying so or by enumerating.
+ */
+const LAYOUT_RULES: readonly string[] = Object.freeze([
+  'Write the result as a single paragraph. Do not insert line breaks or blank lines.',
+  'A pause in speech is punctuation, not a line break: end the sentence, or use a comma.',
+  'The two exceptions are below — a spoken layout command, and a list.',
+])
+
+/**
+ * Spoken punctuation, as a language task rather than find-and-replace.
+ *
+ * The model has to decide from context whether the words are a command or the
+ * thing being said: "add a new line to the config" must not break, while "…and
+ * that's the summary. New paragraph. Next up…" must. A regex cannot see that
+ * difference, which is precisely why this lives in the prompt while the
+ * artifact-stripping in stt/transcript.ts does not.
+ */
+const DICTATED_COMMANDS: readonly string[] = Object.freeze([
+  'The speaker can dictate punctuation and layout by name: "period", "full stop", "comma", "question mark", "exclamation mark", "colon", "semicolon", "em dash", "ellipsis", "open quote", "close quote", "new line", "new paragraph".',
+  'Replace such a command with the mark itself — "new line" becomes a line break, "new paragraph" becomes a blank line — and remove the spoken words.',
+  'Only when it is meant as a command. If the words are part of what is being said ("add a new line to the file", "the comma is wrong"), leave them as text.',
+])
+
+/**
+ * A list is the one structure allowed to survive as multiple lines, and it is
+ * allowed at *every* level rather than only in Rewrite.
+ *
+ * That placement is the point. Turning "one… two… three…" into a list is what
+ * the reference product calls Smart Formatting, and it is on for everyone —
+ * there is no tier where enumerating gives you a run-on sentence. It sits
+ * outside LEVEL_RULES so Clean gets it too, which is why Clean's
+ * "do not restructure" rule below names it as the exception rather than
+ * contradicting it.
+ */
+const LIST_RULE =
+  'When the speaker enumerates — "one… two… three…", "first… second…" — format those items as a Markdown list, one per line. This is the only case where the result may span multiple lines without being asked to.'
+
+/**
+ * Self-corrections, including the ones the speaker flags out loud.
+ *
+ * The trigger words matter: a speaker who has learned that "scratch that"
+ * works will use it deliberately, and a model that only handles the implicit
+ * "Tuesday — no wait, Wednesday" shape will leave the explicit one in the
+ * output, which reads worse than not having the feature.
+ */
+const BACKTRACK_RULE =
+  'Resolve self-corrections, keeping only what the speaker settled on: "Tuesday — no wait, Wednesday" becomes "Wednesday". Treat "actually", "scratch that" and "no wait" as corrections of what came before, and drop the correction phrase along with what it replaced.'
+
 const LEVEL_RULES: Record<Exclude<PolishingLevel, 'off'>, readonly string[]> = {
   clean: Object.freeze([
     'Add sentence-ending punctuation and capitalisation.',
-    'Resolve self-corrections: keep only what the speaker settled on ("Tuesday — no wait, Wednesday" becomes "Wednesday").',
+    BACKTRACK_RULE,
     'Fix obvious speech-recognition slips in common words, but never guess at proper nouns.',
-    'Do not restructure sentences, change vocabulary, or alter the speaker’s phrasing.',
+    'Do not restructure sentences, change vocabulary, or alter the speaker’s phrasing — except to build a list, as described under Layout.',
   ]),
   rewrite: Object.freeze([
-    'Add punctuation and capitalisation, and resolve self-corrections.',
+    'Add punctuation and capitalisation.',
+    BACKTRACK_RULE,
     'Tighten phrasing: remove repetition and false starts, and split run-on sentences.',
-    'Where the speaker enumerates ("one… two… three…"), format the result as a Markdown list.',
     'Keep every fact, name, number, and commitment exactly as spoken. Rewriting is about form, never content.',
   ]),
 }
@@ -88,9 +149,16 @@ const FILLER_RULES: Record<StyleProfile['fillerHandling'], string> = {
 }
 
 const FORMALITY_RULES: Record<StyleProfile['formality'], string> = {
+  veryCasual:
+    'Keep the tone very casual, the way someone texts a friend. Contractions and sentence fragments are fine, and a message this short does not need a closing full stop.',
   casual: 'Keep the tone casual and conversational. Contractions are fine.',
+  // Deprecated and healed away on load (healStyleProfiles), but a profile can
+  // still reach here in the window before that runs — and an unhandled key
+  // would put `undefined` in the middle of the prompt.
   neutral: 'Keep the tone neutral — neither stiff nor chatty.',
   formal: 'Keep the tone professional. Prefer complete sentences and avoid slang.',
+  excited:
+    'Keep the tone warm and enthusiastic. Energy comes from word choice, never from exclamation marks the speaker did not intend — at most one.',
 }
 
 const EMOJI_RULES: Record<StyleProfile['emoji'], string> = {
@@ -126,6 +194,18 @@ const EXAMPLES: Record<Exclude<PolishingLevel, 'off'>, { user: string; assistant
       user: 'hey what time does the standup start tomorrow',
       assistant: 'Hey, what time does the standup start tomorrow?',
     },
+    // The layout pair. One example carries both halves of the disambiguation
+    // deliberately: "scratch that" is obeyed as a correction in the same
+    // breath as "add a new line to the file" is left alone as content, so the
+    // contrast is visible in a single turn rather than inferred across two.
+    {
+      user: 'so the config is broken scratch that the config is fine but I need to add a new line to the end of the file',
+      assistant: 'The config is fine, but I need to add a new line to the end of the file.',
+    },
+    {
+      user: "that's the summary new paragraph we shipped on wednesday and everything held",
+      assistant: "That's the summary.\n\nWe shipped on Wednesday and everything held.",
+    },
   ],
   rewrite: [
     {
@@ -135,6 +215,17 @@ const EXAMPLES: Record<Exclude<PolishingLevel, 'off'>, { user: string; assistant
     {
       user: 'can you send me the invoice when you get a chance no rush',
       assistant: 'Could you send me the invoice when you get a chance? No rush.',
+    },
+    // Rewrite is the level most tempted to "improve" a rambling utterance into
+    // paragraphs, so it gets its own one-paragraph example: several pauses,
+    // resolved into punctuation, on one line.
+    {
+      user: 'yeah so I think we should do it and then uh see how it goes and if it works we ship on friday',
+      assistant: 'I think we should do it and see how it goes. If it works, we ship on Friday.',
+    },
+    {
+      user: 'the deploy is stuck actually no it finished I just need to add a new line to the changelog',
+      assistant: 'The deploy finished. I just need to add a new line to the changelog.',
     },
   ],
 }
@@ -151,6 +242,8 @@ export function buildPolishPrompt(inputs: PromptInputs): BuiltPrompt {
 
   const levelName = inputs.level === 'clean' ? 'Clean' : 'Rewrite'
   sections.push([`Editing level: ${levelName}.`, ...(LEVEL_RULES[inputs.level] ?? [])].join('\n'))
+
+  sections.push(['Layout.', ...LAYOUT_RULES, ...DICTATED_COMMANDS, LIST_RULE].join('\n'))
 
   const style = [
     CATEGORY_CONTEXT[inputs.profile.category],

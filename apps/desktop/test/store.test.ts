@@ -510,8 +510,10 @@ describe('StyleRepository', () => {
     expect(email.formality).toBe('formal')
     expect(email.emoji).toBe('never')
 
+    // Personal ships casual while the rest ship formal, so an untouched
+    // profile keeps its own default rather than a single global one.
     const personal = updated.find((profile) => profile.category === 'personal')!
-    expect(personal.formality).toBe('neutral')
+    expect(personal.formality).toBe('casual')
   })
 
   it('persists across instances', () => {
@@ -522,7 +524,29 @@ describe('StyleRepository', () => {
 
   it('falls back to the default when a stored row is invalid', () => {
     db.prepare('UPDATE style_profiles SET formality = ? WHERE category = ?').run('bizarre', 'work')
-    expect(repository.forCategory('work').formality).toBe('neutral')
+    expect(repository.forCategory('work').formality).toBe('formal')
+  })
+
+  it('migrates the retired neutral tone to the category default on read', () => {
+    // `neutral` was the shipped default before Styles, so it is sitting in
+    // every pre-existing install. It still parses — which is exactly why it
+    // needs healing rather than the invalid-row fallback above: left alone it
+    // would reach a Select that has no such option.
+    db.prepare('UPDATE style_profiles SET formality = ?').run('neutral')
+
+    expect(repository.forCategory('personal').formality).toBe('casual')
+    expect(repository.forCategory('work').formality).toBe('formal')
+    expect(repository.forCategory('email').formality).toBe('formal')
+  })
+
+  it('leaves a tone the category still offers untouched', () => {
+    // The healing must not be a blanket reset — only Very Casual is
+    // personal-only, and Casual is legitimate everywhere.
+    repository.set({ category: 'personal', formality: 'veryCasual' })
+    repository.set({ category: 'work', formality: 'casual' })
+
+    expect(repository.forCategory('personal').formality).toBe('veryCasual')
+    expect(repository.forCategory('work').formality).toBe('casual')
   })
 
   it('re-seeds a category whose row was deleted', () => {

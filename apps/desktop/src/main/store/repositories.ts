@@ -9,6 +9,7 @@ import {
   MeetingRecordSchema,
   StyleProfileSchema,
   createDefaultStyleProfiles,
+  healStyleProfiles,
   type DictationRecord,
   type DictionaryEntry,
   type DictionaryEntryDraft,
@@ -414,7 +415,7 @@ export class StyleRepository {
     const rows = this.#db.prepare(`SELECT * FROM style_profiles`).all() as StyleRow[]
     const byCategory = new Map(rows.map((row) => [row.category, row]))
 
-    return createDefaultStyleProfiles().map((fallback) => {
+    const stored = createDefaultStyleProfiles().map((fallback) => {
       const row = byCategory.get(fallback.category)
       if (!row) return fallback
       const parsed = StyleProfileSchema.safeParse({
@@ -426,6 +427,12 @@ export class StyleRepository {
       })
       return parsed.success ? parsed.data : fallback
     })
+
+    // Retired tones (`neutral`, the pre-Styles default) become the category's
+    // current one. Read-time rather than a SQL migration on purpose: the value
+    // still parses, so nothing is broken until it is *displayed*, and healing
+    // where it is read keeps the rule next to the only code that cares.
+    return healStyleProfiles(stored)
   }
 
   /** The profile for one app category — what the prompt builder asks for. */

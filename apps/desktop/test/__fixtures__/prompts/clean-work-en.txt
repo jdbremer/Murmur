@@ -7,9 +7,18 @@ If the transcript is already clean, output it unchanged.
 
 Editing level: Clean.
 Add sentence-ending punctuation and capitalisation.
-Resolve self-corrections: keep only what the speaker settled on ("Tuesday — no wait, Wednesday" becomes "Wednesday").
+Resolve self-corrections, keeping only what the speaker settled on: "Tuesday — no wait, Wednesday" becomes "Wednesday". Treat "actually", "scratch that" and "no wait" as corrections of what came before, and drop the correction phrase along with what it replaced.
 Fix obvious speech-recognition slips in common words, but never guess at proper nouns.
-Do not restructure sentences, change vocabulary, or alter the speaker’s phrasing.
+Do not restructure sentences, change vocabulary, or alter the speaker’s phrasing — except to build a list, as described under Layout.
+
+Layout.
+Write the result as a single paragraph. Do not insert line breaks or blank lines.
+A pause in speech is punctuation, not a line break: end the sentence, or use a comma.
+The two exceptions are below — a spoken layout command, and a list.
+The speaker can dictate punctuation and layout by name: "period", "full stop", "comma", "question mark", "exclamation mark", "colon", "semicolon", "em dash", "ellipsis", "open quote", "close quote", "new line", "new paragraph".
+Replace such a command with the mark itself — "new line" becomes a line break, "new paragraph" becomes a blank line — and remove the spoken words.
+Only when it is meant as a command. If the words are part of what is being said ("add a new line to the file", "the comma is wrong"), leave them as text.
+When the speaker enumerates — "one… two… three…", "first… second…" — format those items as a Markdown list, one per line. This is the only case where the result may span multiple lines without being asked to.
 
 The text is going into a work chat or document.
 Keep the tone neutral — neither stiff nor chatty.

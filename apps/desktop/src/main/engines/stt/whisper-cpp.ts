@@ -23,6 +23,7 @@ import {
   type SttOptions,
   type UtteranceOptions,
 } from '../types'
+import { normaliseTranscript } from './transcript'
 import { encodeWav } from './wav'
 
 /**
@@ -218,7 +219,10 @@ export class WhisperCppEngine implements SttEngine {
     }
 
     const payload = (await response.json()) as WhisperResponse
-    const text = (payload.text ?? '').trim()
+    // Not `.trim()`: whisper.cpp joins its segments with newlines and a segment
+    // boundary is a pause, so trimming the ends leaves a line break wherever
+    // the speaker drew breath. See transcript.ts.
+    const text = normaliseTranscript(payload.text ?? '')
     const durationMs = Date.now() - started
     this.#log.debug(`transcribed in ${durationMs} ms →`, redact(text))
 

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type {
-  AppCategory,
-  EmojiPolicy,
-  FillerHandling,
-  Formality,
-  StyleProfile,
-  StyleProfileSet,
+import {
+  formalityOptionsFor,
+  type AppCategory,
+  type EmojiPolicy,
+  type FillerHandling,
+  type Formality,
+  type StyleProfile,
+  type StyleProfileSet,
 } from '@murmur/shared'
 
 import { Card, ErrorCard, Row, Section, Select } from '../../components/Section'
@@ -28,11 +29,22 @@ const POLISHING_LEVELS = [
   { value: 'rewrite' as const, label: 'Rewrite — tone & structure' },
 ]
 
-const FORMALITY: { value: Formality; label: string }[] = [
-  { value: 'casual', label: 'Casual' },
-  { value: 'neutral', label: 'Neutral' },
-  { value: 'formal', label: 'Formal' },
-]
+/**
+ * Labels only. *Which* of these a category offers comes from
+ * `formalityOptionsFor` in shared, so the Style UI and the polish prompt can
+ * never disagree about what is selectable — and Neutral is absent from both.
+ */
+const FORMALITY_LABELS: Record<Formality, string> = {
+  veryCasual: 'Very casual',
+  casual: 'Casual',
+  neutral: 'Neutral (retired)',
+  formal: 'Formal',
+  excited: 'Excited',
+}
+
+function formalityOptions(category: AppCategory): { value: Formality; label: string }[] {
+  return formalityOptionsFor(category).map((value) => ({ value, label: FORMALITY_LABELS[value] }))
+}
 
 const FILLERS: { value: FillerHandling; label: string }[] = [
   { value: 'keep', label: 'Keep them' },
@@ -132,7 +144,7 @@ export function StyleSection(): React.JSX.Element {
           <Row label="Formality">
             <Select
               value={profile.formality}
-              options={FORMALITY}
+              options={formalityOptions(profile.category)}
               onChange={(formality) => void patch(profile.category, { formality })}
             />
           </Row>

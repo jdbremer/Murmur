@@ -11,6 +11,7 @@ import {
 import { SIDECAR, TIMEOUTS } from '../../config'
 import { createLogger, redact, type Logger } from '../../logging'
 import { detectFamily, type OnnxRequest, type OnnxResponse } from './onnx/protocol'
+import { normaliseTranscript } from './transcript'
 import {
   StatusHolder,
   type ModelRef,
@@ -159,7 +160,12 @@ export class OnnxRuntimeEngine implements SttEngine {
 
     this.#log.debug(`transcribed in ${response.durationMs} ms →`, redact(response.text))
     return {
-      text: response.text,
+      // The ONNX decoders assemble text token by token rather than by segment,
+      // so they do not inject whisper.cpp's newlines — but the contract for
+      // Transcript.text is the same whichever engine produced it, and a decode
+      // loop is free to grow a line break later. Normalising both keeps the
+      // downstream guarantee engine-independent.
+      text: normaliseTranscript(response.text),
       avgLogProb: response.avgLogProb,
       durationMs: response.durationMs,
     }

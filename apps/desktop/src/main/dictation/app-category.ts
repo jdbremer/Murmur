@@ -45,3 +45,32 @@ export function categoryForBundleId(bundleId: string | null): AppCategory {
   }
   return 'other'
 }
+
+/**
+ * Chat apps, where a message ending in a full stop reads as curt.
+ *
+ * A *separate* list rather than a reuse of the categories above, because the
+ * two questions are genuinely different. `personal` covers Notes and `work`
+ * covers Chrome and Notion — long-form writing where a closing full stop is
+ * simply correct punctuation. Keying the trailing-period rule on category
+ * would strip it from a paragraph of notes, which is a typo, not a style.
+ *
+ * Deliberately narrow: this list only grows when an app is somewhere people
+ * send short messages to each other.
+ */
+const MESSAGING_PATTERNS: readonly string[] = Object.freeze([
+  'com.apple.mobilesms',
+  'net.whatsapp',
+  'org.telegram',
+  'com.hnc.discord',
+  'com.tinyspeck',
+  'com.microsoft.teams',
+  'com.signal',
+  'com.facebook.archon', // Messenger
+])
+
+export function isMessagingApp(bundleId: string | null): boolean {
+  if (!bundleId) return false
+  const normalised = bundleId.toLowerCase()
+  return MESSAGING_PATTERNS.some((pattern) => normalised.includes(pattern))
+}

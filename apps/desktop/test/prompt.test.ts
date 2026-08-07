@@ -64,7 +64,11 @@ describe('buildPolishPrompt — golden files', () => {
       language: 'en',
     })
     golden('clean-work-en', built.systemPrompt)
-    expect(built.examples).toHaveLength(2)
+    // Four since the layout work: the original self-correction and
+    // do-not-answer pair, plus one showing "scratch that" obeyed while "add a
+    // new line to the file" stays as text, and one showing a spoken
+    // "new paragraph" becoming an actual break.
+    expect(built.examples).toHaveLength(4)
   })
 
   it('rewrite level, formal email tone, no dictionary, auto language', () => {

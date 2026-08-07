@@ -24,7 +24,8 @@ import {
   shouldSkipPolish,
 } from '../engines/polish/prompt'
 import type { PolishEngine, SttEngine } from '../engines/types'
-import { categoryForBundleId } from './app-category'
+import { categoryForBundleId, isMessagingApp } from './app-category'
+import { stripTrailingPeriod } from './trailing-period'
 import type { InjectionResult, TextInjector } from './injector'
 import type { DictationStateMachine } from './state-machine'
 
@@ -506,7 +507,14 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       }
     }
 
-    const finalText = polishedText ?? rawText
+    // Applied to whichever text is about to be inserted, not just the polished
+    // one: "ok." is two words, so it skips polishing entirely (POLISH
+    // .skipWordCount) — and a bare "ok." is the single most common message
+    // this rule exists for.
+    const finalText = stripTrailingPeriod(polishedText ?? rawText, {
+      messaging: isMessagingApp(context.frontmostBundleId),
+      formality: this.#deps.styleFor(context.category).formality,
+    })
 
     // -- insert ------------------------------------------------------------
     this.#phase = 'inserting'
