@@ -206,9 +206,34 @@ void HandleEdge(bool down) {
   EmitHotkeyEvent(1, now);
 }
 
+/**
+ * Stamped on every event we post ourselves.
+ *
+ * The paste used to be posted from a private event source, which kept it out
+ * of our own tap for free — but a private source is also why the Command
+ * modifier never reached the target app (see SendPasteShortcut). Posting from
+ * the combined session state fixes that and makes our synthetic keystrokes
+ * visible to our own tap, so they need a way to be recognised: without one, a
+ * user who had bound `v` as a custom hotkey would have their own paste
+ * swallowed by the tap that is meant to be watching for their key.
+ */
+constexpr int64_t kMurmurSyntheticMarker = 0x4D524D52;  // 'MRMR'
+
+void MarkSynthetic(CGEventRef event) {
+  CGEventSetIntegerValueField(event, kCGEventSourceUserData, kMurmurSyntheticMarker);
+}
+
+bool IsSynthetic(CGEventRef event) {
+  return CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kMurmurSyntheticMarker;
+}
+
 CGEventRef TapCallback(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void* refcon) {
   (void)proxy;
   (void)refcon;
+
+  // Our own synthetic paste, on its way to the target app. Never a hotkey edge,
+  // and never ours to suppress.
+  if (IsSynthetic(event)) return event;
 
   // The OS disables a tap that takes too long, or when access is revoked.
   // Re-enable rather than silently losing the hotkey for the rest of the session.
@@ -488,30 +513,50 @@ Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
     return MakeResult(env, false, "Accessibility permission is not granted");
   }
 
-  // A private source keeps our synthetic events out of our own tap and out of
-  // other apps' key-repeat state.
-  CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStatePrivate);
+  // **Combined session state, not private.** A private source has its own
+  // modifier state that the window server does not merge into the system's,
+  // so an app that asks "is Command down right now?" — rather than reading the
+  // flags on the event it was handed — sees no modifier and treats ⌘V as a
+  // bare `v`. That is the "it typed the letter v into my document" bug: the
+  // keystroke arrived, the modifier did not. Our own tap is kept out by the
+  // marker below instead, which is what the private source was really for.
+  CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStateCombinedSessionState);
   if (source == nullptr) return MakeResult(env, false, "could not create an event source");
 
+  // **The modifier is pressed, not merely asserted.** Setting the Command flag
+  // on the `v` alone races: an app can process the key before the window
+  // server's modifier state reflects it. Posting Command as its own event
+  // first establishes the state every app agrees on, which is what a real
+  // keyboard does.
+  CGEventRef commandDown =
+      CGEventCreateKeyboardEvent(source, static_cast<CGKeyCode>(kVK_Command), true);
   CGEventRef keyDown = CGEventCreateKeyboardEvent(source, static_cast<CGKeyCode>(kVK_ANSI_V), true);
   CGEventRef keyUp = CGEventCreateKeyboardEvent(source, static_cast<CGKeyCode>(kVK_ANSI_V), false);
-  if (keyDown == nullptr || keyUp == nullptr) {
-    if (keyDown != nullptr) CFRelease(keyDown);
-    if (keyUp != nullptr) CFRelease(keyUp);
+  CGEventRef commandUp =
+      CGEventCreateKeyboardEvent(source, static_cast<CGKeyCode>(kVK_Command), false);
+  if (commandDown == nullptr || keyDown == nullptr || keyUp == nullptr || commandUp == nullptr) {
+    for (CGEventRef event : {commandDown, keyDown, keyUp, commandUp}) {
+      if (event != nullptr) CFRelease(event);
+    }
     CFRelease(source);
     return MakeResult(env, false, "could not create the keyboard events");
   }
 
+  CGEventSetFlags(commandDown, kCGEventFlagMaskCommand);
   CGEventSetFlags(keyDown, kCGEventFlagMaskCommand);
   CGEventSetFlags(keyUp, kCGEventFlagMaskCommand);
+  // The release carries no Command: it *is* the modifier going up, and leaving
+  // the flag set here is how a stuck ⌘ ends up wedged in the target app.
+  CGEventSetFlags(commandUp, static_cast<CGEventFlags>(0));
 
   // kCGHIDEventTap so the event enters at the lowest level and every app sees
   // it, including ones that install their own session taps.
-  CGEventPost(kCGHIDEventTap, keyDown);
-  CGEventPost(kCGHIDEventTap, keyUp);
+  for (CGEventRef event : {commandDown, keyDown, keyUp, commandUp}) {
+    MarkSynthetic(event);
+    CGEventPost(kCGHIDEventTap, event);
+  }
 
-  CFRelease(keyDown);
-  CFRelease(keyUp);
+  for (CGEventRef event : {commandDown, keyDown, keyUp, commandUp}) CFRelease(event);
   CFRelease(source);
 
   return MakeResult(env, true, nullptr);
