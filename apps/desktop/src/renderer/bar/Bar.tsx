@@ -449,7 +449,7 @@ function Controls({
 }): React.JSX.Element {
   return (
     <div className="bar-controls absolute right-[6px] top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
-      <ControlButton label="Cancel dictation" onClick={onCancel}>
+      <ControlButton label="Cancel dictation" onClick={onCancel} destructive>
         <path d="M6 6l12 12M18 6L6 18" />
       </ControlButton>
       <ControlButton label="Choose microphone" onClick={onMic} pressed={menuOpen}>
@@ -466,11 +466,19 @@ function ControlButton({
   label,
   onClick,
   pressed,
+  destructive = false,
   children,
 }: {
   label: string
   onClick: () => void
   pressed?: boolean
+  /**
+   * Throws the current utterance away. Warm on hover rather than always red:
+   * three identical grey glyphs give the eye no way to tell the one that
+   * discards your dictation from the two that do not — and it is the leftmost,
+   * where the pointer arrives first.
+   */
+  destructive?: boolean
   children: React.ReactNode
 }): React.JSX.Element {
   return (
@@ -482,7 +490,10 @@ function ControlButton({
       onClick={onClick}
       className={[
         'grid size-[18px] cursor-pointer place-items-center rounded-full transition-all duration-150',
-        'hover:bg-white/15 hover:text-white active:scale-90 active:bg-white/20',
+        'active:scale-90',
+        destructive
+          ? 'hover:bg-red-500/25 hover:text-red-200 active:bg-red-500/35'
+          : 'hover:bg-white/15 hover:text-white active:bg-white/20',
         pressed ? 'bg-white/15 text-white' : 'text-white/70',
       ].join(' ')}
     >
