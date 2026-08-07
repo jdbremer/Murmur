@@ -81,14 +81,21 @@ body {
   animation: bar-menu-rise 160ms cubic-bezier(0.3, 1.2, 0.5, 1) both;
 }
 
+/*
+ * Scale only — no translate. The controls centre themselves vertically with
+ * Tailwind's `-translate-y-1/2`, which compiles to the standalone CSS
+ * `translate` property, not to `transform`. The two compose rather than
+ * override, so repeating the -50% here applied it twice and left the controls
+ * sitting half their own height (9px) above the centre of the capsule.
+ */
 @keyframes bar-fade-scale {
   from {
     opacity: 0;
-    transform: translateY(-50%) scale(0.85);
+    transform: scale(0.85);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) scale(1);
+    transform: scale(1);
   }
 }
 
