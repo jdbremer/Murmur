@@ -3,10 +3,11 @@
   "version": "0.1.6",
   "private": true,
   "license": "MIT",
-  "description": "N-API glue for Murmur: hotkey, text injection, frontmost-app, permissions (macOS + Windows).",
+  "description": "N-API glue for Murmur: hotkey, text injection, frontmost-app, permissions (macOS, Windows, Linux/X11).",
   "os": [
     "darwin",
-    "win32"
+    "win32",
+    "linux"
   ],
   "gypfile": true,
   "main": "index.js",

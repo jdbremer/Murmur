@@ -107,10 +107,39 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
 
-# Linux is deliberately absent. `@murmur/native` declares os: [darwin, win32],
-# so a Linux build would ship the no-op stub: the Hub and settings would run,
-# and nothing would ever dictate. Shipping that as a download would be a
-# broken promise — see WINDOWS-HANDOFF.md and PLAN §4.1.
+# Linux: AppImage (runs anywhere, no install) plus a .deb for apt users. x64
+# only for now — the sidecar prebuilds we fetch are x64, so an arm64 package
+# would install and never transcribe.
+#
+# `category` and the desktop entry matter more here than on the other two: it
+# is what puts Murmur in the applications menu at all.
+linux:
+  # The 512 px PNG scripts/make-icons.sh already emits for this target.
+  icon: buildResources/icon.png
+  category: Utility
+  synopsis: Local-first dictation
+  description: >-
+    Hold a key, speak, release — polished text appears wherever your cursor is.
+    Speech-to-text and polishing both run on this machine.
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  desktop:
+    entry:
+      # Startup notification off: the first window is the tray/Bar, not a
+      # document window, so the desktop's "starting…" cursor never resolves.
+      StartupNotify: 'false'
+      Keywords: 'dictation;speech;transcription;voice;'
+
+# `deb.depends` is deliberately left at electron-builder's default. The default
+# list already carries libxtst6 — the one package the native addon adds beyond
+# Electron's own needs, and the one that supplies both XTEST and XRecord —
+# while libx11-6 arrives transitively with GTK. Hand-writing the list would
+# override the default wholesale and silently drop the rest of it, and the
+# ALSA package has been renamed (libasound2 → libasound2t64) in a way that
+# would make a pinned list wrong on current Debian and Ubuntu.
 
 # Draft, not published: a release is created with the binaries attached and
 # waits for a human to review and publish it. Nothing reaches users by accident.

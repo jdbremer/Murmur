@@ -19,7 +19,7 @@ import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDevMode } from '../../hooks/useDevMode'
 import { useDictationState } from '../../hooks/useDictationState'
 import { useSettings } from '../../hooks/useSettings'
-import { isMacPlatform, isWindowsPlatform } from '../../lib/platform'
+import { isLinuxPlatform, isMacPlatform, isWindowsPlatform } from '../../lib/platform'
 
 /**
  * Settings (PLAN §2.2.5).
@@ -40,6 +40,21 @@ const MAC_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
 const WINDOWS_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
   { value: 'rightCtrl', label: 'Right Ctrl (recommended)' },
   { value: 'capsLock', label: 'Caps Lock' },
+  { value: 'custom', label: 'Custom key' },
+]
+
+/**
+ * Linux/X11: the right-hand modifiers only.
+ *
+ * XRecord cannot swallow a key, so Caps Lock is absent for a concrete reason —
+ * offering it would toggle caps on every dictation. The stored-key names are
+ * shared across platforms, so `rightCmd`/`rightOpt` are relabelled here to the
+ * keys X11 actually binds them to.
+ */
+const LINUX_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
+  { value: 'rightCtrl', label: 'Right Ctrl (recommended)' },
+  { value: 'rightOpt', label: 'Right Alt' },
+  { value: 'rightCmd', label: 'Right Super' },
   { value: 'custom', label: 'Custom key' },
 ]
 
@@ -104,14 +119,12 @@ export function SettingsSection(): React.JSX.Element {
     settings.historyRetention.mode === 'off' ? 'off' : String(settings.historyRetention.days)
   const isMac = isMacPlatform()
   const isWindows = isWindowsPlatform()
-  // Linux keeps the mac list + stored value: the listener never fires there,
-  // so the Select's job is to show what is stored, not to migrate it.
-  const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : MAC_HOTKEYS
+  const isLinux = isLinuxPlatform()
+  const hotkeyOptions = isWindows ? WINDOWS_HOTKEYS : isLinux ? LINUX_HOTKEYS : MAC_HOTKEYS
+  const hotkeyFallback: HotkeyKey = isWindows || isLinux ? 'rightCtrl' : 'fn'
   const hotkeyValue = hotkeyOptions.some((o) => o.value === settings.hotkey.key)
     ? settings.hotkey.key
-    : isWindows
-      ? 'rightCtrl'
-      : 'fn'
+    : hotkeyFallback
 
   return (
     <Section
@@ -129,7 +142,9 @@ export function SettingsSection(): React.JSX.Element {
               ? 'fn is the default — while Murmur is running it owns this key, so macOS globe actions (emoji, Apple Dictation) will not fire from it. The right-hand modifiers exist for external keyboards that have no fn key.'
               : isWindows
                 ? 'Right Ctrl is the Windows default. Space chords are disabled until key-latch is rock-solid.'
-                : 'The key listener is macOS- and Windows-only; on this platform the key is stored but never fires.'
+                : isLinux
+                  ? 'Right Ctrl is the Linux default. X11 only — on a Wayland session the key is stored but never fires, and Help says so. Caps Lock is not offered because X11 cannot swallow it.'
+                  : 'The key listener needs macOS, Windows or Linux/X11; on this platform the key is stored but never fires.'
           }
           htmlFor="settings-hotkey"
         >
@@ -260,7 +275,13 @@ export function SettingsSection(): React.JSX.Element {
         </Row>
         <Row
           label="Launch at login"
-          hint={isMacPlatform() ? undefined : 'Only applied on macOS and Windows.'}
+          hint={
+            isLinux
+              ? 'Writes ~/.config/autostart/murmur.desktop.'
+              : isMac || isWindows
+                ? undefined
+                : 'Not applied on this platform.'
+          }
         >
           <Toggle
             label="Launch at login"

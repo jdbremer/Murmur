@@ -35,7 +35,7 @@ if (missing.length > 0) {
     yellow('   The app will build and run, and will not be able to transcribe anything.'),
   )
   console.warn(
-    yellow('   Build them first: brew install cmake && scripts/sidecars/build-whisper.sh'),
+    yellow('   Build them first: scripts/sidecars/build-whisper.sh (needs cmake on PATH)'),
   )
   console.warn(
     yellow('   (build-llama.sh for polishing; the .ps1 scripts fetch prebuilds on Windows)'),

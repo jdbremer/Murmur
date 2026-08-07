@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applySettingsPatch,
   createDefaultSettings,
+  LINUX_DEFAULT_HOTKEY_KEY,
   sanitizeHotkeyForPlatform,
   SettingsPatchSchema,
   SettingsSchema,
@@ -31,11 +32,25 @@ describe('SettingsSchema', () => {
       onboardingCompleted: false,
       commandModeEnabled: true,
       soundCuesEnabled: true,
+      meetings: {
+        enabled: false,
+        autoDetect: false,
+        folder: null,
+        keepAudio: false,
+        autoRecord: {},
+      },
     } satisfies Settings)
   })
 
   it('audio retention defaults to off — audio is never written to disk unasked', () => {
     expect(createDefaultSettings().audioRetention).toEqual({ mode: 'off' })
+  })
+
+  it('meeting capture is off by default — recording is opted into, never discovered', () => {
+    const meetings = createDefaultSettings().meetings
+    expect(meetings.enabled).toBe(false)
+    expect(meetings.autoDetect).toBe(false)
+    expect(meetings.keepAudio).toBe(false)
   })
 
   it('round-trips: parse(defaults) is a fixed point', () => {
@@ -90,9 +105,28 @@ describe('SettingsSchema', () => {
     for (const key of ['rightCtrl', 'ctrlSpace', 'altSpace', 'capsLock'] as const) {
       const windowsKey = SettingsSchema.parse({ hotkey: { key } }).hotkey
       expect(sanitizeHotkeyForPlatform(windowsKey, 'darwin').key).toBe('fn')
-      // Linux binds nothing either way; the stored key should still be honest.
-      expect(sanitizeHotkeyForPlatform(windowsKey, 'linux').key).toBe('fn')
     }
+  })
+
+  it('heals only the keys X11 cannot bind on Linux', () => {
+    // XRecord is listen-only, so anything needing suppression is unbindable —
+    // but Right Ctrl is not, and healing it away would move a working hotkey.
+    for (const key of ['fn', 'capsLock', 'ctrlSpace', 'altSpace'] as const) {
+      const unbindable = SettingsSchema.parse({ hotkey: { key } }).hotkey
+      expect(sanitizeHotkeyForPlatform(unbindable, 'linux').key).toBe(LINUX_DEFAULT_HOTKEY_KEY)
+    }
+
+    // These straddle the Mac/Windows deny-lists and X11 binds all three.
+    for (const key of ['rightCtrl', 'rightOpt', 'rightCmd'] as const) {
+      const bindable = SettingsSchema.parse({ hotkey: { key } }).hotkey
+      expect(sanitizeHotkeyForPlatform(bindable, 'linux')).toEqual(bindable)
+    }
+
+    const custom = SettingsSchema.parse({ hotkey: { key: 'custom', customKeyCode: 105 } }).hotkey
+    expect(sanitizeHotkeyForPlatform(custom, 'linux')).toEqual(custom)
+
+    const broken = SettingsSchema.parse({ hotkey: { key: 'custom', customKeyCode: null } }).hotkey
+    expect(sanitizeHotkeyForPlatform(broken, 'linux').key).toBe(LINUX_DEFAULT_HOTKEY_KEY)
   })
 
   it('leaves a hotkey the platform can bind untouched', () => {

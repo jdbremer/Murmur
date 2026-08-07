@@ -60,11 +60,15 @@ jobs:
       - name: Build
         run: npm run build
 
-  # The port gate: Windows compiles the win32 native module (the check that
-  # catches an MSVC break the Mac job never sees) and Linux proves the
-  # README's promise that the app installs and tests green with no native
-  # addon at all. Style gates (lint, format) stay on the Mac job — they do
-  # not vary by OS.
+  # The port gate: each runner compiles and loads its own native backend, the
+  # only check that catches an MSVC or a GCC break the Mac job never sees.
+  # Style gates (lint, format) stay on the Mac job — they do not vary by OS.
+  #
+  # This leg used to prove the opposite thing on Linux — that the workspace
+  # installs and tests green with *no* addon at all. That property moved rather
+  # than vanished: it is now what `createNativeStub` covers in the unit tests
+  # (apps/desktop/test/injection.test.ts and friends), which exercise the stub's
+  # behaviour directly instead of inferring it from a skipped install.
   gate-ports:
     name: typecheck · test · build (${{ matrix.os }})
     if: github.event_name != 'schedule'
@@ -85,14 +89,29 @@ jobs:
           node-version: 22
           cache: npm
 
+      # The X11 client headers the Linux backend links against. Not on the
+      # runner image by default, and without them `npm ci` skips the addon
+      # silently — which is exactly the failure the next step exists to catch.
+      - name: Install the X11 headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev
+
       - name: Install
         run: npm ci
 
       # npm treats @murmur/native as optional, so a broken compile during
       # `npm ci` is silently skipped — this explicit build is what fails loud.
-      - name: Build the native module (Windows)
-        if: runner.os == 'Windows'
+      - name: Build the native module
         run: npm run native:build
+
+      # Compiling is not loading. This is what catches a missing symbol or an
+      # soname the runner has but a user's box does not.
+      #
+      # `available` is false on a headless runner even when the build is
+      # perfect — there is no X server — so the assertion is on platformInfo()
+      # reporting a real backend rather than the JS stub's "stub (…)".
+      - name: Verify the native module loads
+        run: node -e "const n=require('@murmur/native'); const i=n.platformInfo(); if (i.startsWith('stub')) { console.error('native module failed to load:', i); process.exit(1) } console.log('native ok:', i)"
 
       - name: Typecheck
         run: npm run typecheck
