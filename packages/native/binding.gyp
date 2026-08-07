@@ -30,6 +30,14 @@
           }
         ],
         [
+          "OS==\"linux\"",
+          {
+            "sources": ["src/linux/murmur_native_linux.cpp"],
+            "cflags_cc": ["-std=c++20", "-Wall", "-Wextra", "-fno-exceptions"],
+            "libraries": ["-lX11", "-lXtst"]
+          }
+        ],
+        [
           "OS==\"win\"",
           {
             "sources": ["src/win/murmur_native_win.cpp"],

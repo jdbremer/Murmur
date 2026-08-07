@@ -1,5 +1,6 @@
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
 import { app, ipcMain, Menu } from 'electron'
 
 import {
@@ -415,9 +416,53 @@ async function bootstrap(): Promise<void> {
   }
 
   function applyLaunchAtLogin(current: Settings): void {
-    // Only macOS and Windows implement this; Linux dev builds no-op.
+    if (process.platform === 'linux') {
+      applyLinuxAutostart(current.launchAtLogin)
+      return
+    }
     if (process.platform !== 'darwin' && process.platform !== 'win32') return
     app.setLoginItemSettings({ openAtLogin: current.launchAtLogin, openAsHidden: true })
+  }
+
+  /**
+   * Linux autostart, by hand.
+   *
+   * Electron's `setLoginItemSettings` is a no-op on Linux, so the toggle would
+   * flip and do nothing — the silent-dead-setting shape this app keeps
+   * refusing to ship. The XDG spec's answer is a .desktop file in
+   * `~/.config/autostart`, which every mainstream desktop honours. Failure is
+   * logged and swallowed: an unwritable config dir must not take down boot.
+   */
+  function applyLinuxAutostart(enabled: boolean): void {
+    const configHome = process.env['XDG_CONFIG_HOME'] || join(homedir(), '.config')
+    const file = join(configHome, 'autostart', 'murmur.desktop')
+
+    try {
+      if (!enabled) {
+        rmSync(file, { force: true })
+        return
+      }
+      // APPIMAGE is set by the AppImage runtime and points at the .AppImage the
+      // user actually launched; argv[0] there is the unpacked temp binary,
+      // which is gone by the next boot.
+      const exec = process.env['APPIMAGE'] || app.getPath('exe')
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(
+        file,
+        [
+          '[Desktop Entry]',
+          'Type=Application',
+          'Name=Murmur',
+          `Exec=${exec}`,
+          'Terminal=false',
+          'X-GNOME-Autostart-enabled=true',
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+    } catch (error) {
+      log.warn('could not update the Linux autostart entry:', error)
+    }
   }
 
   function applyHistoryRetention(): void {

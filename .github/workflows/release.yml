@@ -49,6 +49,14 @@ jobs:
           - os: windows-latest
             name: Windows (NSIS x64)
             script: pack:win
+          # Pinned to the oldest supported runner on purpose, and only here.
+          # A Linux binary links the glibc it was built against and will not
+          # start on anything older, so building on ubuntu-latest would quietly
+          # restrict the AppImage to the newest distros. The other two jobs
+          # have no equivalent concern.
+          - os: ubuntu-22.04
+            name: Linux (AppImage + deb x64)
+            script: pack:linux
 
     steps:
       # The repo is LF; stop the Windows runner's autocrlf from rewriting it.
@@ -60,6 +68,13 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # The X11 client headers the Linux backend links against — not on the
+      # runner image by default. Installed before `npm ci` so the addon builds
+      # on the first pass rather than only on the explicit build below.
+      - name: Install the X11 headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev
 
       - name: Install
         run: npm ci
@@ -73,8 +88,31 @@ jobs:
 
       # `available` is a boolean property, not a method — the stub sets it to
       # false and reports why through platformInfo().
+      #
+      # Two assertions, because they mean different things on different
+      # runners. "platformInfo does not start with `stub`" is the universal
+      # one: it fails only when the addon did not compile or did not load,
+      # which is the shipping risk this step exists for. `available` is only
+      # additionally required on macOS and Windows — the Linux backend
+      # correctly answers false on a headless runner (no X server to connect
+      # to), so asserting it there would fail every release for the one reason
+      # that is not a defect.
       - name: Verify the native module loads
-        run: node -e "const n=require('@murmur/native'); if (!n.available) { console.error('native module failed to load:', n.platformInfo()); process.exit(1) } console.log('native ok:', n.platformInfo())"
+        shell: bash
+        run: |
+          node -e "
+            const n = require('@murmur/native')
+            const info = n.platformInfo()
+            if (info.startsWith('stub')) {
+              console.error('native module failed to load:', info)
+              process.exit(1)
+            }
+            if (process.platform !== 'linux' && !n.available) {
+              console.error('native module loaded but reports unavailable:', info)
+              process.exit(1)
+            }
+            console.log('native ok:', info)
+          "
 
       # The same gate as CI. A release should never be the first time these run
       # against the tagged commit.
@@ -110,6 +148,15 @@ jobs:
         run: |
           ./scripts/sidecars/fetch-whisper-win.ps1
           ./scripts/sidecars/fetch-llama-win.ps1
+
+      # From source, like macOS: ggml-org publishes no Linux prebuild we could
+      # pin the way fetch-*-win.ps1 does. Slow, and the cache above is what
+      # keeps it off the critical path for every release but the first.
+      - name: Build sidecars (Linux)
+        if: runner.os == 'Linux' && steps.sidecars.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake build-essential
+          scripts/sidecars/build-linux.sh
 
       # A release that silently ships without them is the bug this whole step
       # exists to prevent: the app installs, opens, downloads a model, and then
@@ -203,10 +250,12 @@ jobs:
           path: |
             apps/desktop/release/*.dmg
             apps/desktop/release/*.exe
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest*.yml
 
-  # The single publisher. Runs once, after both platforms, so there is exactly
+  # The single publisher. Runs once, after every platform, so there is exactly
   # one draft per tag no matter how many times the tag is re-cut.
   release:
     name: Draft release

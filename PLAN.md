@@ -163,13 +163,13 @@ Prototype-stage shortcut: `uiohook-napi` can stand in for the event tap during M
 
 Bundled sidecar binaries (`whisper-server`, `llama-server`) are compiled in CI for arm64 + x86_64, code-signed with hardened runtime, and shipped inside `Contents/Resources/bin/` (notarization requirement — see §16 risks).
 
-### 4.1 Windows & Linux ports (planned — M7/M8)
+### 4.1 Windows & Linux ports (M7 landed; M8 X11 landed, Wayland outstanding)
 
 Only `@murmur/native` and packaging are per-OS; the inference stack, Electron shell, and the entire Hub/Bar UI are already cross-platform. A port implements this table plus an installer — nothing else changes:
 
 | Concern | Windows (M7) | Linux (M8, best-effort) |
 |---|---|---|
-| Hold-to-talk hotkey | low-level keyboard hook (`SetWindowsHookEx` WH_KEYBOARD_LL) in the native module, with key suppression | X11: XGrabKey/XInput2; Wayland: GlobalShortcuts portal where the compositor supports it |
+| Hold-to-talk hotkey | low-level keyboard hook (`SetWindowsHookEx` WH_KEYBOARD_LL) in the native module, with key suppression | X11: **XRecord** (shipped, not the XGrabKey planned here — see below); Wayland: GlobalShortcuts portal where the compositor supports it |
 | Text insertion | clipboard swap + `SendInput` Ctrl+V; UI Automation fallback | X11: XTEST Ctrl+V; Wayland: virtual-keyboard protocol, else clipboard-assist mode |
 | Frontmost app (tone category) | `GetForegroundWindow` → process name | X11: `_NET_ACTIVE_WINDOW`; Wayland: often unavailable → falls back to the global default tone |
 | GPU acceleration | llama.cpp/whisper.cpp Vulkan (or CUDA) builds; CPU int8 STT via ONNX Runtime | same (Vulkan/CPU) |
@@ -178,6 +178,8 @@ Only `@murmur/native` and packaging are per-OS; the inference stack, Electron sh
 | Packaging | signed NSIS installer + winget manifest + auto-update | AppImage + .deb + Flatpak |
 
 Sequencing: Windows right after macOS v1.0 (well-trodden mechanics). Linux last and explicitly best-effort — Wayland fragments global hotkeys and synthetic paste across compositors, so Linux ships X11-first with a published Wayland support matrix.
+
+**Deviation, Linux hotkey: XRecord, not XGrabKey.** The row above planned an XGrabKey grab so the key could be suppressed the way the mac tap and the Windows hook suppress theirs. That is unworkable for the presets we actually ship. Murmur's hotkeys are bare modifiers (Right Ctrl by default), and an XGrabKey grab on a modifier takes that key *exclusively* — Right Ctrl would stop working as Ctrl in every other application for as long as Murmur runs. XRecord observes the key without stealing it, at the cost of being unable to swallow anything. Two consequences are load-bearing and documented where a user meets them (`packages/native/src/linux/`, `LINUX-HANDOFF.md`, the README): Caps Lock and the Space chords are not offered as Linux presets, because both need suppression to behave; and `isSecureInputActive` reports false, because the only X11 probe for it would mean grabbing the keyboard away from the password dialog it is trying to detect.
 
 ---
 
@@ -420,9 +422,10 @@ Release automation: tag → CI builds, signs, notarizes, staples, and publishes 
 `@murmur/native` win32 backend (low-level keyboard hook, SendInput paste, foreground-app lookup), Vulkan/CPU sidecar builds, NSIS installer + Authenticode signing + winget manifest, Windows CI leg, QA matrix (Win 10/11).
 **Accept:** M1-parity on Windows 11 — hold-key → text lands in Notepad/Teams/Chrome in ≤ 2.5 s; installer, auto-update, and download page verified.
 
-### M8 — Linux port (post-1.0, best-effort)
-X11 backend (XGrabKey + XTEST), StatusNotifier tray, AppImage/.deb/Flatpak packaging, documented Wayland support matrix (GlobalShortcuts portal where available).
+### M8 — Linux port (post-1.0, best-effort) — X11 landed, unproven on hardware
+X11 backend (XRecord + XTEST — see the deviation in §4.1), AppImage/.deb packaging, Wayland detected and reported rather than silently failing.
 **Accept:** M1-parity on Ubuntu LTS under X11; Wayland matrix published with per-compositor status.
+**Where it stands:** the backend compiles and loads in CI on every push and the installers build, but no dictation has been driven end-to-end on real Linux hardware — the acceptance above is *not* met yet. Flatpak, the StatusNotifier tray and the Wayland matrix are all still outstanding. [LINUX-HANDOFF.md](./LINUX-HANDOFF.md) is the queue.
 
 ### 13.4 Evals (built alongside M3, run in CI)
 - **Polish golden set**: ~150 transcript → expected-output pairs per level (fillers, self-corrections, lists, emails, mixed-language), scored by exact/fuzzy match; run against every catalog polish model in a nightly job on a self-hosted Apple Silicon runner.

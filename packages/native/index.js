@@ -9,12 +9,14 @@
  *   2. supported, binding won't load → typed no-op stub (`available: false`)
  *   3. supported, binding loaded  → binding functions with per-member fallback
  *
- * Windows lives in `src/win/`; macOS in `src/murmur_native.mm`. Linux stays stub.
+ * macOS lives in `src/murmur_native.mm`, Windows in `src/win/`, Linux in
+ * `src/linux/` (X11 only — the binding itself reports `isAvailable: false` on a
+ * Wayland session, which is case 3 below rather than case 1).
  */
 
 const BINDING_PATHS = ['./build/Release/murmur_native.node', './build/Debug/murmur_native.node']
 
-const SUPPORTED = new Set(['darwin', 'win32'])
+const SUPPORTED = new Set(['darwin', 'win32', 'linux'])
 
 /** Every capability, inert. Safe to call; nothing happens. */
 function createStub(reason) {

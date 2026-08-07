@@ -25,6 +25,10 @@ export function isWindowsPlatform(userAgent: string = navigatorUserAgent()): boo
   return detectPlatform(userAgent) === 'windows'
 }
 
+export function isLinuxPlatform(userAgent: string = navigatorUserAgent()): boolean {
+  return detectPlatform(userAgent) === 'linux'
+}
+
 /**
  * Where Murmur keeps everything (PLAN §9).
  *

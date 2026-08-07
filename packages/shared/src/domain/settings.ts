@@ -53,6 +53,32 @@ export const WINDOWS_HOTKEY_KEYS = [
   'custom',
 ] as const satisfies readonly HotkeyKey[]
 
+/**
+ * Presets shown on Linux/X11.
+ *
+ * Narrower than either of the others, and for a reason that is structural
+ * rather than stylistic: XRecord is listen-only, so the Linux backend cannot
+ * swallow a key. Every preset whose contract depends on suppression is out —
+ * Caps Lock would toggle caps on each dictation, and the Space chords would
+ * type a space. `fn` never reaches X at all (the firmware consumes it). What
+ * remains is the three right-hand modifiers, which no platform suppresses
+ * anyway, plus a custom keycode the user has chosen knowing it still types.
+ */
+export const LINUX_HOTKEY_KEYS = [
+  'rightCtrl',
+  'rightOpt',
+  'rightCmd',
+  'custom',
+] as const satisfies readonly HotkeyKey[]
+
+/** True when `key` is one the Linux/X11 backend can actually bind. */
+export function isLinuxSupportedHotkeyKey(key: HotkeyKey): boolean {
+  return (LINUX_HOTKEY_KEYS as readonly HotkeyKey[]).includes(key)
+}
+
+/** Shipped Linux default hotkey — Right Ctrl, as on Windows. */
+export const LINUX_DEFAULT_HOTKEY_KEY: HotkeyKey = 'rightCtrl'
+
 /** True when `key` is a macOS-only preset that must not surface on Windows. */
 export function isMacOnlyHotkeyKey(key: HotkeyKey): boolean {
   return key === 'fn' || key === 'rightCmd' || key === 'rightOpt'
@@ -109,23 +135,35 @@ export function isSpaceChordHotkey(key: HotkeyKey): boolean {
  */
 export function sanitizeHotkeyForPlatform(hotkey: HotkeyConfig, platform: string): HotkeyConfig {
   const isWindows = platform === 'win32'
-  const platformDefault = isWindows ? WINDOWS_DEFAULT_HOTKEY_KEY : MAC_DEFAULT_HOTKEY_KEY
+  const isLinux = platform === 'linux'
+  const platformDefault = isWindows
+    ? WINDOWS_DEFAULT_HOTKEY_KEY
+    : isLinux
+      ? LINUX_DEFAULT_HOTKEY_KEY
+      : MAC_DEFAULT_HOTKEY_KEY
 
   if (isIncompleteCustomHotkey(hotkey)) {
     return { ...hotkey, key: platformDefault, customKeyCode: null }
   }
+  // Linux is checked against an allow-list rather than the two deny-lists: its
+  // supported set straddles both (Right Ctrl is "Windows-only", Right Super and
+  // Right Alt are "Mac-only"), so either deny-list would heal away a key X11
+  // binds perfectly well.
+  if (isLinux) {
+    if (!isLinuxSupportedHotkeyKey(hotkey.key)) {
+      return { ...hotkey, key: LINUX_DEFAULT_HOTKEY_KEY, customKeyCode: null }
+    }
+    return hotkey
+  }
   if (isWindows && (isMacOnlyHotkeyKey(hotkey.key) || isSpaceChordHotkey(hotkey.key))) {
     return { ...hotkey, key: WINDOWS_DEFAULT_HOTKEY_KEY, customKeyCode: null }
   }
-  // Non-Windows: a Windows-only preset can never fire here. Note this also
-  // covers Linux, where nothing fires either way — healing to `fn` at least
-  // leaves the stored key honest about what this build would bind.
   if (!isWindows && isWindowsOnlyHotkeyKey(hotkey.key)) {
     return { ...hotkey, key: MAC_DEFAULT_HOTKEY_KEY, customKeyCode: null }
   }
   // A custom key code is a per-OS value: macOS stores a CGKeyCode, Windows a
-  // Win32 VK. The same number means a different physical key on the other
-  // platform, so a synced `custom` binding is not portable.
+  // Win32 VK, Linux an X11 keycode. The same number means a different physical
+  // key on each, so a synced `custom` binding is not portable.
   return hotkey
 }
 
@@ -166,6 +204,44 @@ export const ExternalEndpointSchema = z.object({
   model: z.string().min(1),
 })
 export type ExternalEndpoint = z.infer<typeof ExternalEndpointSchema>
+
+// ---------------------------------------------------------------------------
+// Meetings
+// ---------------------------------------------------------------------------
+
+/**
+ * Long-form meeting capture (PLAN §18.2).
+ *
+ * **Off by default, and "off" means inert rather than quiet.** With `enabled`
+ * false nothing polls, no window title is read, no capture lease is taken, no
+ * tap subprocess is spawned, and the system-audio permission is never
+ * requested — a user who never turns this on is never even asked for a fourth
+ * permission. `autoDetect` is a second switch so manual recording is usable
+ * without any process polling at all.
+ */
+export const MeetingSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Watch for meetings and offer to record. Requires `enabled`. */
+  autoDetect: z.boolean().default(false),
+  /**
+   * Where transcripts are written. `null` means
+   * `~/Documents/Murmur Meetings` — resolved in main, because this package
+   * may not touch Node built-ins.
+   */
+  folder: z.string().min(1).nullable().default(null),
+  /**
+   * Keep the recorded audio beside the transcript. Deliberately separate from
+   * `audioRetention`, which is about dictation: one switch controlling both a
+   * few MB of utterances and a 350 MB meeting WAV would be a bad control.
+   */
+  keepAudio: z.boolean().default(false),
+  /**
+   * Per-bundle-id answers remembered from the consent prompt, so a user who
+   * said "always" for Zoom is not asked again.
+   */
+  autoRecord: z.record(z.string(), z.enum(['ask', 'always', 'never'])).default({}),
+})
+export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -216,6 +292,8 @@ const settingsFields = {
    * before the eye notices a missing pill.
    */
   soundCuesEnabled: z.boolean(),
+  /** Long-form meeting capture. Off by default — see {@link MeetingSettingsSchema}. */
+  meetings: MeetingSettingsSchema,
 } as const
 
 /** Full settings: unknown/missing keys fall back to the shipped defaults. */
@@ -238,6 +316,7 @@ export const SettingsSchema = z.object({
   onboardingCompleted: settingsFields.onboardingCompleted.default(false),
   commandModeEnabled: settingsFields.commandModeEnabled.default(true),
   soundCuesEnabled: settingsFields.soundCuesEnabled.default(true),
+  meetings: settingsFields.meetings.default(() => MeetingSettingsSchema.parse({})),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 
