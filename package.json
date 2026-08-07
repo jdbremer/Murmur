@@ -3,7 +3,7 @@
   "version": "0.1.6",
   "private": true,
   "license": "MIT",
-  "description": "Local-first dictation for macOS \u2014 hold a key, speak, release, polished text appears.",
+  "description": "Local-first dictation for macOS — hold a key, speak, release, polished text appears.",
   "type": "commonjs",
   "engines": {
     "node": ">=22.12.0"

@@ -3,7 +3,7 @@
   "version": "0.1.6",
   "private": true,
   "license": "MIT",
-  "description": "Murmur desktop shell \u2014 Electron main process, preload bridge and the Hub / Bar / audio-capture renderers.",
+  "description": "Murmur desktop shell — Electron main process, preload bridge and the Hub / Bar / audio-capture renderers.",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
