@@ -324,7 +324,157 @@ export function maxOutputTokens(text: string): number {
 }
 
 export type GuardVerdict =
-  { ok: true } | { ok: false; reason: 'empty' | 'too-short' | 'too-long'; detail: string }
+  | { ok: true }
+  | { ok: false; reason: 'empty' | 'too-short' | 'too-long' | 'answered'; detail: string }
+
+/**
+ * Openers that only ever start a *reply*.
+ *
+ * Anchored to the beginning, because these are how an assistant answers, not
+ * how a transcript starts. Someone genuinely dictating "I understand the
+ * problem" is caught by the grounding check below rather than here — the
+ * phrase has to open the output *and* the output has to be largely ungrounded
+ * before anything is rejected.
+ */
+const ANSWER_OPENERS: readonly RegExp[] = [
+  /^(sure|certainly|absolutely|of course|got it|understood)\b/i,
+  /^i (understand|see|can help|will|would|think you)\b/i,
+  /^(here('s| is)|let me|let's) \b/i,
+  /^(as an|i'm an) (ai|assistant|language model)\b/i,
+  /^(would|could) you like\b/i,
+  /^please (provide|let me know|clarify|specify)\b/i,
+  /^(that's|this is) a (great|good) (question|point)\b/i,
+]
+
+/** Words too common to say anything about whether the output came from the input. */
+const FUNCTION_WORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'but',
+  'if',
+  'so',
+  'to',
+  'of',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'it',
+  'this',
+  'that',
+  'these',
+  'those',
+  'i',
+  'you',
+  'we',
+  'they',
+  'he',
+  'she',
+  'my',
+  'your',
+  'our',
+  'their',
+  'me',
+  'us',
+  'them',
+  'as',
+  'by',
+  'from',
+  'not',
+  'no',
+  'yes',
+  'do',
+  'does',
+  'did',
+  'have',
+  'has',
+  'had',
+  'will',
+  'would',
+  'can',
+  'could',
+  'should',
+  'about',
+  'into',
+  'out',
+  'up',
+  'down',
+  'then',
+  'than',
+  'there',
+  'here',
+  'what',
+  'when',
+  'how',
+  'why',
+  'who',
+  'all',
+  'just',
+  'like',
+  'well',
+  'okay',
+  'ok',
+])
+
+function contentWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2 && !FUNCTION_WORDS.has(word))
+}
+
+/**
+ * How much of the output is actually rooted in what was said.
+ *
+ * Polishing is allowed to delete, reorder, re-punctuate and — at `rewrite` —
+ * rephrase. What it is never allowed to do is introduce a body of *new*
+ * subject matter, which is exactly what answering looks like: the reply is
+ * about the transcript rather than made of it. The threshold is deliberately
+ * generous so an aggressive rewrite still passes; a genuine answer scores far
+ * below it because it shares little but function words.
+ */
+const MIN_GROUNDED_RATIO = 0.5
+
+function detectAnswer(raw: string, polished: string): string | null {
+  const source = new Set(contentWords(raw))
+  const words = contentWords(polished)
+  // Too few content words to judge — "OK, sounds good." is legitimate and
+  // carries almost nothing to match on.
+  if (words.length < 3 || source.size === 0) return null
+
+  const grounded = words.filter((word) => source.has(word)).length
+  const ratio = grounded / words.length
+  const opener = ANSWER_OPENERS.some((pattern) => pattern.test(polished))
+  // "A question stays a question" is already a rule in the system prompt, so
+  // losing the question mark is a sign the model treated it as something to
+  // resolve. Not decisive on its own: trimming a trailing "…, right?" is a
+  // legitimate filler removal, and that output stays fully grounded.
+  const questionDropped = raw.includes('?') && !polished.includes('?')
+
+  // These raise the bar rather than deciding, because both have honest
+  // explanations — "Let's ship it on Wednesday" is a real thing to dictate,
+  // and it stays made of its own transcript. An actual reply does not: it is
+  // *about* what was said rather than a tidied version of it, so it shares
+  // little beyond the subject nouns it echoes back.
+  const floor = opener || questionDropped ? 0.75 : MIN_GROUNDED_RATIO
+  if (ratio >= floor) return null
+
+  const share = `${Math.round(ratio * 100)}% of the output came from the transcript`
+  if (opener) return `the model replied instead of editing (${share})`
+  if (questionDropped) return `a question came back as a statement (${share})`
+  return `${share} (minimum ${Math.round(floor * 100)}%)`
+}
 
 /**
  * The hallucination guard (PLAN §7.4).
@@ -343,6 +493,15 @@ export function checkPolishOutput(raw: string, polished: string): GuardVerdict {
   if (trimmed.length === 0) {
     return { ok: false, reason: 'empty', detail: 'the model returned nothing' }
   }
+
+  // Length is not enough on its own. A small instruct model that answers the
+  // transcript instead of editing it tends to reply at *about* the same
+  // length — "what time is the standup?" → "The standup is at 9." — so every
+  // ratio below waves it through. Observed in the wild from Gemma 3 1B: a
+  // dictation about editing a spec came back as "I understand. Let's focus on
+  // preserving the original specification…", inserted over the user's words.
+  const answered = detectAnswer(raw, trimmed)
+  if (answered) return { ok: false, reason: 'answered', detail: answered }
 
   const rawLength = raw.trim().length
   if (rawLength <= POLISH.shortInputChars) {

@@ -255,20 +255,25 @@ describe('checkPolishOutput — the hallucination guard (PLAN §7.4)', () => {
     const answered =
       'Shipping on Wednesday is a good idea because it gives the team an extra day to finish ' +
       'testing, and it avoids the Monday release freeze. Here are three things to consider first.'
-    expect(checkPolishOutput(raw, answered)).toMatchObject({ ok: false, reason: 'too-long' })
+    // Caught as `answered` rather than `too-long`: the length was only ever a
+    // proxy, and the grounding check names what actually went wrong.
+    expect(checkPolishOutput(raw, answered)).toMatchObject({ ok: false, reason: 'answered' })
   })
 
   it('gives short utterances an absolute slack instead of a ratio', () => {
     // "ok sounds good" → "OK, sounds good." doubles in relative terms but is
     // obviously a legitimate edit.
     expect(checkPolishOutput('ok sounds good', 'OK, sounds good.')).toEqual({ ok: true })
-    // …while a full paragraph from three words is still caught.
+    // …while a full paragraph from three words is still caught — now by the
+    // grounding check, which reaches it first because most of that paragraph
+    // is words the speaker never said. The length rule remains the backstop
+    // for output that *is* made of the transcript but far too much of it.
     expect(
       checkPolishOutput(
         'ok sounds good',
         'OK, that sounds good to me — let us go ahead with it right away.',
       ),
-    ).toMatchObject({ ok: false, reason: 'too-long' })
+    ).toMatchObject({ ok: false, reason: 'answered' })
   })
 })
 
@@ -334,5 +339,70 @@ describe('command output rules', () => {
     expect(checkCommandOutput('').ok).toBe(false)
     expect(checkCommandOutput('  \n ').ok).toBe(false)
     expect(checkCommandOutput('Fine.').ok).toBe(true)
+  })
+})
+
+describe('checkPolishOutput — answering, not editing', () => {
+  it('rejects the reply Gemma 3 1B actually inserted over a user', () => {
+    // Verbatim from a user's history: they dictated about fixing a spec and
+    // the model answered them. Length ratio alone waved it through.
+    const raw =
+      'I want to fix the spec so that it preserves the original behaviour and we only make the minimal changes needed to get it working again.'
+    const polished =
+      "I understand. Let's focus on preserving the original specification. I'll prioritize minimal changes and ensure everything remains as it was before. Please provide the specific changes you'd like to make."
+    const verdict = checkPolishOutput(raw, polished)
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) expect(verdict.reason).toBe('answered')
+  })
+
+  it('rejects an answer that is the same length as the question', () => {
+    // The case no ratio can catch: a reply that fits in the same space.
+    const verdict = checkPolishOutput(
+      'What time is the standup tomorrow morning?',
+      'The standup is at nine in the morning.',
+    )
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) expect(verdict.reason).toBe('answered')
+  })
+
+  it('keeps ordinary punctuation-and-filler polishing', () => {
+    expect(
+      checkPolishOutput(
+        'hey hey hey let me know i think this is gonna work just fine let me know',
+        'Let me know. I think this is going to work just fine.',
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('keeps a restructure that stays made of the transcript', () => {
+    expect(
+      checkPolishOutput(
+        'This is another test. I want to first check the logs. Second, I want to analyze the logs.',
+        'This is another test. I want to:\n\n1. Check the logs.\n2. Analyze the logs.',
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('keeps an aggressive rewrite, which is a level the user can choose', () => {
+    expect(
+      checkPolishOutput(
+        'so basically the deploy failed again because the certificate expired and nobody renewed it',
+        'The deploy failed again: the certificate expired and was never renewed.',
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('does not fire on a short utterance with nothing to match on', () => {
+    expect(checkPolishOutput('ok sounds good', 'OK, sounds good.').ok).toBe(true)
+  })
+
+  it('lets an assistant-sounding phrase through when it is what was dictated', () => {
+    // "Let's" opens the output, but every word of it came from the transcript.
+    expect(
+      checkPolishOutput(
+        "let's ship the release on wednesday and tell the team on monday",
+        "Let's ship the release on Wednesday and tell the team on Monday.",
+      ).ok,
+    ).toBe(true)
   })
 })
