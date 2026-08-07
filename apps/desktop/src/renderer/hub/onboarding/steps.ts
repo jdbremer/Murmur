@@ -1,4 +1,11 @@
-import type { HardwareFit, HardwareReport, HotkeyKey, ModelEntry } from '@murmur/shared'
+import type {
+  HardwareFit,
+  HardwareReport,
+  HotkeyKey,
+  ModelEntry,
+  PermissionState,
+  PermissionsStatus,
+} from '@murmur/shared'
 
 import type { Platform } from '../../lib/platform'
 
@@ -24,14 +31,46 @@ export type OnboardingStepId =
 export interface StepContext {
   platform: Platform
   hotkeyKey: HotkeyKey
+  /**
+   * Live permission state, or `null` before the first check comes back.
+   *
+   * `null` means "do not filter yet" — dropping steps from an unanswered
+   * question would make the sequence flicker on the welcome screen.
+   */
+  permissions?: PermissionsStatus | null
+  /** Whether a speech-to-text model has been chosen (not necessarily downloaded). */
+  hasSttModel?: boolean
 }
 
 /**
- * The screens, in order.
+ * A permission that cannot block progress.
  *
- * The macOS built-in dictation conflict screen is conditional twice over: the
- * setting only exists on macOS, and it only collides when the user's key *is*
- * `fn` (PLAN §2.4.7, §4 "Conflict").
+ * `unavailable` counts as satisfied on purpose: it means the platform has no
+ * such concept (this repository is developed on Linux), and treating a
+ * question the OS never asks as a refusal would strand every non-macOS user.
+ */
+function satisfied(state: PermissionState | undefined): boolean {
+  return state === 'granted' || state === 'unavailable'
+}
+
+/**
+ * The screens, in order — minus any whose prerequisites are not met.
+ *
+ * Two screens are only worth showing if they can actually do something:
+ *
+ *  - **tutorial** asks the user to hold their key and watch text appear. That
+ *    needs the microphone to hear them, Input Monitoring to see the key,
+ *    Accessibility to type the result, and a speech model to transcribe it.
+ *    Skip any of those and the screen becomes a box that will never react —
+ *    the worst possible first impression of the feature it is demonstrating.
+ *  - **dictationConflict** warns that macOS steals a double-`fn`. If Input
+ *    Monitoring was skipped, Murmur's own `fn` listener never runs, so there
+ *    is nothing to collide with yet.
+ *
+ * Filtering rather than disabling: a step you are walked through and told is
+ * useless is worse than one you were never shown. Both reappear on their own
+ * if the user goes back and grants what was missing, because this is
+ * recomputed from live state on every render.
  */
 export function buildSteps(context: StepContext): OnboardingStepId[] {
   const steps: OnboardingStepId[] = [
@@ -40,11 +79,43 @@ export function buildSteps(context: StepContext): OnboardingStepId[] {
     'accessibility',
     'inputMonitoring',
     'models',
-    'tutorial',
   ]
-  if (context.platform === 'mac' && context.hotkeyKey === 'fn') steps.push('dictationConflict')
+
+  const permissions = context.permissions
+  // Unchecked (`null`) keeps the full sequence — see StepContext.
+  const canHearAndType =
+    !permissions ||
+    (satisfied(permissions.microphone) &&
+      satisfied(permissions.accessibility) &&
+      satisfied(permissions.inputMonitoring))
+  const canTranscribe = context.hasSttModel !== false
+
+  if (canHearAndType && canTranscribe) steps.push('tutorial')
+  if (
+    context.platform === 'mac' &&
+    context.hotkeyKey === 'fn' &&
+    (!permissions || satisfied(permissions.inputMonitoring))
+  ) {
+    steps.push('dictationConflict')
+  }
   steps.push('done')
   return steps
+}
+
+/** The step's own name, for the progress line. */
+const STEP_TITLE: Record<OnboardingStepId, string> = {
+  welcome: 'Welcome',
+  microphone: 'Microphone',
+  accessibility: 'Accessibility',
+  inputMonitoring: 'Input Monitoring',
+  models: 'Models',
+  tutorial: 'Try it',
+  dictationConflict: 'macOS dictation',
+  done: 'Done',
+}
+
+export function stepTitle(step: OnboardingStepId): string {
+  return STEP_TITLE[step]
 }
 
 export function stepIndex(steps: readonly OnboardingStepId[], step: OnboardingStepId): number {
@@ -73,10 +144,10 @@ export function isLastStep(steps: readonly OnboardingStepId[], step: OnboardingS
   return stepIndex(steps, step) === steps.length - 1
 }
 
-/** "Step 3 of 8" — progress, stated plainly. */
+/** "Step 3 of 7 · Microphone" — where you are, and what this one is. */
 export function progressLabel(steps: readonly OnboardingStepId[], step: OnboardingStepId): string {
   const index = stepIndex(steps, step)
-  return `Step ${Math.max(1, index + 1)} of ${steps.length}`
+  return `Step ${Math.max(1, index + 1)} of ${steps.length} · ${stepTitle(step)}`
 }
 
 /** Steps a user may walk past without doing anything (PLAN §2.4: skippable, with a warning). */

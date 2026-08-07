@@ -33,8 +33,11 @@ export function App(): React.JSX.Element {
   if (!settings) return <div className="h-full bg-canvas" />
 
   if (!settings.onboardingCompleted) {
+    // `overflow-hidden`, not `overflow-y-auto`: Onboarding is its own shell and
+    // scrolls its middle pane. A scrolling parent around a full-height child
+    // gave the outer box nothing to scroll and clipped the inner content.
     return (
-      <div className="h-full overflow-y-auto bg-canvas text-ink">
+      <div className="h-full overflow-hidden bg-canvas text-ink">
         <Onboarding settings={settings} onFinish={() => setSection('home')} />
       </div>
     )

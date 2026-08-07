@@ -70,8 +70,11 @@ describe('navigation', () => {
     expect(nextStep(steps, 'done')).toBe('done')
   })
 
-  it('labels progress as counted by humans', () => {
-    expect(progressLabel(steps, 'welcome')).toBe(`Step 1 of ${steps.length}`)
+  it('labels progress as counted by humans, and names the step', () => {
+    // The count alone made every screen's header look identical; the name is
+    // what tells you at a glance which of the three permissions you are on.
+    expect(progressLabel(steps, 'welcome')).toBe(`Step 1 of ${steps.length} · Welcome`)
+    expect(progressLabel(steps, 'inputMonitoring')).toContain('Input Monitoring')
     expect(isLastStep(steps, 'done')).toBe(true)
   })
 
@@ -108,5 +111,93 @@ describe('starterOptions', () => {
 
   it('offers nothing rather than throwing on an empty catalog', () => {
     expect(starterOptions(null, [])).toEqual([])
+  })
+})
+
+describe('buildSteps: prerequisites', () => {
+  const allGranted = {
+    microphone: 'granted',
+    accessibility: 'granted',
+    inputMonitoring: 'granted',
+  } as const
+
+  it('offers the tutorial only when it could actually work', () => {
+    const ready = buildSteps({
+      platform: 'mac',
+      hotkeyKey: 'fn',
+      permissions: allGranted,
+      hasSttModel: true,
+    })
+    expect(ready).toContain('tutorial')
+  })
+
+  it('drops the tutorial when a permission it needs was skipped', () => {
+    // Each of the three is load-bearing: hearing you, seeing the key, and
+    // typing the result. Miss any one and the screen can never react.
+    for (const missing of ['microphone', 'accessibility', 'inputMonitoring'] as const) {
+      const steps = buildSteps({
+        platform: 'mac',
+        hotkeyKey: 'fn',
+        permissions: { ...allGranted, [missing]: 'denied' },
+        hasSttModel: true,
+      })
+      expect(steps).not.toContain('tutorial')
+    }
+  })
+
+  it('drops the tutorial when no speech model was chosen', () => {
+    const steps = buildSteps({
+      platform: 'mac',
+      hotkeyKey: 'fn',
+      permissions: allGranted,
+      hasSttModel: false,
+    })
+    expect(steps).not.toContain('tutorial')
+  })
+
+  it('drops the macOS dictation warning when the key listener cannot run', () => {
+    // Nothing to collide with: without Input Monitoring our own fn never fires.
+    const steps = buildSteps({
+      platform: 'mac',
+      hotkeyKey: 'fn',
+      permissions: { ...allGranted, inputMonitoring: 'denied' },
+      hasSttModel: true,
+    })
+    expect(steps).not.toContain('dictationConflict')
+  })
+
+  it('treats an unavailable permission as satisfied, not as a refusal', () => {
+    // Linux and Windows report `unavailable`; punishing a question the OS
+    // never asks would strand every non-macOS user on a truncated setup.
+    const steps = buildSteps({
+      platform: 'mac',
+      hotkeyKey: 'fn',
+      permissions: {
+        microphone: 'unavailable',
+        accessibility: 'unavailable',
+        inputMonitoring: 'unavailable',
+      },
+      hasSttModel: true,
+    })
+    expect(steps).toContain('tutorial')
+  })
+
+  it('keeps the full sequence before the first permission check returns', () => {
+    // `null` is "not asked yet" — filtering on it would make the sequence
+    // flicker while the user is still on the welcome screen.
+    const steps = buildSteps({ platform: 'mac', hotkeyKey: 'fn', permissions: null })
+    expect(steps).toContain('tutorial')
+    expect(steps).toContain('dictationConflict')
+  })
+
+  it('always keeps welcome first and done last, however much is filtered', () => {
+    const steps = buildSteps({
+      platform: 'mac',
+      hotkeyKey: 'fn',
+      permissions: { microphone: 'denied', accessibility: 'denied', inputMonitoring: 'denied' },
+      hasSttModel: false,
+    })
+    expect(steps[0]).toBe('welcome')
+    expect(steps[steps.length - 1]).toBe('done')
   })
 })

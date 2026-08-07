@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import type { PermissionKind, PermissionsStatus, Settings } from '@murmur/shared'
+// `PermissionState` must be imported, not inferred: lib.dom declares a global
+// of the same name ('granted' | 'denied' | 'prompt'), and TypeScript resolves
+// to that one silently — which type-checks against a union we never produce.
+import type { PermissionKind, PermissionState, PermissionsStatus, Settings } from '@murmur/shared'
 
 import {
   Badge,
@@ -16,7 +19,6 @@ import { useDictationState } from '../../hooks/useDictationState'
 import { useModels } from '../../hooks/useModels'
 import { downloadPercent, formatBytes } from '../../format'
 import { detectPlatform } from '../../lib/platform'
-import { PermissionCard } from '../sections/HelpSection'
 import { permissionCopy } from '../permissions'
 import {
   buildSteps,
@@ -51,14 +53,22 @@ export function Onboarding({
   settings: Settings
   onFinish: () => void
 }): React.JSX.Element {
-  const steps = useMemo(
-    () =>
-      buildSteps({ platform: detectPlatform(navigator.userAgent), hotkeyKey: settings.hotkey.key }),
-    [settings.hotkey.key],
-  )
   const [step, setStep] = useState<OnboardingStepId>('welcome')
   const [permissions, setPermissions] = useState<PermissionsStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Recomputed from live state, so a step whose prerequisite was skipped is
+  // never offered — and reappears if the user goes back and grants it.
+  const steps = useMemo(
+    () =>
+      buildSteps({
+        platform: detectPlatform(navigator.userAgent),
+        hotkeyKey: settings.hotkey.key,
+        permissions,
+        hasSttModel: settings.sttModelId !== null,
+      }),
+    [settings.hotkey.key, settings.sttModelId, permissions],
+  )
 
   const refreshPermissions = useCallback(() => {
     void window.murmur.permissions
@@ -71,8 +81,14 @@ export function Onboarding({
     refreshPermissions()
   }, [refreshPermissions])
 
-  const advance = useCallback(() => setStep((current) => nextStep(steps, current)), [steps])
-  const back = useCallback(() => setStep((current) => previousStep(steps, current)), [steps])
+  // The sequence can shrink under the step being shown — grant nothing and the
+  // tutorial stops existing while you are standing on it. Derived during
+  // render rather than corrected in an effect, so no frame is ever painted
+  // showing a screen that is no longer part of the flow.
+  const current = steps.includes(step) ? step : (steps[steps.length - 1] ?? 'welcome')
+
+  const advance = useCallback(() => setStep(nextStep(steps, current)), [steps, current])
+  const back = useCallback(() => setStep(previousStep(steps, current)), [steps, current])
 
   const finish = useCallback(() => {
     void window.murmur.settings
@@ -81,63 +97,95 @@ export function Onboarding({
       .catch((cause: unknown) => setError(messageOf(cause)))
   }, [onFinish])
 
-  const index = stepIndex(steps, step)
-  const last = isLastStep(steps, step)
+  const index = stepIndex(steps, current)
+  const last = isLastStep(steps, current)
 
   return (
-    <div className="mx-auto flex h-full max-w-2xl flex-col px-10 py-9">
-      <header className="mb-6">
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-[12px] font-medium text-ink-muted">{progressLabel(steps, step)}</p>
-          {!last ? (
-            <Button variant="secondary" onClick={finish}>
-              Skip setup
-            </Button>
-          ) : null}
-        </div>
-        <div className="mt-2">
-          <ProgressBar value={(index + 1) / steps.length} />
+    // An app shell, not a tall page: the header and footer are pinned and only
+    // the middle scrolls. It used to be one `h-full` column inside a scrolling
+    // parent, which meant the parent never had anything to scroll while the
+    // content in the middle was squeezed past the bottom of the window — long
+    // steps simply could not be read to the end.
+    <div className="flex h-full flex-col">
+      <header className="shrink-0 border-b border-line bg-canvas">
+        <div className="mx-auto w-full max-w-2xl px-10 pb-4 pt-8">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-[12px] font-medium text-ink-muted">
+              {progressLabel(steps, current)}
+            </p>
+            {!last ? (
+              // Quieter than the footer's buttons on purpose: leaving setup
+              // entirely and stepping past one screen were the same secondary
+              // button, which made the destructive-ish one the easy mis-click.
+              <button
+                type="button"
+                onClick={finish}
+                className="rounded-md px-2 py-1 text-[12px] text-ink-faint transition-colors hover:bg-surface hover:text-ink"
+              >
+                Skip setup
+              </button>
+            ) : null}
+          </div>
+          <div className="mt-2.5">
+            <ProgressBar value={(index + 1) / steps.length} />
+          </div>
         </div>
       </header>
 
-      {/* Keyed on the step so each screen drifts in instead of snapping. */}
-      <div key={step} className="hub-section flex-1">
-        <InlineError>{error}</InlineError>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {/*
+          `min-h-full` + `items-center` centres a screen that fits and gets out
+          of the way of one that does not: when the content is taller than the
+          pane the flex line grows past full height, centring becomes a no-op,
+          and it scrolls from the top rather than having its head clipped.
+          Without it the short steps — most of them — sat in the top third
+          under a half-window of empty canvas.
+        */}
+        <div className="flex min-h-full items-center">
+          {/* Keyed on the step so each screen drifts in instead of snapping. */}
+          <div key={current} className="hub-section mx-auto w-full max-w-2xl px-10 py-8">
+            <InlineError>{error}</InlineError>
 
-        {step === 'welcome' ? <Welcome /> : null}
-        {step === 'microphone' || step === 'accessibility' || step === 'inputMonitoring' ? (
-          <PermissionStep
-            kind={
-              step === 'microphone'
-                ? 'microphone'
-                : step === 'accessibility'
-                  ? 'accessibility'
-                  : 'inputMonitoring'
-            }
-            permissions={permissions}
-            onRefresh={refreshPermissions}
-            onChanged={setPermissions}
-          />
-        ) : null}
-        {step === 'models' ? <ModelStep settings={settings} /> : null}
-        {step === 'tutorial' ? <TutorialStep /> : null}
-        {step === 'dictationConflict' ? <DictationConflictStep /> : null}
-        {step === 'done' ? <DoneStep /> : null}
+            {current === 'welcome' ? <Welcome /> : null}
+            {current === 'microphone' ||
+            current === 'accessibility' ||
+            current === 'inputMonitoring' ? (
+              <PermissionStep
+                kind={
+                  current === 'microphone'
+                    ? 'microphone'
+                    : current === 'accessibility'
+                      ? 'accessibility'
+                      : 'inputMonitoring'
+                }
+                permissions={permissions}
+                onRefresh={refreshPermissions}
+                onChanged={setPermissions}
+              />
+            ) : null}
+            {current === 'models' ? <ModelStep settings={settings} /> : null}
+            {current === 'tutorial' ? <TutorialStep /> : null}
+            {current === 'dictationConflict' ? <DictationConflictStep /> : null}
+            {current === 'done' ? <DoneStep /> : null}
+          </div>
+        </div>
       </div>
 
-      <footer className="mt-8 flex items-center justify-between gap-4 border-t border-line pt-5">
-        <Button variant="secondary" onClick={back} disabled={index === 0}>
-          Back
-        </Button>
-        <div className="flex items-center gap-2">
-          {isSkippable(step) ? (
-            <Button variant="secondary" onClick={advance}>
-              Skip this step
-            </Button>
-          ) : null}
-          <Button variant="primary" onClick={last ? finish : advance}>
-            {last ? 'Start dictating' : 'Continue'}
+      <footer className="shrink-0 border-t border-line bg-canvas">
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-4 px-10 py-5">
+          <Button variant="secondary" onClick={back} disabled={index === 0}>
+            Back
           </Button>
+          <div className="flex items-center gap-2">
+            {isSkippable(current) ? (
+              <Button variant="secondary" onClick={advance}>
+                Skip
+              </Button>
+            ) : null}
+            <Button variant="primary" onClick={last ? finish : advance}>
+              {last ? 'Start dictating' : 'Continue'}
+            </Button>
+          </div>
         </div>
       </footer>
     </div>
@@ -189,54 +237,90 @@ function PermissionStep({
 }): React.JSX.Element {
   const copy = permissionCopy(kind)
   const state = permissions?.[kind]
+  const granted = state === 'granted'
 
+  // Deliberately not the Help section's PermissionCard. That card repeats the
+  // title and the "why" it is given, which is right in a list of three but
+  // meant this screen said both twice — once as its own heading and again
+  // inside the card directly beneath. Here the step *is* the card.
   return (
     <div>
-      <h1 className="text-[22px] font-semibold tracking-tight text-ink">{copy.title}</h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-[22px] font-semibold tracking-tight text-ink">{copy.title}</h1>
+        <StatusPill state={state} />
+      </div>
       <p className="mt-2 max-w-lg text-[14px] leading-relaxed text-ink-muted">{copy.why}</p>
+      <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-faint">{copy.notDone}</p>
 
-      <div className="mt-6">
-        <PermissionCard
-          title={copy.title}
-          why={copy.why}
-          notDone={copy.notDone}
-          state={state}
-          // Same trap as in Help, and worse here: someone granting Accessibility
-          // mid-onboarding would watch it stay "Denied" and reasonably conclude
-          // setup is broken.
-          needsRelaunch={kind === 'accessibility' || kind === 'inputMonitoring'}
-          onRequest={() => {
-            void window.murmur.permissions
-              .request({ kind })
-              .then(onChanged)
-              .catch(() => undefined)
-          }}
-          onOpenSettings={() => {
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        {!granted && state !== 'unavailable' ? (
+          <Button
+            variant="primary"
+            onClick={() => {
+              void window.murmur.permissions
+                .request({ kind })
+                .then(onChanged)
+                .catch(() => undefined)
+            }}
+          >
+            Allow
+          </Button>
+        ) : null}
+        <Button
+          onClick={() => {
             void window.murmur.permissions.openSystemSettings({ kind }).catch(() => undefined)
           }}
-        />
+          disabled={state === 'unavailable'}
+        >
+          Open System Settings
+        </Button>
+        <Button onClick={onRefresh}>Check again</Button>
       </div>
 
-      <div className="mt-4 flex items-center gap-3">
-        <Button onClick={onRefresh}>Check again</Button>
-        <p className="text-[12px] text-ink-faint">
-          macOS sometimes needs a moment — or a relaunch — after a permission is granted.
+      {/* Same trap as in Help, and worse here: someone granting Accessibility
+          mid-onboarding would watch it stay "Denied" and reasonably conclude
+          setup is broken. */}
+      {!granted && (kind === 'accessibility' || kind === 'inputMonitoring') ? (
+        <p className="mt-3 max-w-lg text-[12px] leading-relaxed text-warning">
+          macOS decides this one when the app starts, so a grant made now is not visible until
+          Murmur restarts — “Check again” will keep saying denied.
         </p>
-      </div>
+      ) : null}
 
       {state === 'unavailable' ? (
-        <div className="mt-5">
+        <div className="mt-6">
           <Banner tone="accent" title="Not applicable on this platform">
             This is a macOS permission. Continue — Murmur will ask again on a Mac.
           </Banner>
         </div>
-      ) : state !== 'granted' ? (
-        <div className="mt-5">
+      ) : !granted ? (
+        <div className="mt-6">
           <Banner tone="warning" title="You can skip this">
-            {copy.ifSkipped} You can grant it later in Help.
+            {copy.ifSkipped} You can grant it later in Help. Steps that depend on it are left out of
+            the rest of setup.
           </Banner>
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/** Granted / denied / not applicable, as a single glanceable chip. */
+function StatusPill({ state }: { state: PermissionState | undefined }): React.JSX.Element | null {
+  if (!state) return null
+  const tone =
+    state === 'granted' ? 'positive' : state === 'unavailable' ? 'neutral' : ('danger' as const)
+  const label =
+    state === 'granted'
+      ? 'Granted'
+      : state === 'unavailable'
+        ? 'Not applicable'
+        : state === 'denied'
+          ? 'Not granted yet'
+          : 'Not checked'
+  return (
+    <div className="shrink-0 pt-1">
+      <Badge tone={tone}>{label}</Badge>
     </div>
   )
 }
@@ -306,43 +390,48 @@ function ModelStep({ settings }: { settings: Settings }): React.JSX.Element {
           const active = chosen === option.id
           return (
             <Card key={option.id} className={active ? 'border-accent/50' : ''}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="flex items-center gap-2 text-[14px] font-medium text-ink">
-                    {option.title}
-                    {active ? <Badge tone="accent">Chosen</Badge> : null}
-                  </p>
-                  <p className="mt-1 max-w-lg text-[12px] leading-relaxed text-ink-muted">
-                    {option.description}
-                  </p>
-                  <ul className="mt-2 space-y-0.5">
-                    {option.entries.map((entry) => (
-                      <li key={entry.id} className="text-[12px] text-ink-muted">
-                        {entry.displayName}{' '}
-                        <span className="text-ink-faint">
-                          · {entry.org} · {formatBytes(entry.sizeBytes)}
-                        </span>
-                      </li>
-                    ))}
-                    {option.polishId === null ? (
-                      <li className="text-[12px] text-ink-faint">Polishing off — raw transcript</li>
-                    ) : null}
-                  </ul>
-                </div>
-                <div className="text-right">
-                  <p className="text-[13px] font-medium tabular-nums text-ink">
+              {/* One column, then a footing row. The size and the button used
+                  to be a second flex column opposite the text; at this width
+                  it wrapped underneath and its `text-right` then aligned
+                  against its own narrow box, leaving the total floating in
+                  the middle of the card above a left-aligned button. */}
+              <div>
+                <p className="flex items-center gap-2 text-[14px] font-medium text-ink">
+                  {option.title}
+                  {active ? <Badge tone="accent">Chosen</Badge> : null}
+                </p>
+                <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
+                  {option.description}
+                </p>
+                <ul className="mt-2 space-y-0.5">
+                  {option.entries.map((entry) => (
+                    <li key={entry.id} className="text-[12px] text-ink-muted">
+                      {entry.displayName}{' '}
+                      <span className="text-ink-faint">
+                        · {entry.org} · {formatBytes(entry.sizeBytes)}
+                      </span>
+                    </li>
+                  ))}
+                  {option.polishId === null ? (
+                    <li className="text-[12px] text-ink-faint">Polishing off — raw transcript</li>
+                  ) : null}
+                </ul>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3">
+                <p className="text-[12px] text-ink-muted">
+                  <span className="font-medium tabular-nums text-ink">
                     {formatBytes(option.totalBytes)}
-                  </p>
-                  <div className="mt-2">
-                    <Button
-                      variant={active ? 'secondary' : 'primary'}
-                      disabled={active}
-                      onClick={() => choose(option.id)}
-                    >
-                      {active ? 'Downloading' : 'Download this pair'}
-                    </Button>
-                  </div>
-                </div>
+                  </span>{' '}
+                  to download
+                </p>
+                <Button
+                  variant={active ? 'secondary' : 'primary'}
+                  disabled={active}
+                  onClick={() => choose(option.id)}
+                >
+                  {active ? 'Downloading' : 'Download this pair'}
+                </Button>
               </div>
 
               <div className="mt-3 space-y-2">
