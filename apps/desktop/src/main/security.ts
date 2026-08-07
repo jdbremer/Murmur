@@ -83,6 +83,28 @@ export function installSecurityPolicies(isDev: boolean): void {
     return isPermittedMedia(permission, mediaType && mediaType !== 'unknown' ? [mediaType] : [])
   })
 
+  // Windows system audio for meeting capture (PLAN §18.2).
+  //
+  // `audio: 'loopback'` captures what the machine is playing, which is how the
+  // other participants get recorded. Electron 43 supports it on Windows only —
+  // macOS goes through the CoreAudio tap helper instead and never reaches here.
+  //
+  // A display-media request is granted **only** for its audio, never its video:
+  // `video: undefined` means no screen content is captured, requested, or even
+  // enumerated. The `getSources` call that would normally accompany this is
+  // deliberately absent for the same reason.
+  if (process.platform === 'win32') {
+    session.defaultSession.setDisplayMediaRequestHandler(
+      (_request, callback) => {
+        // Omitted rather than explicitly undefined: with
+        // `exactOptionalPropertyTypes` the two are different types, and the
+        // omission is also the clearer statement that no video is involved.
+        callback({ audio: 'loopback' })
+      },
+      { useSystemPicker: false },
+    )
+  }
+
   // A renderer must never navigate off its own page — not to a remote origin,
   // not to another local file.
   app.on('web-contents-created', (_event, contents) => {

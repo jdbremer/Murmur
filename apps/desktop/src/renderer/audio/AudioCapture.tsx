@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { AudioCaptureStatus, DictationState } from '@murmur/shared'
 
+import { LoopbackCapture } from './loopback'
 import { MicrophoneCapture } from './capture'
 import { CuePlayer } from './cue-player'
 import { decideCue, restingStateOf } from './cues'
@@ -55,7 +56,32 @@ export function AudioCapture(): React.JSX.Element {
       },
     })
 
+    // Windows system audio for meeting capture (PLAN §18.2). Its own graph,
+    // driven by its own two commands; macOS never sends them because it
+    // captures through a helper process instead.
+    const loopback = new LoopbackCapture({
+      onFrame: (pcm, sampleCount) => {
+        window.murmur.audio.sendSystemFrame({
+          pcm,
+          sampleCount,
+          sampleRate: 16_000,
+          ts: Date.now(),
+        })
+      },
+      onError: (message) => {
+        console.warn('[loopback] system audio unavailable:', message)
+      },
+    })
+
     const unsubscribe = window.murmur.audio.onCommand((command) => {
+      if (command.action === 'systemStart') {
+        void loopback.start()
+        return
+      }
+      if (command.action === 'systemStop') {
+        loopback.stop()
+        return
+      }
       void capture.apply(command)
     })
 
@@ -72,6 +98,7 @@ export function AudioCapture(): React.JSX.Element {
     return () => {
       unsubscribe()
       navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange)
+      loopback.stop()
       capture.dispose()
     }
   }, [])

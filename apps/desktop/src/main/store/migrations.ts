@@ -1,5 +1,7 @@
 import type { Database } from 'better-sqlite3'
 
+import { countedText, countWords, dayKey } from './stats'
+
 /**
  * Forward-only schema migrations (PLAN §9, §15.2).
  *
@@ -100,6 +102,110 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
           emoji               TEXT NOT NULL,
           custom_instructions TEXT NOT NULL DEFAULT ''
         );
+      `)
+    },
+  },
+  {
+    version: 2,
+    name: 'lifetime-stats',
+    up(db) {
+      // The Home header's numbers used to be a live aggregate over
+      // `dictations`, which made them a function of the *retention window*
+      // rather than of what the user had actually dictated: every boot with a
+      // 90-day policy silently deleted words from the lifetime total, and
+      // shortening the window subtracted thousands at once. Counters that only
+      // the user can reset are the point of this migration.
+      //
+      // Two tables rather than one because the streak is not a counter: it
+      // needs the *set* of days dictated on, and that set has to outlive the
+      // rows too. One row per day is ~3.6k rows per decade — nothing.
+      db.exec(`
+        CREATE TABLE lifetime_stats (
+          id             INTEGER PRIMARY KEY CHECK (id = 1),
+          total_words    INTEGER NOT NULL DEFAULT 0,
+          -- Numerator and denominator of the average rate, kept in step: a
+          -- dictation contributes to both or to neither (see stats.ts).
+          timed_words    INTEGER NOT NULL DEFAULT 0,
+          spoken_ms      INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO lifetime_stats (id) VALUES (1);
+
+        CREATE TABLE dictation_days (
+          -- Local-calendar 'YYYY-MM-DD', matching stats.ts's dayKey().
+          day TEXT PRIMARY KEY
+        );
+      `)
+
+      // Backfill from whatever history survives, so an upgrading user keeps the
+      // numbers they already had rather than watching them reset to zero.
+      //
+      // Counted in JS through the very functions the live path uses, rather
+      // than in SQL: `countWords` and `dayKey` are the definitions these
+      // columns are supposed to hold, and a hand-rolled SQL transliteration of
+      // them would be a second, subtly different implementation that no test
+      // pins. `iterate` keeps a long history off the heap.
+      const rows = db
+        .prepare(`SELECT ts, raw_text, polished_text, duration_ms FROM dictations`)
+        .iterate() as Iterable<{
+        ts: number
+        raw_text: string
+        polished_text: string | null
+        duration_ms: number
+      }>
+
+      let totalWords = 0
+      let timedWords = 0
+      let spokenMs = 0
+      // Days are collected first and written after the loop: better-sqlite3
+      // refuses to execute a statement while an iterator is still open on the
+      // same connection, so writing inside the loop would throw.
+      const days = new Set<string>()
+
+      for (const row of rows) {
+        const words = countWords(countedText(row.polished_text, row.raw_text))
+        totalWords += words
+        if (row.duration_ms > 0 && words > 0) {
+          timedWords += words
+          spokenMs += row.duration_ms
+        }
+        days.add(dayKey(row.ts))
+      }
+
+      const addDay = db.prepare(`INSERT OR IGNORE INTO dictation_days (day) VALUES (?)`)
+      for (const day of days) addDay.run(day)
+
+      db.prepare(
+        `UPDATE lifetime_stats
+            SET total_words = ?, timed_words = ?, spoken_ms = ?
+          WHERE id = 1`,
+      ).run(totalWords, timedWords, spokenMs)
+    },
+  },
+  {
+    version: 3,
+    name: 'meetings',
+    up(db) {
+      // An index of recorded meetings, not a copy of them. The transcript
+      // itself lives in the Markdown file at `path` and is deliberately not
+      // duplicated here: a meeting can run for hours, the file is the artifact
+      // the user actually wanted, and two copies would only ever disagree.
+      //
+      // `path` is therefore allowed to point at a file the user has since
+      // moved or deleted — readers must handle a missing file rather than
+      // assume the row implies one.
+      db.exec(`
+        CREATE TABLE meetings (
+          id               TEXT PRIMARY KEY,
+          started_at       INTEGER NOT NULL,
+          ended_at         INTEGER,
+          title            TEXT NOT NULL,
+          path             TEXT NOT NULL,
+          app_bundle_id    TEXT,
+          had_system_audio INTEGER NOT NULL DEFAULT 0,
+          segment_count    INTEGER NOT NULL DEFAULT 0,
+          duration_ms      INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_meetings_started ON meetings (started_at DESC);
       `)
     },
   },

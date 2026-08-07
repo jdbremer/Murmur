@@ -104,6 +104,17 @@ export interface MurmurNative {
    * false` is reserved for a missing permission or an uncooperative app.
    */
   getSelectedText(): { ok: boolean; text?: string; error?: string }
+  /**
+   * Frontmost window title of a specific process, for meeting detection
+   * (PLAN §18.2). macOS-only and optional — treat a missing implementation as
+   * "no title", which degrades detection rather than breaking it.
+   *
+   * The narrowest possible read: a bundle id cannot distinguish a Google Meet
+   * tab from any other tab, so this is the only way to recognise — or name — a
+   * browser-hosted call. Callers must only ask about a process already holding
+   * both microphone and speakers, and must never log the result.
+   */
+  getWindowTitle?(pid: number): { ok: boolean; title?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null
   /** True when a password field owns input; Murmur must refuse to type. */
   isSecureInputActive(): boolean
@@ -146,6 +157,9 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
       return { ok: false, error: reason }
     },
     getSelectedText() {
+      return { ok: false, error: reason }
+    },
+    getWindowTitle() {
       return { ok: false, error: reason }
     },
     getFrontmostApp() {

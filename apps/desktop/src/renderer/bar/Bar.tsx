@@ -46,6 +46,8 @@ export function Bar(): React.JSX.Element | null {
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [devices, setDevices] = useState<AudioDevice[]>([])
+  /** A meeting is recording — shown alongside whatever dictation is doing. */
+  const [recording, setRecording] = useState(false)
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null)
   const levelRef = useRef(0)
   const reducedMotion = useReducedMotion()
@@ -59,6 +61,16 @@ export function Bar(): React.JSX.Element | null {
     setDeadline(presenter.current.expiresAt())
     // A pill that is about to disappear must not take an open menu with it.
     if (!isBarVisible(visibilityRef.current, next)) setMenuOpen(false)
+  }, [])
+
+  // Meeting state rides its own channel: it is long-lived and can be true at
+  // the same time as any dictation state, so it cannot share the presenter.
+  useEffect(() => {
+    const apply = (event: { state: string }): void => {
+      setRecording(event.state === 'recording' || event.state === 'finishing')
+    }
+    void window.murmur.meetings.getState().then(apply).catch(noop)
+    return window.murmur.meetings.subscribe(apply)
   }, [])
 
   useEffect(() => {
@@ -130,8 +142,11 @@ export function Bar(): React.JSX.Element | null {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [menuOpen])
 
-  const visual = useMemo(() => describeBar(event, hovered || menuOpen), [event, hovered, menuOpen])
-  const visible = isBarVisible(visibility, event)
+  const visual = useMemo(
+    () => describeBar(event, hovered || menuOpen, recording),
+    [event, hovered, menuOpen, recording],
+  )
+  const visible = isBarVisible(visibility, event, recording)
 
   // -- entrance / exit -------------------------------------------------------
   // `visible` flips instantly; `present` lingers for EXIT_MS so the capsule can
@@ -266,6 +281,7 @@ export function Bar(): React.JSX.Element | null {
         >
           <BarInterior visual={visual} levelRef={levelRef} reducedMotion={reducedMotion} />
         </div>
+        {visual.recording ? <RecordingDot /> : null}
         {visual.handsFree ? <HandsFreeDot /> : null}
         {visual.command ? <CommandDot /> : null}
         {showControls ? (
@@ -387,6 +403,28 @@ function CommandDot(): React.JSX.Element {
 }
 
 /** The latched hands-free indicator (PLAN §2.1). */
+/**
+ * The meeting-recording indicator.
+ *
+ * On the right, opposite the hands-free dot, so both can show at once — you
+ * can dictate hands-free in the middle of a call. Red and steady rather than
+ * pulsing: this is the universal "recording" signal, and a blinking light is
+ * easier to mistake for an animation than for a state.
+ *
+ * It is the only always-visible sign that other people are being recorded, so
+ * `isBarVisible` forces the pill on screen whenever it is lit — including when
+ * the user has set the Bar to Hidden.
+ */
+function RecordingDot(): React.JSX.Element {
+  return (
+    <span
+      title="Recording this meeting"
+      className="absolute right-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
+      style={{ background: '#f87171', boxShadow: '0 0 6px rgba(248,113,113,0.85)' }}
+    />
+  )
+}
+
 function HandsFreeDot(): React.JSX.Element {
   return (
     <span

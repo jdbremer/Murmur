@@ -15,6 +15,14 @@ import {
   DictionaryEntrySchema,
 } from '../domain/dictionary'
 import { EnginesStatusSchema } from '../domain/engine'
+import {
+  MeetingEventSchema,
+  MeetingListSchema,
+  MeetingOfferResponseSchema,
+  MeetingRecordSchema,
+  MeetingStartRequestSchema,
+  SystemAudioAccessSchema,
+} from '../domain/meeting'
 import { HardwareReportSchema } from '../domain/hardware'
 import { PermissionKindSchema, PermissionsStatusSchema } from '../domain/permissions'
 import { SettingsPatchSchema, SettingsSchema } from '../domain/settings'
@@ -317,6 +325,24 @@ export const invokeContract = {
    * Agent: one JSON snapshot of platform, native, engines, dictation, last
    * capture status — machine-readable without a screenshot.
    */
+  /**
+   * Agent / Dev: push synthetic PCM into a meeting's **system-audio** track,
+   * mirroring `debug.injectPcm` for the microphone. This is what lets the whole
+   * two-track meeting pipeline — including speaker attribution and the echo
+   * holdback — be exercised end to end with no real call and no CoreAudio.
+   */
+  'debug.injectSystemPcm': {
+    request: z.object({
+      durationMs: z.number().int().positive().max(120_000).default(2_000),
+      amplitude: z.number().min(0).max(1).default(0.3),
+      frequencyHz: z.number().positive().max(8_000).default(180),
+      samples: z.array(z.number()).max(2_000_000).optional(),
+    }),
+    response: z.object({
+      frames: z.number().int().nonnegative(),
+      sampleCount: z.number().int().nonnegative(),
+    }),
+  },
   'debug.snapshot': {
     request: z.void(),
     response: z.object({
@@ -340,6 +366,37 @@ export const invokeContract = {
       error: z.string().optional(),
     }),
   },
+  // --- meetings (PLAN §18.2) ---------------------------------------------
+  /** Begin recording. Fails loudly if `settings.meetings.enabled` is false. */
+  'meeting.start': { request: MeetingStartRequestSchema, response: MeetingEventSchema },
+  /** Finalise the transcript and close the file. Safe to call when idle. */
+  'meeting.stop': { request: z.void(), response: MeetingRecordSchema.nullable() },
+  /** Current recorder state, for a window that opened mid-meeting. */
+  'meeting.state': { request: z.void(), response: MeetingEventSchema },
+  /** Answer an `offered` prompt. */
+  'meeting.respondToOffer': {
+    request: MeetingOfferResponseSchema,
+    response: MeetingEventSchema,
+  },
+  'meeting.list': { request: z.void(), response: MeetingListSchema },
+  /** Remove the row *and* the transcript file. */
+  'meeting.delete': { request: z.object({ id: z.string().min(1) }), response: z.boolean() },
+  /** Reveal a transcript in Finder / Explorer. */
+  'meeting.reveal': { request: z.object({ id: z.string().min(1) }), response: z.void() },
+  /** Open the transcripts folder itself. */
+  'meeting.openFolder': { request: z.void(), response: z.void() },
+  /**
+   * Whether system audio can be captured, and whether we are allowed to.
+   * Probing may spawn the tap helper, so this is an explicit call rather than
+   * something the Hub polls.
+   */
+  'meeting.systemAudioAccess': { request: z.void(), response: SystemAudioAccessSchema },
+  /**
+   * Trigger the OS consent flow by attempting a real tap. macOS exposes no way
+   * to ask; the attempt *is* the request, and a modal TCC dialog can block it
+   * for a long time.
+   */
+  'meeting.requestSystemAudio': { request: z.void(), response: SystemAudioAccessSchema },
 } as const satisfies Record<string, IpcInvokeDefinition>
 
 export type InvokeContract = typeof invokeContract
@@ -370,6 +427,16 @@ export const eventContract = {
    */
   'engines.changed': EnginesStatusSchema,
   /**
+   * The Home header's numbers, pushed after every dictation.
+   *
+   * Pushed rather than polled because the Hub is a long-lived window: it reads
+   * its stats once when the section mounts, so a user who leaves it open on
+   * Home while dictating watched the numbers sit still indefinitely. Carries
+   * the new totals rather than a bare "something changed" ping, which saves
+   * the renderer an immediate round trip back for them.
+   */
+  'history.changed': HistoryStatsSchema,
+  /**
    * Main → hidden capture renderer. The orchestrator owns when the mic opens;
    * the renderer only obeys (PLAN §5: warm the stream, capture on hotkey-down).
    */
@@ -378,6 +445,12 @@ export const eventContract = {
   'audio.devicesChanged': AudioDeviceListSchema,
   /** The capture renderer's lifecycle changed — including errors while idle. */
   'audio.captureChanged': AudioCaptureStatusSchema,
+  /**
+   * Meeting recorder state. Rides its own channel rather than `dictation.state`
+   * because a meeting is long-lived and can be live *during* a dictation — one
+   * shared channel would make the Bar's state switch ambiguous.
+   */
+  'meeting.changed': MeetingEventSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract
@@ -390,6 +463,12 @@ export type EventChannel = keyof EventContract
 export const messageContract = {
   /** 16 kHz mono Float32 PCM chunks from the hidden capture renderer (PLAN §5). */
   'audio.frame': AudioFrameSchema,
+  /**
+   * Windows loopback system audio for meeting capture (PLAN §18.2). Its own
+   * channel rather than a flag on `audio.frame`, so the dictation path's
+   * "every frame is the microphone" assumption stays true.
+   */
+  'audio.systemFrame': AudioFrameSchema,
   'audio.status': AudioCaptureStatusSchema,
   /**
    * Mic amplitude from the capture renderer at ~30 Hz, which main relays to the

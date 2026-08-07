@@ -7,6 +7,7 @@ import { Sidebar, type SectionId } from './Sidebar'
 import { HomeSection } from './sections/HomeSection'
 import { DictionarySection } from './sections/DictionarySection'
 import { StyleSection } from './sections/StyleSection'
+import { MeetingsSection } from './sections/MeetingsSection'
 import { ModelsSection } from './sections/ModelsSection'
 import { SettingsSection } from './sections/SettingsSection'
 import { HelpSection } from './sections/HelpSection'
@@ -77,6 +78,8 @@ function renderSection(section: SectionId): React.JSX.Element {
       return <DictionarySection />
     case 'style':
       return <StyleSection />
+    case 'meetings':
+      return <MeetingsSection />
     case 'models':
       return <ModelsSection />
     case 'settings':

@@ -1,34 +1,27 @@
-import type { HistoryStats } from '@murmur/shared'
-
 /**
- * The Home header's numbers (PLAN §2.2.1, §13 M4).
+ * The definitions behind the Home header's numbers (PLAN §2.2.1, §13 M4).
  *
- * Pure functions over plain rows, separate from the repository, because these
- * are the definitions most likely to be argued about later and the ones a test
- * can pin to hand-computed fixtures. Every rule below is a decision, not an
- * accident:
+ * Pure functions, separate from the repository, because these are the rules
+ * most likely to be argued about later and the ones a test can pin to
+ * hand-computed fixtures. The repository applies them incrementally — see
+ * `DictationsRepository.insert` — rather than aggregating over the history
+ * table, because the stats are lifetime figures and the history is subject to a
+ * retention policy that deletes rows out from under them.
+ *
+ * Every rule here is a decision, not an accident:
  *
  *  - **totalWords** counts the text the user actually got — polished where
  *    polishing produced something, raw otherwise. Counting both would
  *    double-count every dictation.
  *  - **avgWpm** is words ÷ speaking time, not an average of per-row rates. A
  *    three-word "yes, sounds good" would otherwise skew the number as heavily
- *    as a two-minute ramble. A row with no recorded duration is excluded from
- *    *both* sides of that fraction — counting its words while ignoring its time
- *    would inflate the rate — though it still counts towards `totalWords`.
+ *    as a two-minute ramble. A dictation with no recorded duration is excluded
+ *    from *both* sides of that fraction — counting its words while ignoring its
+ *    time would inflate the rate — though it still counts towards `totalWords`.
  *  - **streakDays** counts consecutive *local* calendar days ending today or
  *    yesterday. Ending yesterday still counts: a streak should not break at
  *    midnight before the user has had a chance to dictate.
  */
-
-export interface StatsRow {
-  /** Epoch milliseconds. */
-  ts: number
-  rawText: string
-  polishedText: string | null
-  /** Length of the utterance's audio, in milliseconds. */
-  durationMs: number
-}
 
 /** Whitespace-delimited words. Punctuation stays attached, as a human would count. */
 export function countWords(text: string): number {
@@ -51,43 +44,23 @@ export function dayKey(ts: number, timeZoneOffsetMinutes?: number): string {
   return `${year}-${month}-${day}`
 }
 
-export interface StatsOptions {
-  /** Epoch ms treated as "now"; injected so streaks are testable. */
-  now?: number
-  /** Minutes to subtract before bucketing into days. Tests only. */
-  timeZoneOffsetMinutes?: number
+/**
+ * The text a dictation contributes to the word count: polished where polishing
+ * produced something, raw otherwise.
+ */
+export function countedText(polishedText: string | null, rawText: string): string {
+  return polishedText && polishedText.trim() ? polishedText : rawText
 }
 
-export function computeStats(rows: readonly StatsRow[], options: StatsOptions = {}): HistoryStats {
-  const now = options.now ?? Date.now()
-
-  let totalWords = 0
-  // Numerator and denominator of the rate, kept together so a row can only
-  // contribute to both or to neither.
-  let timedWords = 0
-  let spokenMs = 0
-  const days = new Set<string>()
-
-  for (const row of rows) {
-    const text = row.polishedText && row.polishedText.trim() ? row.polishedText : row.rawText
-    const words = countWords(text)
-    totalWords += words
-    if (row.durationMs > 0 && words > 0) {
-      timedWords += words
-      spokenMs += row.durationMs
-    }
-    days.add(dayKey(row.ts, options.timeZoneOffsetMinutes))
-  }
-
-  const avgWpm = spokenMs > 0 ? timedWords / (spokenMs / 60_000) : 0
-
-  return {
-    totalWords,
-    // One decimal is all the Hub renders; rounding here keeps the IPC payload
-    // and the golden fixtures free of float noise.
-    avgWpm: Math.round(avgWpm * 10) / 10,
-    streakDays: computeStreak(days, now, options.timeZoneOffsetMinutes),
-  }
+/**
+ * Words per minute from the running totals.
+ *
+ * One decimal is all the Hub renders; rounding here keeps the IPC payload and
+ * the golden fixtures free of float noise.
+ */
+export function averageWpm(timedWords: number, spokenMs: number): number {
+  if (spokenMs <= 0) return 0
+  return Math.round((timedWords / (spokenMs / 60_000)) * 10) / 10
 }
 
 /**

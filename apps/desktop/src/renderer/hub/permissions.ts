@@ -35,7 +35,7 @@ export const PERMISSIONS: readonly PermissionCopy[] = [
     title: 'Accessibility',
     why: 'To type the finished text into whatever app your cursor is in, by pasting it the way you would.',
     notDone:
-      'Murmur does not read the contents of your screen or other apps’ windows. It looks up which app is frontmost — the bundle id, nothing else — to pick a tone.',
+      'Murmur does not read the contents of your screen. It looks up which app is frontmost — the bundle id, nothing else — to pick a tone. If you turn on meeting capture, it also reads the window title of an app that is using your microphone and speakers at the same time, so it can tell a video call from an ordinary browser tab and name the transcript. Nothing else about that window is read, and titles are never written to logs.',
     ifSkipped:
       'Without it the text cannot be inserted; you would have to paste every dictation yourself.',
   },

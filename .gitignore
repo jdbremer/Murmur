@@ -21,6 +21,9 @@ packages/native/prebuilds/
 
 # sidecar checkouts and binaries, built by scripts/sidecars/*.sh
 .sidecars/
+# the compiled system-audio tap helper; its Swift source is tracked and the
+# binary is rebuilt by scripts/sidecars/build-audio-tap.sh during packaging
+apps/desktop/resources/macos-audio-tap
 
 # local env / editor / os
 .env

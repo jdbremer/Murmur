@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  computeStats,
-  computeStreak,
-  countWords,
-  dayKey,
-  type StatsRow,
-} from '../src/main/store/stats'
+import { averageWpm, computeStreak, countedText, countWords, dayKey } from '../src/main/store/stats'
 
 /**
  * History stats (PLAN §2.2.1, §13 M4: "stats match hand-computed fixtures").
@@ -39,101 +33,45 @@ describe('dayKey', () => {
   })
 })
 
-describe('computeStats — hand-computed fixtures', () => {
-  it('is all zeros for an empty history', () => {
-    expect(computeStats([])).toEqual({ totalWords: 0, avgWpm: 0, streakDays: 0 })
-  })
-
-  it('counts the polished text, not both texts', () => {
+describe('countedText', () => {
+  it('prefers the polished text', () => {
     // Raw is 8 words, polished is 6. Counting both would give 14.
-    const rows: StatsRow[] = [
-      {
-        ts: day('2026-08-01'),
-        rawText: 'um so we should uh ship it wednesday',
-        polishedText: 'We should ship it on Wednesday.',
-        durationMs: 6_000,
-      },
-    ]
-    const stats = computeStats(rows, { now: day('2026-08-01'), timeZoneOffsetMinutes: UTC })
-
-    expect(stats.totalWords).toBe(6)
-    // 6 words in 6 s = 60 wpm exactly.
-    expect(stats.avgWpm).toBe(60)
-    expect(stats.streakDays).toBe(1)
+    expect(
+      countWords(countedText('We should ship it on Wednesday.', 'um so we should uh ship it wed')),
+    ).toBe(6)
   })
 
   it('falls back to the raw text when polishing produced nothing', () => {
-    const rows: StatsRow[] = [
-      {
-        ts: day('2026-08-01'),
-        rawText: 'one two three four',
-        polishedText: null,
-        durationMs: 12_000,
-      },
-    ]
-    // 4 words in 12 s = 20 wpm.
-    expect(
-      computeStats(rows, { now: day('2026-08-01'), timeZoneOffsetMinutes: UTC }),
-    ).toMatchObject({ totalWords: 4, avgWpm: 20 })
+    expect(countedText(null, 'one two three four')).toBe('one two three four')
   })
 
   it('treats a whitespace-only polished text as absent', () => {
-    const rows: StatsRow[] = [
-      { ts: day('2026-08-01'), rawText: 'one two three', polishedText: '   ', durationMs: 6_000 },
-    ]
-    expect(
-      computeStats(rows, { now: day('2026-08-01'), timeZoneOffsetMinutes: UTC }).totalWords,
-    ).toBe(3)
+    expect(countedText('   ', 'one two three')).toBe('one two three')
+  })
+})
+
+describe('averageWpm — hand-computed fixtures', () => {
+  it('is 0 before anything has been timed', () => {
+    expect(averageWpm(0, 0)).toBe(0)
   })
 
-  it('computes WPM over total speaking time, not as a mean of per-row rates', () => {
-    // Row A: 2 words in 60 s → 2 wpm on its own.
-    // Row B: 100 words in 60 s → 100 wpm on its own.
-    // Mean of rates would be 51. Total-over-total is 102 words / 2 min = 51…
-    // — so make them unequal in duration to tell the two apart:
-    // Row A: 2 words in 120 s. Row B: 100 words in 60 s.
-    // Mean of rates: (1 + 100) / 2 = 50.5. Correct: 102 / 3 min = 34.
-    const rows: StatsRow[] = [
-      { ts: day('2026-08-01'), rawText: 'one two', polishedText: null, durationMs: 120_000 },
-      {
-        ts: day('2026-08-01'),
-        rawText: Array.from({ length: 100 }, (_v, index) => `w${index}`).join(' '),
-        polishedText: null,
-        durationMs: 60_000,
-      },
-    ]
-    const stats = computeStats(rows, { now: day('2026-08-01'), timeZoneOffsetMinutes: UTC })
-
-    expect(stats.totalWords).toBe(102)
-    expect(stats.avgWpm).toBe(34)
+  it('divides words by speaking time', () => {
+    // 6 words in 6 s = 60 wpm exactly.
+    expect(averageWpm(6, 6_000)).toBe(60)
+    // 4 words in 12 s = 20 wpm.
+    expect(averageWpm(4, 12_000)).toBe(20)
   })
 
-  it('counts a zero-duration row’s words but keeps it out of the rate entirely', () => {
-    const rows: StatsRow[] = [
-      { ts: day('2026-08-01'), rawText: 'one two three', polishedText: null, durationMs: 6_000 },
-      { ts: day('2026-08-01'), rawText: 'four five six', polishedText: null, durationMs: 0 },
-    ]
-    // All 6 words count towards the headline total. The rate uses only the
-    // timed row — 3 words in 6 s = 30 wpm. Counting the untimed row's words
-    // against the timed row's seconds would report 60, which is a lie.
-    const stats = computeStats(rows, { now: day('2026-08-01'), timeZoneOffsetMinutes: UTC })
-    expect(stats.totalWords).toBe(6)
-    expect(stats.avgWpm).toBe(30)
+  it('is a rate over the totals, not a mean of per-dictation rates', () => {
+    // Dictation A: 2 words in 120 s → 1 wpm on its own.
+    // Dictation B: 100 words in 60 s → 100 wpm on its own.
+    // A mean of those rates is 50.5. The honest figure is 102 words / 3 min = 34.
+    expect(averageWpm(102, 180_000)).toBe(34)
   })
 
-  it('rounds WPM to one decimal', () => {
+  it('rounds to one decimal', () => {
     // 10 words in 7 s = 85.714… wpm → 85.7.
-    const rows: StatsRow[] = [
-      {
-        ts: day('2026-08-01'),
-        rawText: 'a b c d e f g h i j',
-        polishedText: null,
-        durationMs: 7_000,
-      },
-    ]
-    expect(computeStats(rows, { now: day('2026-08-01'), timeZoneOffsetMinutes: UTC }).avgWpm).toBe(
-      85.7,
-    )
+    expect(averageWpm(10, 7_000)).toBe(85.7)
   })
 })
 
@@ -182,18 +120,6 @@ describe('computeStreak', () => {
   it('walks across a leap day', () => {
     expect(
       computeStreak(days('2028-02-28', '2028-02-29', '2028-03-01'), day('2028-03-01'), UTC),
-    ).toBe(3)
-  })
-
-  it('is reachable through computeStats', () => {
-    const rows: StatsRow[] = ['2026-08-03', '2026-08-04', '2026-08-05'].map((iso) => ({
-      ts: day(iso),
-      rawText: 'one two three',
-      polishedText: null,
-      durationMs: 3_000,
-    }))
-    expect(
-      computeStats(rows, { now: day('2026-08-05'), timeZoneOffsetMinutes: UTC }).streakDays,
     ).toBe(3)
   })
 })

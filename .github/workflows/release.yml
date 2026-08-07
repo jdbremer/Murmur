@@ -239,6 +239,38 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
+      # Same reasoning as the sidecar check further up, for the other binary a
+      # release can silently ship without — and checked inside the built bundle
+      # rather than in the source tree, so it proves the whole chain: compiled,
+      # copied in by extraResources, and signed.
+      #
+      # The failure this prevents is invisible in use. Without the helper the
+      # app still records the meeting and still transcribes it; there is simply
+      # nobody in the transcript but the user. A release that does that is worse
+      # than one that fails to build.
+      - name: Verify the system-audio helper shipped (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          failed=0
+          for slice in mac-arm64 mac; do
+            APP="apps/desktop/release/$slice/Murmur.app"
+            [ -d "$APP" ] || continue
+            TAP="$APP/Contents/Resources/macos-audio-tap"
+            if [ ! -x "$TAP" ]; then
+              echo "::error::$slice ships without the system-audio helper — meetings would record only the user's own voice"
+              failed=1
+              continue
+            fi
+            echo "$slice: $(lipo -archs "$TAP")"
+            # Unsigned, the tap is created successfully and then delivers pure
+            # silence — the one failure mode that cannot report itself.
+            codesign -dv "$TAP" 2>&1 | grep -q "Authority=Developer ID" \
+              && echo "$slice: helper is signed" \
+              || echo "::warning::$slice helper is unsigned; system audio will return silence"
+          done
+          exit $failed
+
       # Says plainly which kind of build this is, so a signed release is never
       # assumed from a run that quietly produced an unsigned one.
       - name: Report the signing state (macOS)

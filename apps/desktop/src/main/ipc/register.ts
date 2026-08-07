@@ -1,3 +1,5 @@
+import { mkdirSync, rmSync } from 'node:fs'
+
 import { app, dialog, shell } from 'electron'
 
 import type { MainIpc } from '@murmur/shared'
@@ -11,8 +13,13 @@ import type { SettingsStore } from '../store/settings-store'
 import type {
   DictationsRepository,
   DictionaryRepository,
+  MeetingsRepository,
   StyleRepository,
 } from '../store/repositories'
+import type { MeetingRecorder } from '../meeting/recorder'
+import type { SystemAudioSource } from '../audio/system-capture'
+import type { LoopbackSystemAudio } from '../audio/loopback-capture'
+import type { FrameBus } from '../audio/frame-bus'
 import type { TextInjector } from '../dictation/injector'
 import type { WindowManager } from '../windows/manager'
 import type { CaptureController } from '../audio/controller'
@@ -64,6 +71,15 @@ export interface IpcContext {
   dictations: DictationsRepository
   dictionary: DictionaryRepository
   style: StyleRepository
+  /** Mic frame fan-out — dictation and a meeting can both be listening. */
+  frames: FrameBus
+  meetings: MeetingRecorder
+  meetingStore: MeetingsRepository
+  systemAudio: SystemAudioSource
+  /** Non-null on Windows only; receives `audio.systemFrame`. */
+  loopbackAudio: LoopbackSystemAudio | null
+  /** Where transcripts go unless the user picked a folder. */
+  meetingsFolder: string
   isDev: boolean
   quit: () => void
 }
@@ -221,8 +237,18 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   })
 
   // -- audio: frames from the hidden capture renderer ------------------------
+  // Fanned out rather than handed straight to the orchestrator: dictation and
+  // a meeting recording can be live at the same time. One copy per frame, and
+  // every subscriber shares it — nothing downstream mutates a frame in place.
+  context.frames.subscribe((pcm) => orchestrator.pushFrame(pcm))
   ipc.receive('audio.frame', (frame) => {
-    orchestrator.pushFrame(framePcm(frame.pcm, frame.sampleCount))
+    context.frames.publish(framePcm(frame.pcm, frame.sampleCount))
+  })
+  // Windows loopback: the far side of a call, from the same hidden window.
+  // Deliberately not fanned out to the frame bus — this is not the microphone,
+  // and the dictation loop must never see it.
+  ipc.receive('audio.systemFrame', (frame) => {
+    context.loopbackAudio?.push(framePcm(frame.pcm, frame.sampleCount))
   })
   // The orchestrator only cares about errors mid-dictation (an idle error has
   // no dictation to fail). The Hub cares about *every* report — a permission
@@ -257,6 +283,60 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     ipc.broadcast(windows.uiWebContents(), 'audio.devicesChanged', next)
   })
   ipc.handle('audio.listDevices', () => devices)
+
+  // -- meetings (PLAN §18.2) -------------------------------------------------
+  const { meetings, meetingStore, systemAudio } = context
+
+  ipc.handle('meeting.start', ({ title, appBundleId }) => meetings.start(title, appBundleId))
+  ipc.handle('meeting.stop', () => meetings.stop())
+  ipc.handle('meeting.state', () => meetings.state())
+  ipc.handle('meeting.respondToOffer', async ({ accept, remember }) => {
+    const offer = meetings.state()
+    const bundleId = offer.state === 'offered' ? offer.appBundleId : null
+    const title = offer.state === 'offered' ? offer.title : ''
+
+    if (remember && bundleId) {
+      const current = context.settings.get().meetings
+      context.settings.set({
+        meetings: {
+          ...current,
+          autoRecord: { ...current.autoRecord, [bundleId]: accept ? 'always' : 'never' },
+        },
+      })
+    }
+
+    if (!accept) {
+      meetings.clearOffer()
+      return meetings.state()
+    }
+    return meetings.start(title, bundleId)
+  })
+
+  ipc.handle('meeting.list', () => ({ meetings: meetingStore.list() }))
+  ipc.handle('meeting.delete', ({ id }) => {
+    const record = meetingStore.get(id)
+    if (!record) return false
+    // Remove the transcript too: leaving the file behind after the user asked
+    // for the meeting to be deleted would be the wrong kind of surprise.
+    try {
+      rmSync(record.path, { force: true })
+    } catch (error) {
+      log.warn(`could not delete ${record.path}: ${String(error)}`)
+    }
+    return meetingStore.delete(id)
+  })
+  ipc.handle('meeting.reveal', ({ id }) => {
+    const record = meetingStore.get(id)
+    if (record) shell.showItemInFolder(record.path)
+  })
+  ipc.handle('meeting.openFolder', async () => {
+    const folder = context.settings.get().meetings.folder ?? context.meetingsFolder
+    mkdirSync(folder, { recursive: true })
+    await shell.openPath(folder)
+  })
+
+  ipc.handle('meeting.systemAudioAccess', () => systemAudio.access())
+  ipc.handle('meeting.requestSystemAudio', () => systemAudio.probe())
 
   // -- bar: click-through everywhere except the pill (PLAN §2.1) -------------
   ipc.receive('bar.pointerRegion', ({ interactive }) => {
@@ -308,7 +388,7 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
             const v = samples[produced + i] ?? 0
             frame[i] = Math.max(-1, Math.min(1, v))
           }
-          orchestrator.pushFrame(frame)
+          context.frames.publish(frame)
           produced += n
           frames += 1
         }
@@ -329,13 +409,51 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
           frame[i] = amplitude * env * Math.sin(phase)
           phase += twoPiF
         }
-        orchestrator.pushFrame(frame)
+        context.frames.publish(frame)
         produced += n
         frames += 1
       }
 
       return { frames, sampleCount: produced }
     })
+    ipc.handle('debug.injectSystemPcm', ({ durationMs, amplitude, frequencyHz, samples }) => {
+      const samplesPerFrame = Math.round((AUDIO.sampleRate * AUDIO.frameMs) / 1000)
+      let produced = 0
+      let frames = 0
+
+      const push = (frame: Float32Array): void => {
+        context.meetings.pushSystemFrame(frame)
+        frames += 1
+      }
+
+      if (samples && samples.length > 0) {
+        while (produced < samples.length) {
+          const n = Math.min(samplesPerFrame, samples.length - produced)
+          const frame = new Float32Array(n)
+          for (let i = 0; i < n; i++) {
+            frame[i] = Math.max(-1, Math.min(1, samples[produced + i] ?? 0))
+          }
+          push(frame)
+          produced += n
+        }
+        return { frames, sampleCount: produced }
+      }
+
+      const totalSamples = Math.max(1, Math.round((AUDIO.sampleRate * durationMs) / 1000))
+      const twoPiF = (2 * Math.PI * frequencyHz) / AUDIO.sampleRate
+      while (produced < totalSamples) {
+        const n = Math.min(samplesPerFrame, totalSamples - produced)
+        const frame = new Float32Array(n)
+        for (let i = 0; i < n; i++) {
+          const t = (produced + i) / totalSamples
+          frame[i] = Math.sin(twoPiF * (produced + i)) * amplitude * Math.sin(Math.PI * t)
+        }
+        push(frame)
+        produced += n
+      }
+      return { frames, sampleCount: produced }
+    })
+
     ipc.handle('debug.snapshot', () => ({
       app: {
         version: app.getVersion(),

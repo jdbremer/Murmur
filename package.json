@@ -23,7 +23,8 @@
     "format:check": "prettier --check .",
     "native:build": "npm --prefix packages/native run build",
     "agent:server": "node scripts/agent/server.mjs",
-    "agent": "node scripts/agent/cli.mjs"
+    "agent": "node scripts/agent/cli.mjs",
+    "audio-tap:build": "bash scripts/sidecars/build-audio-tap.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

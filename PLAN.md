@@ -514,7 +514,7 @@ The roadmap says what gets built; this section says when it is allowed to be cal
 Ranked by value-for-effort; none block v1.0. The first two are the strongest differentiators local models make uniquely private.
 
 1. **Command mode** (Flow parity; v1.1 flagship) — select text in any app, hold a *second* hotkey, speak an instruction ("tighten this up", "turn it into bullets", "reply yes but ask for an agenda") → the local LLM rewrites the selection in place. Reuses the whole pipeline: selection read via AX/clipboard round-trip, instruction prompt template, same injection path.
-2. **Long-form transcription mode** — record meetings or voice memos (mic first; system audio later), chunked transcription with timestamps into a Hub document view, export as Markdown. Same engines, different loop (no paste).
+2. ~~**Long-form transcription mode**~~ — **shipped as §18.2 Meeting capture.** Landed wider than scoped here: system audio arrived with the first version rather than later, because a meeting transcript carrying only the user's half of the conversation is not worth writing. Both sides are captured as separate tracks and attributed, VAD-cut rather than fixed-window, streamed to a Markdown file as it is spoken, and off by default.
 3. **Re-polish from history** — any history row → "rewrite as email / casual / shorter"; result copied to clipboard. Cheap win that showcases the local LLM.
 4. **Voice punctuation & commands toggle** — deterministic pre-polish handling of "period", "new line", "scratch that" for users who dictate punctuation explicitly.
 5. **Clipboard-only mode** — per-app or global fallback that copies the result and notifies instead of pasting (RDP/VMs/locked-down apps).

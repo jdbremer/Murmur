@@ -33,6 +33,49 @@ export const AUDIO = {
   levelIntervalMs: 33,
 } as const
 
+/**
+ * Long-form meeting capture (PLAN §18.2).
+ *
+ * The numbers that matter here are `maxSegmentMs` and `micHoldbackMs`, and both
+ * are about something other than what they look like:
+ *
+ *  - `maxSegmentMs` **is the dictation-latency knob.** An in-flight segment
+ *    cannot be preempted — aborting the HTTP request frees our client, but
+ *    whisper-server runs the inference to completion regardless — so the worst
+ *    case a dictation can wait behind meeting work is one segment's inference.
+ *    At roughly 15× realtime, 15 s of audio costs about a second.
+ *  - `micHoldbackMs` delays a mic segment that looks like speaker bleed, so a
+ *    matching system transcript has time to arrive and cancel it. See
+ *    `meeting/holdback.ts` for why the delay may never become a deletion.
+ */
+export const MEETING = {
+  /** Trailing silence that ends a segment. */
+  segmentSilenceMs: 700,
+  /** Below this a "segment" is a cough, not a sentence. */
+  minSegmentMs: 1_500,
+  /** Hard cut. Also keeps every segment inside Whisper's 30 s window. */
+  maxSegmentMs: 15_000,
+  /** Carried into the next segment so a cut never clips a word onset. */
+  segmentPreRollMs: 200,
+  /** How often the detector samples the process list. */
+  detectPollMs: 3_000,
+  /** A meeting-shaped app must hold both input and output this long to count. */
+  detectDwellMs: 20_000,
+  /** After a decline, do not re-offer for the same app this soon. */
+  detectCooldownMs: 5 * 60_000,
+  /** Tap delivered nothing for this long while it should have — rebuild it. */
+  systemAudioWatchdogMs: 5_000,
+  /** A modal TCC dialog blocks the probe; a normal start should be quick. */
+  systemAudioProbeMs: 60_000,
+  systemAudioStartMs: 3_000,
+  /** How long a bleed-suspect mic segment waits for a system transcript. */
+  micHoldbackMs: 3_000,
+  /** Everything at session start is suspect until the reference stream fills. */
+  warmupMs: 1_500,
+  /** Elapsed-time repaint cadence for the recording pill. */
+  tickMs: 1_000,
+} as const
+
 export const TIMEOUTS = {
   /**
    * Hotkey-up → first audio frame accounted for. Guards against a capture

@@ -656,6 +656,90 @@ Napi::Value IsSecureInputActive(const Napi::CallbackInfo& info) {
   return Napi::Boolean::New(info.Env(), IsSecureEventInputEnabled() ? true : false);
 }
 
+// Title of a specific process's frontmost window (PLAN §18.2).
+//
+// This is the one place Murmur reads a window title, and it exists because it
+// is the *only* way to tell a Google Meet tab from any other browser tab: a
+// bundle id says "Chrome" for both. It is also the only source of a real
+// meeting name for browser-hosted calls.
+//
+// Deliberately narrow, and the Help copy for Accessibility describes exactly
+// this: it is called only for a process already holding both microphone and
+// speakers, only while meeting detection is enabled and a candidate is being
+// watched, and the result is never logged. It is not a general screen read and
+// must not become one — `GetFrontmostApp` above still learns nothing but a
+// bundle id.
+//
+// Note this takes a *pid*, not "the frontmost app": the process holding a
+// call's audio is usually a helper, and the window belongs to its parent.
+Napi::Value GetWindowTitle(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object out = Napi::Object::New(env);
+
+  if (info.Length() < 1 || !info[0].IsNumber()) {
+    out.Set("ok", Napi::Boolean::New(env, false));
+    out.Set("error", Napi::String::New(env, "a pid is required"));
+    return out;
+  }
+  if (!AXIsProcessTrusted()) {
+    out.Set("ok", Napi::Boolean::New(env, false));
+    out.Set("error", Napi::String::New(env, "Accessibility permission is not granted"));
+    return out;
+  }
+
+  pid_t pid = static_cast<pid_t>(info[0].As<Napi::Number>().Int32Value());
+
+  @autoreleasepool {
+    AXUIElementRef application = AXUIElementCreateApplication(pid);
+    if (application == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "no accessibility element for that process"));
+      return out;
+    }
+    // Same guard as GetSelectedText: a hung target app must cost ~100 ms, not
+    // the several seconds of the default AX messaging timeout. This one runs
+    // on a poll timer, so a blocked call would stall detection indefinitely.
+    AXUIElementSetMessagingTimeout(application, 0.1f);
+
+    CFTypeRef window = nullptr;
+    AXError error =
+        AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute, &window);
+    if (error != kAXErrorSuccess || window == nullptr) {
+      // Fall back to the main window: a background call still has one, but it
+      // is not "focused" while the user works in another app.
+      error = AXUIElementCopyAttributeValue(application, kAXMainWindowAttribute, &window);
+    }
+    CFRelease(application);
+
+    if (error != kAXErrorSuccess || window == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, true));
+      out.Set("title", Napi::String::New(env, ""));
+      return out;
+    }
+
+    CFTypeRef title = nullptr;
+    error = AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(window),
+                                          kAXTitleAttribute, &title);
+    CFRelease(window);
+
+    if (error != kAXErrorSuccess || title == nullptr ||
+        CFGetTypeID(title) != CFStringGetTypeID()) {
+      if (title != nullptr) CFRelease(title);
+      out.Set("ok", Napi::Boolean::New(env, true));
+      out.Set("title", Napi::String::New(env, ""));
+      return out;
+    }
+
+    NSString* text = (__bridge NSString*)title;
+    const char* utf8 = text.UTF8String;
+    out.Set("ok", Napi::Boolean::New(env, true));
+    out.Set("title", Napi::String::New(env, utf8 != nullptr ? utf8 : ""));
+    CFRelease(title);
+  }
+
+  return out;
+}
+
 // Bundle id + name of the frontmost app. No window titles, no screen content
 // (PLAN §4) — this is the whole of what Murmur learns about the target app.
 Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
@@ -802,6 +886,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("sendPasteShortcut", Napi::Function::New(env, SendPasteShortcut));
   exports.Set("insertTextViaAccessibility", Napi::Function::New(env, InsertTextViaAccessibility));
   exports.Set("getSelectedText", Napi::Function::New(env, GetSelectedText));
+  exports.Set("getWindowTitle", Napi::Function::New(env, GetWindowTitle));
 
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));
   exports.Set("getFrontmostApp", Napi::Function::New(env, GetFrontmostApp));

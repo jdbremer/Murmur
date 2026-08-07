@@ -6,6 +6,7 @@ import {
   AppCategorySchema,
   DictationRecordSchema,
   DictionaryEntrySchema,
+  MeetingRecordSchema,
   StyleProfileSchema,
   createDefaultStyleProfiles,
   type DictationRecord,
@@ -15,12 +16,13 @@ import {
   type HistoryPage,
   type HistoryQuery,
   type HistoryStats,
+  type MeetingRecord,
   type StyleProfile,
   type StyleProfilePatch,
   type StyleProfileSet,
 } from '@murmur/shared'
 
-import { computeStats, type StatsRow } from './stats'
+import { averageWpm, computeStreak, countedText, countWords, dayKey } from './stats'
 
 /**
  * Repositories over the SQLite schema (PLAN §9).
@@ -87,26 +89,50 @@ export class DictationsRepository {
 
   insert(draft: DictationDraft): DictationRecord {
     const record = DictationRecordSchema.parse({ ...draft, id: draft.id ?? randomUUID() })
-    this.#db
-      .prepare(
-        `INSERT INTO dictations
-           (id, ts, raw_text, polished_text, app_bundle_id, app_category,
-            duration_ms, stt_model, polish_model, timings_json)
-         VALUES (@id, @ts, @rawText, @polishedText, @appBundleId, @appCategory,
-                 @durationMs, @sttModelId, @polishModelId, @timingsJson)`,
-      )
-      .run({
-        id: record.id,
-        ts: record.ts,
-        rawText: record.rawText,
-        polishedText: record.polishedText,
-        appBundleId: record.appBundleId,
-        appCategory: record.appCategory,
-        durationMs: record.durationMs,
-        sttModelId: record.sttModelId,
-        polishModelId: record.polishModelId,
-        timingsJson: JSON.stringify(record.timings),
-      })
+
+    // The row and the lifetime counters move together or not at all: a crash
+    // between them would leave the header permanently disagreeing with the
+    // history below it, and nothing ever recomputes the counters to notice.
+    this.#db.transaction(() => {
+      this.#db
+        .prepare(
+          `INSERT INTO dictations
+             (id, ts, raw_text, polished_text, app_bundle_id, app_category,
+              duration_ms, stt_model, polish_model, timings_json)
+           VALUES (@id, @ts, @rawText, @polishedText, @appBundleId, @appCategory,
+                   @durationMs, @sttModelId, @polishModelId, @timingsJson)`,
+        )
+        .run({
+          id: record.id,
+          ts: record.ts,
+          rawText: record.rawText,
+          polishedText: record.polishedText,
+          appBundleId: record.appBundleId,
+          appCategory: record.appCategory,
+          durationMs: record.durationMs,
+          sttModelId: record.sttModelId,
+          polishModelId: record.polishModelId,
+          timingsJson: JSON.stringify(record.timings),
+        })
+
+      const words = countWords(countedText(record.polishedText, record.rawText))
+      const timed = record.durationMs > 0 && words > 0
+
+      this.#db
+        .prepare(
+          `UPDATE lifetime_stats
+              SET total_words = total_words + ?,
+                  timed_words = timed_words + ?,
+                  spoken_ms   = spoken_ms + ?
+            WHERE id = 1`,
+        )
+        .run(words, timed ? words : 0, timed ? record.durationMs : 0)
+
+      this.#db
+        .prepare(`INSERT OR IGNORE INTO dictation_days (day) VALUES (?)`)
+        .run(dayKey(record.ts))
+    })()
+
     return record
   }
 
@@ -162,33 +188,68 @@ export class DictationsRepository {
     return this.#db.prepare(`DELETE FROM dictations WHERE id = ?`).run(id).changes > 0
   }
 
+  /**
+   * Delete everything, lifetime counters included.
+   *
+   * The one place the totals go backwards. "Delete all my dictations" is an
+   * explicit, confirmed act of erasure, and leaving a word count and a streak
+   * standing afterwards would misrepresent what was deleted — unlike the
+   * retention sweep below, which the user did not press a button for.
+   */
   clear(): number {
-    return this.#db.prepare(`DELETE FROM dictations`).run().changes
+    return this.#db.transaction(() => {
+      const changes = this.#db.prepare(`DELETE FROM dictations`).run().changes
+      this.#db
+        .prepare(
+          `UPDATE lifetime_stats SET total_words = 0, timed_words = 0, spoken_ms = 0 WHERE id = 1`,
+        )
+        .run()
+      this.#db.prepare(`DELETE FROM dictation_days`).run()
+      return changes
+    })()
   }
 
-  /** Drop rows older than `cutoff` (epoch ms) — the retention sweep (PLAN §9). */
+  /**
+   * Drop rows older than `cutoff` (epoch ms) — the retention sweep (PLAN §9).
+   *
+   * Deliberately leaves the lifetime counters alone: retention governs how long
+   * the *text* is kept, not whether the dictation happened.
+   */
   pruneOlderThan(cutoff: number): number {
     return this.#db.prepare(`DELETE FROM dictations WHERE ts < ?`).run(cutoff).changes
   }
 
+  /**
+   * The Home header's numbers — **lifetime**, not a window over the rows.
+   *
+   * Read from the counters rather than aggregated over `dictations` on purpose:
+   * history is subject to a retention policy (PLAN §9), and deriving the totals
+   * from it made "words dictated" quietly fall every time the sweep ran. What
+   * the user dictated is a fact about the past; deleting the transcript for
+   * privacy does not un-speak it. Only an explicit `clear()` resets these.
+   */
   stats(now?: number): HistoryStats {
-    const rows = this.#db
-      .prepare(`SELECT ts, raw_text, polished_text, duration_ms FROM dictations`)
-      .all() as {
-      ts: number
-      raw_text: string
-      polished_text: string | null
-      duration_ms: number
-    }[]
+    const totals = this.#db
+      .prepare(`SELECT total_words, timed_words, spoken_ms FROM lifetime_stats WHERE id = 1`)
+      .get() as { total_words: number; timed_words: number; spoken_ms: number } | undefined
 
-    const statsRows: StatsRow[] = rows.map((row) => ({
-      ts: row.ts,
-      rawText: row.raw_text,
-      polishedText: row.polished_text,
-      durationMs: row.duration_ms,
-    }))
+    const { total_words, timed_words, spoken_ms } = totals ?? {
+      total_words: 0,
+      timed_words: 0,
+      spoken_ms: 0,
+    }
 
-    return computeStats(statsRows, now === undefined ? {} : { now })
+    const days = new Set(
+      (this.#db.prepare(`SELECT day FROM dictation_days`).all() as { day: string }[]).map(
+        (row) => row.day,
+      ),
+    )
+
+    return {
+      totalWords: total_words,
+      avgWpm: averageWpm(timed_words, spoken_ms),
+      streakDays: computeStreak(days, now ?? Date.now()),
+    }
   }
 
   count(): number {
@@ -417,4 +478,104 @@ export class StyleRepository {
       }
     })(createDefaultStyleProfiles())
   }
+}
+
+/**
+ * Index of recorded meetings (PLAN §18.2).
+ *
+ * An index, not a store: the transcript lives in the Markdown file at `path`
+ * and is never copied in here. That means a row can outlive its file — the
+ * user is free to move or delete a transcript from Finder — so every reader
+ * has to treat the file as possibly missing rather than implied by the row.
+ */
+export class MeetingsRepository {
+  readonly #db: Database
+
+  constructor(db: Database) {
+    this.#db = db
+  }
+
+  save(record: MeetingRecord): MeetingRecord {
+    const parsed = MeetingRecordSchema.parse(record)
+    this.#db
+      .prepare(
+        `INSERT INTO meetings
+           (id, started_at, ended_at, title, path, app_bundle_id,
+            had_system_audio, segment_count, duration_ms)
+         VALUES (@id, @startedAt, @endedAt, @title, @path, @appBundleId,
+                 @hadSystemAudio, @segmentCount, @durationMs)
+         ON CONFLICT(id) DO UPDATE SET
+           ended_at = excluded.ended_at,
+           title = excluded.title,
+           path = excluded.path,
+           segment_count = excluded.segment_count,
+           duration_ms = excluded.duration_ms`,
+      )
+      .run({
+        id: parsed.id,
+        startedAt: parsed.startedAt,
+        endedAt: parsed.endedAt,
+        title: parsed.title,
+        path: parsed.path,
+        appBundleId: parsed.appBundleId,
+        hadSystemAudio: parsed.hadSystemAudio ? 1 : 0,
+        segmentCount: parsed.segmentCount,
+        durationMs: parsed.durationMs,
+      })
+    return parsed
+  }
+
+  list(limit = 200): MeetingRecord[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT id, started_at, ended_at, title, path, app_bundle_id,
+                had_system_audio, segment_count, duration_ms
+           FROM meetings
+          ORDER BY started_at DESC
+          LIMIT ?`,
+      )
+      .all(limit) as MeetingRow[]
+    return rows.map(toMeeting)
+  }
+
+  get(id: string): MeetingRecord | null {
+    const row = this.#db
+      .prepare(
+        `SELECT id, started_at, ended_at, title, path, app_bundle_id,
+                had_system_audio, segment_count, duration_ms
+           FROM meetings WHERE id = ?`,
+      )
+      .get(id) as MeetingRow | undefined
+    return row ? toMeeting(row) : null
+  }
+
+  delete(id: string): boolean {
+    return this.#db.prepare(`DELETE FROM meetings WHERE id = ?`).run(id).changes > 0
+  }
+}
+
+interface MeetingRow {
+  id: string
+  started_at: number
+  ended_at: number | null
+  title: string
+  path: string
+  app_bundle_id: string | null
+  had_system_audio: number
+  segment_count: number
+  duration_ms: number
+}
+
+function toMeeting(row: MeetingRow): MeetingRecord {
+  return MeetingRecordSchema.parse({
+    id: row.id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    title: row.title,
+    path: row.path,
+    appBundleId: row.app_bundle_id,
+    hadSystemAudio: row.had_system_audio === 1,
+    segmentCount: row.segment_count,
+    durationMs: row.duration_ms,
+  })
 }
