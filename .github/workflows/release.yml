@@ -200,8 +200,9 @@ jobs:
       # Both matter, and for different things. Signing is what lets macOS
       # replace the app during an update and what makes TCC keep a permission
       # grant across versions; notarisation is what stops Gatekeeper calling a
-      # download damaged. Unsigned builds still succeed here — they are just
-      # the ones the README has to apologise for.
+      # download damaged. Both secrets are configured, so this is the path a
+      # real release takes — the fallback below stays only so a fork or a
+      # secretless re-run still produces an installer instead of failing.
       # `pack:*`, not `release:*` — these scripts pass `--publish never`. The
       # release job below is the only thing that talks to GitHub.
       # @electron/notarize wants APPLE_API_KEY to be a *path to the .p8 file*,
@@ -343,7 +344,9 @@ jobs:
             --title "${TAG#v}" \
             --notes 'Speech and polishing servers are bundled, so a fresh install can transcribe once you download a model from the Hub.
 
-          **macOS builds are unsigned.** Gatekeeper will report the app as damaged — it is not. See the README for how to open it, and prefer building from source if you would rather not override that warning.
+          **macOS** is signed with a Developer ID and notarised, so it opens normally.
 
-          **Windows** SmartScreen will warn for the same reason: More info → Run anyway.' \
+          **Windows is not signed.** SmartScreen will warn: More info → Run anyway. Murmur asks to watch your keyboard and type into other applications, so only accept that if you trust this build — building from source sidesteps it.
+
+          **Linux** needs an X11 session (not Wayland) and glibc 2.39+ — Ubuntu 24.04+, Debian 13+, Fedora 40+.' \
             installers/*
