@@ -137,7 +137,11 @@ async function withServer(modelPath, port, fn) {
     for (let i = 0; i < 120; i++) {
       try {
         if ((await fetch(`http://127.0.0.1:${port}/health`)).ok) break
-      } catch {}
+      } catch {
+        // Not listening yet. llama-server takes a few seconds to map a
+        // multi-gigabyte model, so a refused connection is the normal case
+        // here rather than a failure — keep polling until the deadline.
+      }
       await sleep(1000)
     }
     return await fn()
