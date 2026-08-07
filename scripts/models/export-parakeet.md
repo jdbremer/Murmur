@@ -31,20 +31,39 @@ loop with its duration-skip semantics, and the SentencePiece detokeniser — all
 unit-tested against synthetic logits. What is missing is the model files and the
 fixture-based validation, not the code.
 
-## The export
+## The export — no longer needs NeMo
 
-Run on a machine with a CUDA-capable GPU or a recent CPU and ~16 GB RAM. NeMo is
-a large dependency and is deliberately _not_ part of this repo's toolchain: this
-is an offline, occasional job whose output is three files.
+NVIDIA now publishes the same weights in `transformers` format
+(`model.safetensors` plus a `ParakeetForTDT` architecture) alongside the
+`.nemo` bundle, so the export runs from `transformers` and `torch` alone. Same
+weights, same provenance, a fraction of the toolchain. **This has now been
+run.**
 
 ```bash
-python3 -m venv .venv-nemo && source .venv-nemo/bin/activate
-pip install "nemo_toolkit[asr]" onnx onnxruntime
+python3.12 -m venv .venv-parakeet && source .venv-parakeet/bin/activate
+pip install torch transformers onnx onnxruntime onnxscript librosa
 
 python3 scripts/models/export_parakeet.py \
   --model nvidia/parakeet-tdt-0.6b-v3 \
   --out   build/parakeet-tdt-0.6b-v3-onnx
 ```
+
+Two things bite, both recorded in the script:
+
+- **Use the TorchScript exporter (`dynamo=False`).** The dynamo path cannot
+  decompose the Conformer attention's `reshape(*input_shape, -1)` once the frame
+  count is symbolic, and variable-length audio is the entire point.
+- **fp32 exceeds protobuf's 2 GB limit**, so the encoder spills its weights into
+  ~300 external tensor files. Before anything is hosted this needs consolidating
+  (`all_tensors_to_one_file=True`) and quantising to int8, which is what the
+  catalog entry claims and what gets the download down to a sane size.
+
+### What the run confirmed
+
+Everything the decode loop assumes is true of the shipped v3 checkpoint:
+`durations = [0, 1, 2, 3, 4]` exactly as `PARAKEET_DURATIONS`,
+`max_symbols_per_step = 10`, blank at id 8192, and a joint head of width
+8198 = 8193 + 5, which is the `V + 1 + D` the loop expects.
 
 That produces the three graphs a transducer needs:
 
@@ -67,14 +86,21 @@ utterance, or duplicates tokens on frames where the duration head predicts zero.
 
 Before an entry goes in the catalog:
 
-1. **Featurizer parity.** Run `AudioToMelSpectrogramPreprocessor` from NeMo on
-   ~10 s of speech, run `computeLogMel()` on the same PCM, and assert a max
-   absolute difference below `1e-3`. A mismatch here is almost always one of
-   three things, in order of likelihood: `mel_norm` (`slaney` vs `none` — this
-   rescales every feature and is what `MelConfig.melNorm` exists to make
-   explicit), the window (periodic vs symmetric Hann), or the pre-emphasis
-   coefficient. `export_parakeet.py` writes the model's actual values into
-   `config.json`; `PARAKEET_MEL` in `featurizer.ts` must match them exactly.
+1. **Featurizer parity — done.** Verified against the shipped
+   `ParakeetFeatureExtractor`: the filterbank matches to `3.7e-9` and full
+   features to `6.6e-5`, against the `1e-3` bar. The fixture lives at
+   `apps/desktop/test/__fixtures__/parakeet/featurizer.json` and the check at
+   `apps/desktop/test/parakeet-featurizer-parity.test.ts`, so it runs without
+   Python or the checkpoint.
+
+   It found **five** defects, not the three predicted, and every one was silent:
+   80 mel bands where v3 uses 128; the HTK formula behind a function named
+   "Slaney"; reflect padding where the extractor zero-pads; the 400-sample
+   window left-aligned in the 512-point FFT frame rather than centred; and one
+   frame too many, whose log-mel is the padding floor and which drags the
+   per-feature mean and standard deviation. Anyone repeating this on a future
+   checkpoint should assume the same and re-run the parity test rather than
+   trust the constants.
 2. **Decode parity.** Transcribe the NeMo reference set with
    `nemo_asr.models.ASRModel.transcribe()`, then with our ONNX loop, and assert
    identical strings. Not "similar" — identical. Greedy decoding is

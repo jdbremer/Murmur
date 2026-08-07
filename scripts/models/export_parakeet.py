@@ -1,23 +1,43 @@
 #!/usr/bin/env python3
-"""Export NVIDIA Parakeet-TDT from .nemo to ONNX, first-party.
+"""Export NVIDIA Parakeet-TDT to ONNX, first-party.
 
-**Skeleton.** This has not been run — Murmur's development container has no
-NeMo, no GPU and no 650 MB checkpoint — so treat every step below as the plan
-rather than as tested code. Read `export-parakeet.md` first; it explains why
-this exists at all (NVIDIA ships .nemo, not ONNX, and Murmur's provenance policy
-does not list community conversions) and, more importantly, what has to be
-*verified* before the output may enter the catalog.
+Read `export-parakeet.md` first. It explains why this exists — NVIDIA ships
+`.nemo`, not ONNX, and Murmur's provenance policy does not list community
+conversions — and, more importantly, what has to be *verified* before the output
+may enter the catalog.
 
-Run it in a throwaway virtualenv:
+## This no longer needs NeMo
 
-    python3 -m venv .venv-nemo && source .venv-nemo/bin/activate
-    pip install "nemo_toolkit[asr]" onnx onnxruntime
-    python3 scripts/models/export_parakeet.py \
-        --model nvidia/parakeet-tdt-0.6b-v3 \
+The original plan installed `nemo_toolkit[asr]`: a very large dependency, a GPU,
+and a `.nemo` bundle that only NeMo can open. NVIDIA has since published the
+same weights in Hugging Face `transformers` format — `model.safetensors` plus a
+`ParakeetForTDT` architecture — so the export runs from `transformers` and
+`torch` alone. Same weights, same provenance, a fraction of the toolchain:
+
+    python3.12 -m venv .venv-parakeet && source .venv-parakeet/bin/activate
+    pip install torch transformers onnx onnxruntime librosa
+    python3 scripts/models/export_parakeet.py \\
+        --model nvidia/parakeet-tdt-0.6b-v3 \\
         --out   build/parakeet-tdt-0.6b-v3-onnx
 
-NeMo is deliberately not a dependency of this repo: this is an occasional
-offline job whose output is a handful of files, not part of the app's build.
+## What comes out
+
+A transducer is three graphs, because they run at different rates: the encoder
+once per utterance, the decoder once per emitted token, the joint once per
+(frame, token) step. Exporting them as one graph would force the whole decode
+loop into ONNX control flow; keeping them separate is what lets `tdt-decode.ts`
+own the loop, which is where the duration-skip semantics live.
+
+    encoder.onnx   [B, T, 128] log-mel  -> [B, T', 640] encoder states
+    decoder.onnx   token + LSTM state   -> [B, 1, 640] prediction state
+    joint.onnx     (enc_t, dec_u)       -> [B, 8198] logits
+
+plus `vocab.json` and `config.json` recording the vocabulary, blank id, duration
+bins and the mel front-end the featurizer has to match.
+
+Note the encoder graph folds in `encoder_projector` (1024 -> 640): the joint
+expects projected states, and leaving the projection out of the graph is an easy
+way to produce an export that runs and transcribes nonsense.
 """
 
 from __future__ import annotations
@@ -27,20 +47,14 @@ import json
 import sys
 from pathlib import Path
 
+MEL_BINS = 128
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--model",
-        default="nvidia/parakeet-tdt-0.6b-v3",
-        help="Hugging Face model id or a local .nemo path.",
-    )
-    parser.add_argument("--out", required=True, type=Path, help="Output directory.")
-    parser.add_argument(
-        "--quantize",
-        action="store_true",
-        help="Also emit int8 dynamic-quantised graphs (what the catalog ships).",
-    )
+    parser.add_argument("--model", default="nvidia/parakeet-tdt-0.6b-v3")
+    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--opset", type=int, default=17)
     return parser.parse_args()
 
 
@@ -49,97 +63,164 @@ def main() -> int:
     args.out.mkdir(parents=True, exist_ok=True)
 
     try:
-        import nemo.collections.asr as nemo_asr  # noqa: PLC0415
-    except ImportError:
-        print(
-            "nemo_toolkit is not installed. See scripts/models/export-parakeet.md.",
-            file=sys.stderr,
-        )
+        import torch
+        from transformers import AutoConfig, AutoModel, AutoProcessor
+    except ImportError as error:  # pragma: no cover - operator-facing
+        print(f"missing dependency: {error}. See scripts/models/export-parakeet.md.", file=sys.stderr)
         return 1
 
     print(f"loading {args.model}")
-    model = nemo_asr.models.ASRModel.from_pretrained(model_name=args.model)
-    model.eval()
+    config = AutoConfig.from_pretrained(args.model)
+    model = AutoModel.from_pretrained(args.model, dtype=torch.float32).eval()
+    processor = AutoProcessor.from_pretrained(args.model)
 
-    # NeMo's `export()` on a transducer writes the three graphs a transducer
-    # needs, deriving their names from the stem it is given:
-    #   <stem>-encoder-model.onnx / -decoder-model.onnx / -joiner-model.onnx
-    #
-    # The decoder ("prediction network") and joiner are separate graphs on
-    # purpose — the decode loop in `tdt-decode.ts` calls them at different rates,
-    # which is exactly what makes TDT fast.
-    stem = args.out / "parakeet.onnx"
-    print(f"exporting ONNX graphs into {args.out}")
-    model.export(str(stem))
+    hidden = model.encoder_projector.out_features
+    layers = model.decoder.lstm.num_layers
 
-    # -- the tokenizer -------------------------------------------------------
-    # `loadTokenizer()` on the TypeScript side reads a plain vocab.txt: one
-    # SentencePiece piece per line, id = line number. Nothing more exotic is
-    # needed because we only ever *de*tokenise.
-    vocab_path = args.out / "vocab.txt"
-    pieces = list(model.tokenizer.vocab)
-    vocab_path.write_text("\n".join(pieces) + "\n", encoding="utf-8")
-    print(f"wrote {vocab_path} ({len(pieces)} pieces)")
+    # -- encoder ------------------------------------------------------------
+    # Wrapped so the projection travels with it; see the module docstring.
+    class Encoder(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
 
-    # -- the constants the decode loop must agree with -----------------------
-    # Every one of these has a matching constant in the TypeScript. If a future
-    # Parakeet release changes any of them, the export must fail loudly rather
-    # than produce a model that decodes to plausible nonsense.
-    config = getattr(model, "cfg", {})
-    durations = list(getattr(getattr(config, "model_defaults", {}), "tdt_durations", [0, 1, 2, 3, 4]))
-    preprocessor = getattr(config, "preprocessor", {})
+        def forward(self, input_features):
+            out = self.inner.encoder(input_features)
+            states = out.last_hidden_state if hasattr(out, "last_hidden_state") else out[0]
+            return self.inner.encoder_projector(states)
 
-    metadata = {
-        "source_model": args.model,
-        "vocab_size": len(pieces),
-        # `tdt-decode.ts` splits the joiner's output at `vocab_size + 1`; the
-        # duration head is everything after it.
-        "blank_index": len(pieces),
-        "durations": durations,
-        # `featurizer.ts` PARAKEET_MEL must match these exactly.
+    print("exporting encoder")
+    torch.onnx.export(
+        Encoder(model),
+        (torch.randn(1, 200, MEL_BINS),),
+        str(args.out / "encoder.onnx"),
+        input_names=["input_features"],
+        output_names=["encoder_states"],
+        dynamic_axes={"input_features": {0: "batch", 1: "frames"},
+                      "encoder_states": {0: "batch", 1: "enc_frames"}},
+        opset_version=args.opset,
+        # The TorchScript exporter, not the dynamo one. Dynamo cannot decompose
+        # the Conformer attention's `reshape(*input_shape, -1)` once the frame
+        # count is symbolic — it fails on a view whose strides it cannot prove —
+        # and the whole point of the export is a graph that takes variable-length
+        # audio. Tracing does not care, and the three graphs here are simple
+        # feed-forward blocks with no data-dependent control flow to lose.
+        dynamo=False,
+    )
+
+    # -- decoder (prediction network) ---------------------------------------
+    # State in and state out, explicitly: the decode loop advances one token at
+    # a time and must be able to carry the LSTM state itself.
+    class Decoder(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.embedding = inner.decoder.embedding
+            self.lstm = inner.decoder.lstm
+            self.projector = inner.decoder.decoder_projector
+
+        def forward(self, token, h_in, c_in):
+            x = self.embedding(token)
+            y, (h_out, c_out) = self.lstm(x, (h_in, c_in))
+            return self.projector(y), h_out, c_out
+
+    print("exporting decoder")
+    torch.onnx.export(
+        Decoder(model),
+        (torch.zeros(1, 1, dtype=torch.long),
+         torch.zeros(layers, 1, hidden),
+         torch.zeros(layers, 1, hidden)),
+        str(args.out / "decoder.onnx"),
+        input_names=["token", "h_in", "c_in"],
+        output_names=["decoder_state", "h_out", "c_out"],
+        dynamic_axes={"token": {0: "batch"}, "h_in": {1: "batch"}, "c_in": {1: "batch"},
+                      "decoder_state": {0: "batch"}, "h_out": {1: "batch"}, "c_out": {1: "batch"}},
+        opset_version=args.opset,
+        # The TorchScript exporter, not the dynamo one. Dynamo cannot decompose
+        # the Conformer attention's `reshape(*input_shape, -1)` once the frame
+        # count is symbolic — it fails on a view whose strides it cannot prove —
+        # and the whole point of the export is a graph that takes variable-length
+        # audio. Tracing does not care, and the three graphs here are simple
+        # feed-forward blocks with no data-dependent control flow to lose.
+        dynamo=False,
+    )
+
+    # -- joint --------------------------------------------------------------
+    class Joint(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.joint = inner.joint
+
+        def forward(self, decoder_state, encoder_state):
+            out = self.joint(decoder_state, encoder_state)
+            return out[0] if isinstance(out, (tuple, list)) else out
+
+    print("exporting joint")
+    torch.onnx.export(
+        Joint(model),
+        (torch.randn(1, 1, hidden), torch.randn(1, 1, hidden)),
+        str(args.out / "joint.onnx"),
+        input_names=["decoder_state", "encoder_state"],
+        output_names=["logits"],
+        dynamic_axes={"decoder_state": {0: "batch"}, "encoder_state": {0: "batch"},
+                      "logits": {0: "batch"}},
+        opset_version=args.opset,
+        # The TorchScript exporter, not the dynamo one. Dynamo cannot decompose
+        # the Conformer attention's `reshape(*input_shape, -1)` once the frame
+        # count is symbolic — it fails on a view whose strides it cannot prove —
+        # and the whole point of the export is a graph that takes variable-length
+        # audio. Tracing does not care, and the three graphs here are simple
+        # feed-forward blocks with no data-dependent control flow to lose.
+        dynamo=False,
+    )
+
+    # -- vocabulary + config ------------------------------------------------
+    tokenizer = processor.tokenizer
+    size = getattr(tokenizer, "vocab_size", None) or len(tokenizer.get_vocab())
+    vocab = [tokenizer.convert_ids_to_tokens(i) for i in range(size)]
+    (args.out / "vocab.json").write_text(json.dumps(vocab, ensure_ascii=False))
+
+    extractor = processor.feature_extractor
+    meta = {
+        "model": args.model,
+        "vocabSize": int(config.vocab_size),
+        "blankTokenId": int(config.blank_token_id),
+        "durations": list(config.durations),
+        "maxSymbolsPerStep": int(config.max_symbols_per_step),
+        "hiddenSize": int(hidden),
+        "decoderLayers": int(layers),
         "mel": {
-            "sample_rate": int(getattr(preprocessor, "sample_rate", 16000)),
-            "n_fft": int(getattr(preprocessor, "n_fft", 512)),
-            "win_length": int(
-                float(getattr(preprocessor, "window_size", 0.025))
-                * int(getattr(preprocessor, "sample_rate", 16000))
-            ),
-            "hop_length": int(
-                float(getattr(preprocessor, "window_stride", 0.01))
-                * int(getattr(preprocessor, "sample_rate", 16000))
-            ),
-            "n_mels": int(getattr(preprocessor, "features", 80)),
-            "window": str(getattr(preprocessor, "window", "hann")),
-            "normalize": str(getattr(preprocessor, "normalize", "per_feature")),
-            "preemph": float(getattr(preprocessor, "preemph", 0.97)),
-            # The single most consequential value: it rescales every feature and
-            # a wrong choice degrades accuracy silently. `featurizer.ts` defaults
-            # to "slaney" (librosa's default, which NeMo passes through); the
-            # parity check in export-parakeet.md is what confirms it.
-            "mel_norm": str(getattr(preprocessor, "mel_norm", "slaney")),
+            "sampleRate": int(extractor.sampling_rate),
+            "nFft": int(extractor.n_fft),
+            "winLength": int(extractor.win_length),
+            "hopLength": int(extractor.hop_length),
+            "nMels": int(extractor.feature_size),
+            "preEmphasis": float(extractor.preemphasis),
+            # Spelled out because each is a way to be silently wrong; see the
+            # parity notes in export-parakeet.md.
+            "melScale": "slaney",
+            "melNorm": "slaney",
+            "window": "symmetric",
+            "padMode": "constant",
+            "normalize": "per_feature",
+            "logZeroGuard": 2**-24,
         },
     }
-    config_path = args.out / "config.json"
-    config_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {config_path}")
+    (args.out / "config.json").write_text(json.dumps(meta, indent=2))
 
-    if args.quantize:
-        # Dynamic int8 is what makes Parakeet real-time on CPU (PLAN §6.1) and
-        # what the catalog's size estimate assumes.
-        from onnxruntime.quantization import QuantType, quantize_dynamic  # noqa: PLC0415
+    # The joint's width is the one shape that silently invalidates the decode
+    # loop's duration arithmetic, so assert it here rather than discover it as
+    # bad transcripts.
+    expected = meta["vocabSize"] + len(meta["durations"])
+    actual = model.joint.head.out_features
+    if actual != expected:
+        print(f"joint width {actual} != vocab {meta['vocabSize']} + durations "
+              f"{len(meta['durations'])}; PARAKEET_DURATIONS must change with it.",
+              file=sys.stderr)
+        return 1
 
-        for graph in sorted(args.out.glob("*-model.onnx")):
-            target = graph.with_name(graph.name.replace(".onnx", ".int8.onnx"))
-            print(f"quantising {graph.name} → {target.name}")
-            quantize_dynamic(str(graph), str(target), weight_type=QuantType.QInt8)
-
-    print()
-    print("Export finished. Do NOT add a catalog entry yet — run the validation")
-    print("in scripts/models/export-parakeet.md first:")
-    print("  1. featurizer parity against NeMo's preprocessor (max abs diff < 1e-3)")
-    print("  2. decode parity against NeMo reference transcripts (identical strings)")
-    print("  3. duration-bin sanity: joiner output width == vocab_size + 1 + len(durations)")
-    print("  4. capture fixtures into apps/desktop/test/__fixtures__/parakeet/")
+    for f in sorted(args.out.iterdir()):
+        print(f"  {f.name}  {f.stat().st_size / 1e6:.1f} MB")
+    print(f"\nwrote {args.out}. Validate before cataloguing — see export-parakeet.md.")
     return 0
 
 
