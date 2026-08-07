@@ -70,6 +70,13 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
+    # The DMG is what a human downloads; the ZIP is what the *updater* needs.
+    # electron-updater cannot apply a DMG — it mounts and copies by hand — so a
+    # release with only DMGs makes `latest-mac.yml` list nothing it can use and
+    # the in-app update fails with "ZIP file not provided", having already
+    # downloaded ~190 MB. Both targets, or auto-update on macOS does not exist.
+    - target: zip
+      arch: [arm64, x64]
   # macOS 13 Ventura+ (PLAN §16.1).
   minimumSystemVersion: '13.0'
   hardenedRuntime: true

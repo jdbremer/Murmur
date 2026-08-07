@@ -298,6 +298,9 @@ jobs:
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
             apps/desktop/release/*.blockmap
+            # The macOS updater artifact. Without it on the release, the app
+            # finds an update, downloads it, and then cannot install it.
+            apps/desktop/release/*.zip
             apps/desktop/release/latest*.yml
 
   # The single publisher. Runs once, after every platform, so there is exactly
