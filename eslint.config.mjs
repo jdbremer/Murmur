@@ -102,6 +102,13 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node }, sourceType: 'module' },
   },
 
+  // The one tooling script that cannot be ESM: it is loaded by `npx electron`,
+  // whose main process is CommonJS.
+  {
+    files: ['scripts/**/*.cjs'],
+    languageOptions: { globals: { ...globals.node }, sourceType: 'commonjs' },
+  },
+
   // Prettier last: turn off stylistic rules it owns.
   prettier,
 )

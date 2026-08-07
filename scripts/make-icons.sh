@@ -15,10 +15,21 @@ RES=apps/desktop/buildResources
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# qlmanage renders the SVG through QuickLook; -s is the longest edge.
-qlmanage -t -s 1024 -o "$TMP" "$RES/icon.svg" >/dev/null
-MASTER="$TMP/icon.svg.png"
-[ -f "$MASTER" ] || { echo "qlmanage did not produce a PNG" >&2; exit 1; }
+# Rendered through Chromium, not `qlmanage -t`: QuickLook composites its
+# preview onto white, so the icon's rounded corners and the padding around them
+# came out opaque white — a white border stuck to the app in the Dock.
+MASTER="$TMP/icon.png"
+npx electron scripts/render-svg.cjs "$RES/icon.svg" "$MASTER" 1024 >/dev/null 2>&1
+[ -f "$MASTER" ] || { echo "electron did not produce a PNG" >&2; exit 1; }
+
+# Guard the thing that was silently wrong before: a corner pixel must be
+# transparent. A fully opaque master means the rasteriser flattened the alpha
+# again, and every icon built from it would carry a background.
+node -e '
+  const { execFileSync } = require("node:child_process")
+  const out = execFileSync("sips", ["-g", "hasAlpha", process.argv[1]]).toString()
+  if (!/hasAlpha:\s*yes/.test(out)) { console.error("master PNG has no alpha channel"); process.exit(1) }
+' "$MASTER"
 
 ICONSET="$TMP/icon.iconset"
 mkdir "$ICONSET"
