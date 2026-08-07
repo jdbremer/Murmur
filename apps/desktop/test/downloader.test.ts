@@ -187,12 +187,20 @@ describe('downloadFile', () => {
       const stream = new ReadableStream<Uint8Array>({
         start(streamController) {
           streamController.enqueue(Buffer.from(body).subarray(0, 40))
-        },
-        // Called once the first chunk has been taken; nothing more arrives, so
-        // the abort is what ends the transfer. Driving it from `pull` rather
-        // than from `start` keeps the ordering deterministic.
-        pull() {
+          // Abort here rather than from `pull`. `pull` fires only once the
+          // consumer has drained the queue, which put the abort in a race with
+          // the pipeline: any other rejection arriving first left
+          // `signal.aborted` still false, so the raw error escaped instead of
+          // the typed one and this test failed perhaps once in thirty runs.
+          // Aborting before a byte is read makes the ordering a fact rather
+          // than a likelihood — a chunk is still queued, so this is the same
+          // "cancelled part-way through a transfer" case it always was.
           controller.abort()
+        },
+        // Nothing more is coming. If the consumer does reach `pull`, end the
+        // stream rather than leaving it open for the test to time out on.
+        pull(streamController) {
+          streamController.error(new DOMException('aborted', 'AbortError'))
         },
       })
       return new Response(stream, { status: 200 })
