@@ -3,6 +3,8 @@
   "version": "0.2.0",
   "private": true,
   "license": "MIT",
+  "author": "Jordan Bremer <jordanbremer98@gmail.com>",
+  "homepage": "https://github.com/jdbremer/Murmur",
   "description": "Murmur desktop shell — Electron main process, preload bridge and the Hub / Bar / audio-capture renderers.",
   "main": "./out/main/index.js",
   "scripts": {

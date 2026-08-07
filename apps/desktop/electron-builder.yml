@@ -131,6 +131,20 @@ nsis:
 # `category` and the desktop entry matter more here than on the other two: it
 # is what puts Murmur in the applications menu at all.
 linux:
+  # Defaults to the npm package name, which here is the scoped
+  # `@murmur/desktop`. electron-builder strips the slash, gets `@murmurdesktop`
+  # and then refuses it — `@` is not legal in a Linux executable name — so the
+  # AppImage build fails outright without this.
+  #
+  # It also fixes window association: Electron derives WM_CLASS from the
+  # executable name, and a desktop entry the window manager cannot match leaves
+  # a running Murmur showing a second, generic icon in the dock.
+  executableName: murmur
+  # The .deb target names its file from the *package* name by default, which is
+  # the scoped `@murmur/desktop` — producing `@murmur/desktop_0.2.0_amd64.deb`,
+  # a filename containing a path separator. Naming it from productName instead
+  # matches what the DMG and the AppImage already produce.
+  artifactName: ${productName}-${version}-${arch}.${ext}
   # The 512 px PNG scripts/make-icons.sh already emits for this target.
   icon: buildResources/icon.png
   category: Utility
