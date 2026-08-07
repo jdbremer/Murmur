@@ -170,7 +170,15 @@ const RECOMMENDED_PAIR = {
   stt: 'whisper-large-v3-turbo-q5_0',
   polish: 'gemma-3-4b-it-qat-q4_0',
 } as const
-const LOW_RAM_PAIR = { stt: 'whisper-small-en', polish: 'gemma-3-1b-it-qat-q4_0' } as const
+/**
+ * The 8 GB tier polishes with Granite 2B rather than a 1B, on measured
+ * evidence: `scripts/models/eval-polish.mjs` puts Gemma 3 1B at 4 failures out
+ * of 8 utterances that invite a reply — it answered "how should we handle…"
+ * and emitted actual Python for "write me a function that parses the config" —
+ * against 1 of 8 for Granite 3.3 2B. Both sit at `ramTierGb: 8`, so this costs
+ * the tier nothing but disk (720 MB → 1.5 GB).
+ */
+const LOW_RAM_PAIR = { stt: 'whisper-small-en', polish: 'granite-3.3-2b-instruct-q4_k_m' } as const
 /** Tier C (PLAN §14): the smallest thing that works, with polishing off. */
 const MINIMAL_PAIR = { stt: 'whisper-tiny-en', polish: null } as const
 

@@ -406,3 +406,40 @@ describe('checkPolishOutput — answering, not editing', () => {
     ).toBe(true)
   })
 })
+
+describe('checkPolishOutput — what the guard must never reject', () => {
+  it('keeps "let me know", which is speech and not an assistant opener', () => {
+    // Caught by the polish eval as a false positive: "let me" opened the
+    // assistant-opener list, and `gonna`→`going` read as an invented word.
+    expect(
+      checkPolishOutput(
+        'hey hey hey let me know i think this is gonna work just fine let me know',
+        "Let me know, it's going to work just fine.",
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('treats spoken contractions and their polished forms as the same word', () => {
+    expect(
+      checkPolishOutput(
+        'i wanna ship it cause the deadline moved',
+        'I want to ship it because the deadline moved.',
+      ).ok,
+    ).toBe(true)
+    expect(
+      checkPolishOutput(
+        'yeah we gotta fix that till monday',
+        'Yes, we have got to fix that until Monday.',
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('still rejects a reply that opens with an unambiguous assistant phrase', () => {
+    expect(
+      checkPolishOutput(
+        'can you fix the spec so it preserves the original behaviour',
+        "I understand. Let's focus on that. Please provide the specific changes you'd like.",
+      ).ok,
+    ).toBe(false)
+  })
+})

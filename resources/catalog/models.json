@@ -229,8 +229,7 @@
           "filename": "gemma-3-1B-it-QAT-Q4_0.gguf"
         }
       ],
-      "recommended": true,
-      "notes": "Low-RAM polish default (PLAN §7.2). Same provenance note as the 4B entry: lmstudio-community GGUF of Google's official QAT weights, because Google's own GGUF repo is licence-gated."
+      "notes": "No longer the low-RAM default (PLAN §7.2): measured by scripts/models/eval-polish.mjs, it answered 4 of 8 utterances that invite a reply instead of editing them — emitting Python for \"write me a function that parses the config file\" — against 1 of 8 for Granite 3.3 2B at the same 8 GB tier. Still selectable, and the polish guard catches the replies. Same provenance note as the 4B entry: lmstudio-community GGUF of Google's official QAT weights, because Google's own GGUF repo is licence-gated."
     },
     {
       "id": "phi-4-mini-instruct-q4_k_m",
@@ -340,7 +339,8 @@
           "filename": "granite-3.3-2b-instruct-Q4_K_M.gguf"
         }
       ],
-      "notes": "First-party GGUF from IBM, Apache-2.0. Enterprise-friendly (PLAN §7.2)."
+      "recommended": true,
+      "notes": "Low-RAM polish default (PLAN §7.2), on measured evidence rather than size: scripts/models/eval-polish.mjs scores it 1 failure in 8 utterances that invite a reply, against 4 in 8 for the Gemma 3 1B it replaces, with no regression on ordinary dictation. Same 8 GB tier. First-party GGUF from IBM, Apache-2.0, which is also the easiest licence here to put in front of a legal team."
     },
     {
       "id": "granite-4.1-3b-instruct-q4_k_m",

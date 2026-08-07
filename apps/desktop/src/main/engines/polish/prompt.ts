@@ -338,13 +338,37 @@ export type GuardVerdict =
  */
 const ANSWER_OPENERS: readonly RegExp[] = [
   /^(sure|certainly|absolutely|of course|got it|understood)\b/i,
-  /^i (understand|see|can help|will|would|think you)\b/i,
-  /^(here('s| is)|let me|let's) \b/i,
+  /^i (understand|see|can help)\b/i,
   /^(as an|i'm an) (ai|assistant|language model)\b/i,
   /^(would|could) you like\b/i,
-  /^please (provide|let me know|clarify|specify)\b/i,
+  /^please (provide|clarify|specify)\b/i,
   /^(that's|this is) a (great|good) (question|point)\b/i,
 ]
+
+/**
+ * Informal speech and its polished form, so tidying one into the other does not
+ * read as invention.
+ *
+ * Found by the eval rather than guessed: "…this is gonna work just fine" →
+ * "…it's going to work just fine" is exactly the edit `clean` exists to make,
+ * and counting `going` as a word the speaker never said pushed a perfectly good
+ * polish below the grounding floor.
+ */
+const SPOKEN_FORMS: Record<string, string> = {
+  gonna: 'going',
+  wanna: 'want',
+  gotta: 'got',
+  kinda: 'kind',
+  sorta: 'sort',
+  cause: 'because',
+  cuz: 'because',
+  yeah: 'yes',
+  yep: 'yes',
+  nope: 'no',
+  till: 'until',
+  lemme: 'let',
+  dunno: 'know',
+}
 
 /** Words too common to say anything about whether the output came from the input. */
 const FUNCTION_WORDS = new Set([
@@ -431,6 +455,7 @@ function contentWords(text: string): string[] {
     .toLowerCase()
     .replace(/['’]/g, '')
     .split(/[^a-z0-9]+/)
+    .map((word) => SPOKEN_FORMS[word] ?? word)
     .filter((word) => word.length > 2 && !FUNCTION_WORDS.has(word))
 }
 
