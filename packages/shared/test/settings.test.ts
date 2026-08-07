@@ -30,6 +30,7 @@ describe('SettingsSchema', () => {
       appearance: 'system',
       onboardingCompleted: false,
       commandModeEnabled: true,
+      soundCuesEnabled: true,
     } satisfies Settings)
   })
 

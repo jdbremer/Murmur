@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { AudioCaptureStatus } from '@murmur/shared'
+import type { AudioCaptureStatus, DictationState } from '@murmur/shared'
 
 import { MicrophoneCapture } from './capture'
+import { CuePlayer } from './cue-player'
+import { decideCue, restingStateOf } from './cues'
 
 /**
  * The hidden capture page (PLAN §3.1, §5).
@@ -71,6 +73,54 @@ export function AudioCapture(): React.JSX.Element {
       unsubscribe()
       navigator.mediaDevices?.removeEventListener?.('devicechange', onDeviceChange)
       capture.dispose()
+    }
+  }, [])
+
+  // The start/stop cue (PLAN §2.1). Kept in its own effect because it shares
+  // nothing with capture but the window it runs in — see `cue-player.ts` for
+  // why that window is this one.
+  useEffect(() => {
+    const player = new CuePlayer()
+    void player.warm()
+
+    let enabled = true
+    let previous: DictationState = 'idle'
+    let seeded = false
+
+    void window.murmur.settings
+      .get()
+      .then((settings) => {
+        enabled = settings.soundCuesEnabled
+      })
+      .catch(() => {})
+    const unsubscribeSettings = window.murmur.settings.subscribe((settings) => {
+      enabled = settings.soundCuesEnabled
+    })
+
+    // Adopt the live state, so reloading this page mid-utterance does not make
+    // the next transition look like the first one. A broadcast that beats the
+    // reply is the fresher answer, hence the guard rather than a plain assign.
+    void window.murmur.dictation
+      .getState()
+      .then((event) => {
+        if (!seeded) previous = restingStateOf(event)
+      })
+      .catch(() => {})
+
+    const unsubscribeState = window.murmur.dictation.subscribe((event) => {
+      seeded = true
+      const cue = decideCue(previous, event)
+      previous = restingStateOf(event)
+      // Checked at the edge rather than in the player: a cue suppressed by the
+      // setting still has to move the state forward, or the next transition
+      // would be measured from a stale one.
+      if (cue !== null && enabled) void player.play(cue)
+    })
+
+    return () => {
+      unsubscribeSettings()
+      unsubscribeState()
+      player.dispose()
     }
   }, [])
 

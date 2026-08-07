@@ -225,6 +225,13 @@ export function SettingsSection(): React.JSX.Element {
             onChange={(language) => void update({ language })}
           />
         </Row>
+        <Row label="Dictation sounds" hint="A soft two-note cue when dictation starts and stops.">
+          <Toggle
+            label="Dictation sounds"
+            checked={settings.soundCuesEnabled}
+            onChange={(soundCuesEnabled) => void update({ soundCuesEnabled })}
+          />
+        </Row>
       </Card>
 
       <h2 className="mb-2 text-[13px] font-semibold text-ink">Appearance</h2>

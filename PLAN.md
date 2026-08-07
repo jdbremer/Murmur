@@ -59,6 +59,12 @@ The signature element: a small dark capsule floating at the bottom-center of the
 | Inserted | quick ✓ pulse, then contracts to idle or hides | text injected |
 | Error | warm-red tint, pill expands to fit a short message ("Didn't catch that", "Mic in use", "Secure field — can't type here"), auto-dismiss ~2.5 s | failure |
 
+**Sound**
+
+- A soft two-note cue marks the edges of an utterance: a rising perfect fifth (D4→A4) when listening starts, the same fifth falling (A4→D4) when it stops. ~210 ms, peaking around −16 dBFS, sine only.
+- Synthesised at runtime by the hidden capture window (`renderer/audio/cues.ts`), never sampled — the fidelity decision above applies to audio exactly as it does to icons. The pitches, phrasing and envelope were recovered by measuring Flow's cue and fitting the envelope model to it, which is the audible equivalent of recreating the pill's geometry by eye.
+- On by default, with an off switch in Settings. It is the only feedback the user gets when the Bar is set to Hidden, which is also the mode where it matters most.
+
 **Interaction**
 
 - Non-activating panel: never steals focus from the app being dictated into.
@@ -75,7 +81,7 @@ Left sidebar navigation, content pane right — Wispr Flow's layout, tracked clo
 2. **Dictionary** — user-managed vocabulary: proper nouns, jargon, acronyms + optional "replace X with Y" rules (e.g., "murmer → Murmur", "eta → ETA"). Fed to both STT biasing and the polish prompt (§7.4). "Add from correction" flow later (M4).
 3. **Style** — tone controls per app category (Personal / Work / Email / Other), mapped from the frontmost app's bundle ID. Options per category: capitalization/punctuation strictness, formality, emoji allowance, filler-word handling. Plus a global "polishing level": Off (raw transcript) / Clean (punctuation, fillers, self-corrections) / Rewrite (tone + structure).
 4. **Models** — the model manager (§8): pick STT model, pick polish model, download/delete, disk usage, origin & license badges (US-only catalog, policy visibly enforced), custom model import, advanced: external OpenAI-compatible endpoint (e.g., company-approved LM Studio/Ollama).
-5. **Settings** — hotkey config (default: hold `fn`, like Flow; alternatives Right-⌘/Right-⌥ for external keyboards), double-tap for hands-free, mic selection, language(s), launch at login, audio retention toggle (default **off** — audio deleted after transcription), history retention window, appearance (system/dark/light).
+5. **Settings** — hotkey config (default: hold `fn`, like Flow; alternatives Right-⌘/Right-⌥ for external keyboards), double-tap for hands-free, mic selection, language(s), dictation sounds, launch at login, audio retention toggle (default **off** — audio deleted after transcription), history retention window, appearance (system/dark/light).
 6. **Help** — permissions status panel (re-check/fix buttons), troubleshooting, logs export (local only).
 
 ### 2.3 Menu bar

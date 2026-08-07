@@ -209,6 +209,13 @@ const settingsFields = {
    * place. On by default — it is the reference product's flagship gesture.
    */
   commandModeEnabled: z.boolean(),
+  /**
+   * The two-note cue that marks the start and end of an utterance (PLAN §2.1).
+   * On by default: with the Bar set to Hidden it is the only confirmation that
+   * the key press registered at all, and the ear notices a missing sound long
+   * before the eye notices a missing pill.
+   */
+  soundCuesEnabled: z.boolean(),
 } as const
 
 /** Full settings: unknown/missing keys fall back to the shipped defaults. */
@@ -230,6 +237,7 @@ export const SettingsSchema = z.object({
   appearance: settingsFields.appearance.default('system'),
   onboardingCompleted: settingsFields.onboardingCompleted.default(false),
   commandModeEnabled: settingsFields.commandModeEnabled.default(true),
+  soundCuesEnabled: settingsFields.soundCuesEnabled.default(true),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 

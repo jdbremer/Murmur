@@ -26,6 +26,10 @@ export function createAudioWindow(): BrowserWindow {
       // Capture must keep running while every visible window is in the
       // background — that is the normal case during dictation.
       backgroundThrottling: false,
+      // This page also sounds the dictation cue (PLAN §2.1). It has no UI and
+      // so can never collect the gesture Chromium would otherwise want before
+      // letting it make noise; the app's own hotkey is the gesture.
+      autoplayPolicy: 'no-user-gesture-required',
     },
   })
 

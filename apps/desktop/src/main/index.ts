@@ -311,7 +311,10 @@ async function bootstrap(): Promise<void> {
   })
 
   machine.on('event', (event: DictationEvent) => {
-    ipc.broadcast(windows.uiWebContents(), 'dictation.state', event)
+    // Every window, not just the ones with pixels: the hidden capture page
+    // sounds the start/stop cue off these transitions (PLAN §2.1), and it is
+    // the only renderer guaranteed to still be alive when the Bar is hidden.
+    ipc.broadcast(windows.allWebContents(), 'dictation.state', event)
     applyBarVisibility(settings.get(), event)
   })
 
