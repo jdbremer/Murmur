@@ -99,10 +99,38 @@ export function tokenizerFromVocabText(text: string): Tokenizer {
   return { pieces, specialIds: new Set(), size: pieces.size }
 }
 
-/** Pick the right loader from a file name. */
+/**
+ * A bare `["<unk>", "▁the", …]` array, id = index.
+ *
+ * What `scripts/models/export_parakeet.py` writes: NeMo checkpoints carry a
+ * SentencePiece vocabulary with no HuggingFace `tokenizer.json` around it, and
+ * a plain array is the honest representation — no escaping question, unlike the
+ * newline-delimited `vocab.txt` a piece could in principle contain.
+ */
+export function tokenizerFromPieceArray(pieces: readonly unknown[]): Tokenizer {
+  const map = new Map<number, string>()
+  pieces.forEach((piece, index) => {
+    if (typeof piece === 'string') map.set(index, piece)
+  })
+  if (map.size === 0) throw new Error('vocabulary array was empty')
+  return { pieces: map, specialIds: new Set(), size: map.size }
+}
+
+/**
+ * Pick the right loader.
+ *
+ * Dispatches on *shape* rather than on the file name alone, because two
+ * different JSON layouts land here: HuggingFace's `tokenizer.json`, whose
+ * vocabulary hangs off `model.vocab`, and our own exported piece array. Keying
+ * only on the `.json` suffix sent the array through the HuggingFace parser,
+ * which found no `model.vocab` and threw "contains no vocabulary" — with the
+ * model itself perfectly fine.
+ */
 export function loadTokenizer(fileName: string, contents: string): Tokenizer {
-  if (fileName.endsWith('.json')) return tokenizerFromHuggingFace(JSON.parse(contents))
-  return tokenizerFromVocabText(contents)
+  if (!fileName.endsWith('.json')) return tokenizerFromVocabText(contents)
+  const parsed: unknown = JSON.parse(contents)
+  if (Array.isArray(parsed)) return tokenizerFromPieceArray(parsed)
+  return tokenizerFromHuggingFace(parsed)
 }
 
 export interface DecodeOptions {

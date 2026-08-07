@@ -1,0 +1,138 @@
+{
+  "source": "nvidia/parakeet-tdt-0.6b-v3, exported and quantised by scripts/models/export_parakeet.py",
+  "vocabSize": 8192,
+  "blankTokenId": 8192,
+  "durations": [0, 1, 2, 3, 4],
+  "maxSymbolsPerStep": 10,
+  "utterances": [
+    {
+      "audio": "utt1.wav",
+      "encoderFrames": 32,
+      "steps": [
+        { "token": 1502, "durationIndex": 2 },
+        { "token": 363, "durationIndex": 1 },
+        { "token": 1413, "durationIndex": 2 },
+        { "token": 4870, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 1 },
+        { "token": 1471, "durationIndex": 2 },
+        { "token": 1361, "durationIndex": 2 },
+        { "token": 7950, "durationIndex": 2 },
+        { "token": 300, "durationIndex": 2 },
+        { "token": 385, "durationIndex": 2 },
+        { "token": 1447, "durationIndex": 1 },
+        { "token": 1388, "durationIndex": 2 },
+        { "token": 506, "durationIndex": 1 },
+        { "token": 393, "durationIndex": 3 },
+        { "token": 569, "durationIndex": 2 },
+        { "token": 4522, "durationIndex": 3 },
+        { "token": 7883, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 2 }
+      ],
+      "expectedTokens": [
+        1502, 363, 1413, 4870, 1471, 1361, 7950, 300, 385, 1447, 1388, 506, 393, 569, 4522, 7883
+      ],
+      "expectedText": "The quick brown fox jumps over the lazy dog."
+    },
+    {
+      "audio": "utt10.wav",
+      "encoderFrames": 39,
+      "steps": [
+        { "token": 356, "durationIndex": 1 },
+        { "token": 344, "durationIndex": 2 },
+        { "token": 470, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 2 },
+        { "token": 1875, "durationIndex": 2 },
+        { "token": 711, "durationIndex": 1 },
+        { "token": 7870, "durationIndex": 2 },
+        { "token": 279, "durationIndex": 1 },
+        { "token": 376, "durationIndex": 2 },
+        { "token": 572, "durationIndex": 2 },
+        { "token": 3224, "durationIndex": 3 },
+        { "token": 2274, "durationIndex": 2 },
+        { "token": 575, "durationIndex": 2 },
+        { "token": 409, "durationIndex": 1 },
+        { "token": 548, "durationIndex": 2 },
+        { "token": 1840, "durationIndex": 2 },
+        { "token": 630, "durationIndex": 2 },
+        { "token": 319, "durationIndex": 0 },
+        { "token": 7870, "durationIndex": 2 },
+        { "token": 411, "durationIndex": 1 },
+        { "token": 764, "durationIndex": 2 },
+        { "token": 2915, "durationIndex": 2 },
+        { "token": 7883, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 1 }
+      ],
+      "expectedTokens": [
+        356, 344, 470, 1875, 711, 7870, 279, 376, 572, 3224, 2274, 575, 409, 548, 1840, 630, 319,
+        7870, 411, 764, 2915, 7883
+      ],
+      "expectedText": "Murma records audio locally and never uploads anything."
+    },
+    {
+      "audio": "utt2.wav",
+      "encoderFrames": 31,
+      "steps": [
+        { "token": 373, "durationIndex": 1 },
+        { "token": 337, "durationIndex": 1 },
+        { "token": 1605, "durationIndex": 1 },
+        { "token": 7383, "durationIndex": 3 },
+        { "token": 6607, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 2 },
+        { "token": 7875, "durationIndex": 1 },
+        { "token": 344, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 1 },
+        { "token": 366, "durationIndex": 1 },
+        { "token": 506, "durationIndex": 1 },
+        { "token": 525, "durationIndex": 1 },
+        { "token": 291, "durationIndex": 1 },
+        { "token": 381, "durationIndex": 2 },
+        { "token": 1491, "durationIndex": 2 },
+        { "token": 283, "durationIndex": 2 },
+        { "token": 509, "durationIndex": 2 },
+        { "token": 1574, "durationIndex": 2 },
+        { "token": 294, "durationIndex": 1 },
+        { "token": 5804, "durationIndex": 1 },
+        { "token": 7883, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 2 }
+      ],
+      "expectedTokens": [
+        373, 337, 1605, 7383, 6607, 7875, 344, 366, 506, 525, 291, 381, 1491, 283, 509, 1574, 294,
+        5804, 7883
+      ],
+      "expectedText": "Please add murmur to the meeting notes for tomorrow."
+    },
+    {
+      "audio": "utt3.wav",
+      "encoderFrames": 31,
+      "steps": [
+        { "token": 1842, "durationIndex": 2 },
+        { "token": 3306, "durationIndex": 1 },
+        { "token": 1687, "durationIndex": 1 },
+        { "token": 275, "durationIndex": 1 },
+        { "token": 1979, "durationIndex": 2 },
+        { "token": 7878, "durationIndex": 1 },
+        { "token": 506, "durationIndex": 2 },
+        { "token": 375, "durationIndex": 1 },
+        { "token": 567, "durationIndex": 1 },
+        { "token": 1605, "durationIndex": 2 },
+        { "token": 431, "durationIndex": 2 },
+        { "token": 499, "durationIndex": 1 },
+        { "token": 326, "durationIndex": 1 },
+        { "token": 1764, "durationIndex": 1 },
+        { "token": 591, "durationIndex": 2 },
+        { "token": 7893, "durationIndex": 1 },
+        { "token": 799, "durationIndex": 1 },
+        { "token": 441, "durationIndex": 2 },
+        { "token": 473, "durationIndex": 2 },
+        { "token": 289, "durationIndex": 1 },
+        { "token": 7883, "durationIndex": 1 },
+        { "token": 8192, "durationIndex": 2 }
+      ],
+      "expectedTokens": [
+        1842, 3306, 1687, 275, 1979, 7878, 506, 375, 567, 1605, 431, 499, 326, 1764, 591, 7893, 799,
+        441, 473, 289, 7883
+      ],
+      "expectedText": "We should ship the release on Wednesday afternoon."
+    }
+  ]
+}
