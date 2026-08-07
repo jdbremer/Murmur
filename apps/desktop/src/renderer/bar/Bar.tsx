@@ -254,11 +254,13 @@ export function Bar(): React.JSX.Element | null {
         />
         {/* The interior slides left to make room for the hover controls rather
             than being overlapped by them. min-w-0 keeps a long error message
-            truncating inside the capsule instead of overflowing it. */}
+            truncating inside the capsule instead of overflowing it.
+            Half the controls' footprint is exactly the shift that re-centres
+            the interior in what is left of the capsule. */}
         <div
           className="relative flex min-w-0 max-w-full items-center justify-center"
           style={{
-            transform: showControls ? `translateX(-${BAR.hoverWidth / 2}px)` : 'none',
+            transform: showControls ? `translateX(-${BAR.controlsWidth / 2}px)` : 'none',
             transition: reducedMotion ? 'none' : `transform ${BAR.morphMs}ms ease-out`,
           }}
         >

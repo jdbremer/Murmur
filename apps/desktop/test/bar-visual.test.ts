@@ -214,4 +214,26 @@ describe('the spec numbers themselves', () => {
     const waveform = BAR.waveformBars * (BAR.waveformBarWidth + BAR.waveformBarGap)
     expect(waveform).toBeLessThan(BAR.listeningWidth)
   })
+
+  /**
+   * The interior shifts left by half `controlsWidth` so it stays centred in
+   * what is left of the capsule. Shifting by half `hoverWidth` instead — the
+   * growth rather than the footprint — put it 9px off-centre, which is exactly
+   * the kind of thing that is easy to see and hard to name.
+   *
+   * Both numbers describe the controls, so a fourth button would move them
+   * together and nothing here would catch a drift. This asserts the geometry
+   * they are both derived from.
+   */
+  it('derives the controls footprint from the buttons that make it up', () => {
+    const buttons = 3
+    const buttonSize = 18
+    const gap = 3
+    const inset = 6
+    expect(BAR.controlsWidth).toBe(buttons * buttonSize + (buttons - 1) * gap + inset)
+  })
+
+  it('leaves the capsule wider than the controls need, so they do not crowd it', () => {
+    expect(BAR.hoverWidth).toBeGreaterThan(BAR.controlsWidth)
+  })
 })

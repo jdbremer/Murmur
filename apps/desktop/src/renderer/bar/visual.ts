@@ -20,8 +20,22 @@ export const BAR = {
   height: 22,
   /** Height while the hover controls are showing — "expands it slightly". */
   hoverHeight: 30,
-  /** Extra width the three hover controls need (cancel · mic · Hub). */
+  /**
+   * How much wider the capsule grows on hover. Deliberately more than
+   * {@link BAR.controlsWidth}: the extra is breathing room so the controls do
+   * not crowd whatever the pill is showing.
+   */
   hoverWidth: 84,
+  /**
+   * What the controls actually occupy on the right, derived from their own
+   * geometry: three 18px buttons, two 3px gaps, and the 6px inset they sit at.
+   *
+   * Kept separate from `hoverWidth` because they answer different questions —
+   * how much the capsule grows, versus how much room is no longer available to
+   * the interior. Centring the interior against the growth rather than the
+   * footprint is what left it sitting 9px off-centre.
+   */
+  controlsWidth: 3 * 18 + 2 * 3 + 6,
   /** Listening. */
   listeningWidth: 160,
   processingWidth: 132,
