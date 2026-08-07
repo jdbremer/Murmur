@@ -12,31 +12,28 @@ Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, pe
 
 Installers are attached to each [release](https://github.com/jdbremer/Murmur/releases):
 
-| OS      | File                             | Notes                                                                                                                        |
-| ------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| macOS   | `.dmg`, separate arm64 and Intel | macOS 13 Ventura or newer                                                                                                    |
-| Windows | NSIS `.exe`, x64                 | Windows 10 / 11                                                                                                              |
-| Linux   | `.AppImage` and `.deb`, x64      | **X11 sessions only** — see [Platform support](#platform-support). Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) |
+| OS      | File                             | Signed                   | Notes                                                                                                                        |
+| ------- | -------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| macOS   | `.dmg`, separate arm64 and Intel | Developer ID + notarised | macOS 13 Ventura or newer                                                                                                    |
+| Windows | NSIS `.exe`, x64                 | **no**                   | Windows 10 / 11                                                                                                              |
+| Linux   | `.AppImage` and `.deb`, x64      | n/a                      | **X11 sessions only** — see [Platform support](#platform-support). Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) |
 
-**They are all currently unsigned**, which each OS will tell you about in its
-own alarming way:
+**macOS opens normally.** The DMG is signed with a Developer ID and notarised,
+so Gatekeeper lets it through with no warning and no `xattr` incantation. Two
+things follow from that signature beyond a quiet first launch: the app can
+update itself in place (Squirrel refuses to swap in a replacement that is not
+signed with the same identity), and your Accessibility and Input Monitoring
+grants survive an update, because macOS ties those to the code signature.
 
-- **macOS** quarantines anything downloaded and Gatekeeper refuses to open it,
-  usually reporting that Murmur "is damaged". It is not. Right-click → Open, or
-  on macOS 15+ go to System Settings → Privacy & Security → Open Anyway. You can
-  also clear it directly: `xattr -dr com.apple.quarantine /Applications/Murmur.app`
-- **Windows** SmartScreen shows "Windows protected your PC" → More info → Run anyway.
-- **Linux** has no equivalent gate. Mark the AppImage executable and run it
-  (`chmod +x Murmur-*.AppImage`), or `sudo apt install ./murmur_*.deb`.
+**Windows is not signed.** SmartScreen shows "Windows protected your PC" →
+More info → Run anyway. Only accept that if you trust this build — Murmur asks
+for permission to watch your keyboard and type into other applications, so it
+is not a prompt to wave through on a whim. Building it yourself (below)
+sidesteps the question entirely. Authenticode is the fix and is not configured
+yet.
 
-Only accept those warnings if you trust this build — Murmur asks for permission
-to watch your keyboard and type into other applications, so that is not a
-prompt to wave through on a whim. Building it yourself (below) sidesteps the
-question entirely. Signing and notarisation are the fix and are already
-declared in `apps/desktop/electron-builder.yml`, waiting on a certificate.
-
-Also note macOS ties Accessibility and Input Monitoring grants to an app's code
-signature, so with an unsigned build those permissions can reset on each update.
+**Linux has no equivalent gate.** Mark the AppImage executable and run it
+(`chmod +x Murmur-*.AppImage`), or `sudo apt install ./murmur_*.deb`.
 
 Installers bundle the `whisper-server` and `llama-server` binaries, so the only
 thing left after installing is downloading a model from the Hub.
@@ -119,10 +116,12 @@ Packaging without them succeeds deliberately, so a contributor who only needs
 the UI is not forced through a whisper.cpp build — the release workflow is
 where their absence is a hard failure.
 
-The env var above skips macOS code signing; see [Download](#download) for what
-unsigned means in practice. Drop it once a Developer ID is configured —
-`hardenedRuntime`, the entitlements and notarisation are already declared in
-`apps/desktop/electron-builder.yml`.
+The env var above skips macOS code signing, which is what you want for a local
+build on a machine that has no Developer ID in its keychain — without it,
+electron-builder hunts for an identity, fails, and takes the build down with
+it. Drop it if you do have the certificate: `hardenedRuntime`, the entitlements
+and notarisation are declared in `apps/desktop/electron-builder.yml`, and that
+is the path releases take.
 
 ### Cutting a release
 
