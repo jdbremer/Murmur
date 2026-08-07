@@ -145,4 +145,11 @@ export const HOTKEY = {
    * used to mean "dictation never stops".
    */
   physicalPollMs: 250,
+  /**
+   * When the OS refuses to install the tap/hook (a permission not yet
+   * granted, a transient failure at login), retry this often until it takes.
+   * This is what lets a permission granted mid-session bring the key to life
+   * without a relaunch — a dictation key must never be silently dead.
+   */
+  startRetryMs: 3000,
 } as const

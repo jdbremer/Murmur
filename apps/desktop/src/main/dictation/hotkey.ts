@@ -70,6 +70,14 @@ export class HotkeyBridge {
    * system rightly says "not held" for a key nobody pressed.
    */
   #watchdog: NodeJS.Timeout | null = null
+  /**
+   * Pending re-attempt after the OS refused to install the tap/hook. Booting
+   * before Input Monitoring is granted must leave a key that comes alive when
+   * the grant lands, not one that is dead until the next relaunch.
+   */
+  #startRetry: NodeJS.Timeout | null = null
+  /** Log the refusal once per outage, not once per retry. */
+  #startRetryLogged = false
 
   constructor(options: HotkeyBridgeOptions) {
     this.#native = options.native
@@ -107,17 +115,35 @@ export class HotkeyBridge {
       const started = native.startHotkeyListener(config, (event) => this.handle(event))
       if (started === false) {
         this.#running = false
-        this.#log.warn(
-          `native hotkey listener failed to start for ${describeKey(config)} — use debug.simulateHotkey`,
-        )
+        if (!this.#startRetryLogged) {
+          this.#startRetryLogged = true
+          this.#log.warn(
+            `native hotkey listener failed to start for ${describeKey(config)} — ` +
+              `retrying every ${HOTKEY.startRetryMs} ms until the OS accepts it`,
+          )
+        }
+        this.#scheduleStartRetry(config)
         return
       }
       this.#running = true
+      if (this.#startRetryLogged) this.#log.info('hotkey listener recovered')
+      this.#startRetryLogged = false
       this.#log.info(`listening for ${describeKey(config)}`)
     } catch (error) {
       this.#running = false
       this.#log.warn('native hotkey listener threw:', error)
+      this.#scheduleStartRetry(config)
     }
+  }
+
+  #scheduleStartRetry(config: HotkeyConfig): void {
+    if (this.#startRetry !== null) return
+    this.#startRetry = setTimeout(() => {
+      this.#startRetry = null
+      // Settings may have moved on while we waited; the newest config wins.
+      if (this.#config === config) this.start(config)
+    }, HOTKEY.startRetryMs)
+    this.#startRetry.unref?.()
   }
 
   stop(): void {
@@ -129,6 +155,10 @@ export class HotkeyBridge {
       }
     }
     this.#running = false
+    if (this.#startRetry !== null) {
+      clearTimeout(this.#startRetry)
+      this.#startRetry = null
+    }
     this.#stopWatchdog()
     this.#downAt = null
     this.#lastDownAt = null

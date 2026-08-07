@@ -306,3 +306,61 @@ describe('toggle activation', () => {
     expect(recorded.ends).toBe(1)
   })
 })
+
+describe('start retry', () => {
+  it('keeps retrying a refused tap and comes alive when the OS relents', () => {
+    // The field case: booted before Input Monitoring was granted. The tap is
+    // refused at start; the grant lands later. The key must recover without a
+    // relaunch.
+    let accepts = false
+    const native = makeNative()
+    native.startHotkeyListener = () => accepts
+
+    bridge.stop()
+    bridge = makeBridge(config(), () => native)
+    expect(bridge.running).toBe(false)
+
+    vi.advanceTimersByTime(HOTKEY.startRetryMs + 1)
+    expect(bridge.running).toBe(false)
+
+    accepts = true
+    vi.advanceTimersByTime(HOTKEY.startRetryMs + 1)
+    expect(bridge.running).toBe(true)
+  })
+
+  it('stop() cancels a pending retry', () => {
+    let attempts = 0
+    const native = makeNative()
+    native.startHotkeyListener = () => {
+      attempts += 1
+      return false
+    }
+
+    bridge.stop()
+    bridge = makeBridge(config(), () => native)
+    const before = attempts
+    bridge.stop()
+    vi.advanceTimersByTime(HOTKEY.startRetryMs * 3)
+    expect(attempts).toBe(before)
+  })
+
+  it('a rebind supersedes the retry of the older config', () => {
+    let attempts: HotkeyConfig[] = []
+    const native = makeNative()
+    native.startHotkeyListener = (cfg: HotkeyConfig) => {
+      attempts.push(cfg)
+      return false
+    }
+
+    bridge.stop()
+    attempts = []
+    bridge = makeBridge(config(), () => native)
+    bridge.rebind(config({ key: 'rightCmd' }))
+    vi.advanceTimersByTime(HOTKEY.startRetryMs * 2 + 1)
+
+    // Every attempt after the rebind must carry the new key.
+    const afterRebind = attempts.slice(1)
+    expect(afterRebind.length).toBeGreaterThan(0)
+    expect(afterRebind.every((cfg) => cfg.key === 'rightCmd')).toBe(true)
+  })
+})

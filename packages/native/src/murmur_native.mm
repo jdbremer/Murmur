@@ -388,6 +388,17 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
 
   gEventTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, option, mask, TapCallback,
                                nullptr);
+  if (gEventTap == nullptr && gConfig.kind == HotkeyKind::Fn) {
+    // A suppressing tap needs more trust than a listener (Accessibility on
+    // top of Input Monitoring). If macOS refuses it, degrade to the old
+    // listen-only tap — a live hotkey that merely cannot silence the
+    // globe-key actions — rather than a dead key. Custom stays fail-hard:
+    // without suppression, holding it would type characters.
+    gEventTap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+                                 kCGEventTapOptionListenOnly, mask, TapCallback, nullptr);
+    // (Returning nullptr from a listen-only tap's callback is defined to
+    // leave the event stream untouched, so TapCallback needs no change.)
+  }
   if (gEventTap == nullptr) {
     // Almost always missing Input Monitoring. Report it as a return value so
     // the app can point the user at the permission pane.
@@ -413,6 +424,20 @@ Napi::Value StartHotkeyListener(const Napi::CallbackInfo& info) {
     gRunLoop = (CFRunLoopRef)CFRetain(CFRunLoopGetCurrent());
     CFRunLoopAddSource(gRunLoop, gRunLoopSource, kCFRunLoopCommonModes);
     CGEventTapEnable(gEventTap, true);
+    // Watchdog: the disabled-by-timeout/user-input callbacks re-enable the tap
+    // when the OS *says* it disabled it, but a tap can also go quiet without a
+    // word (a wake from sleep, a TCC hiccup). A dictation key must never be
+    // silently dead, so check every few seconds and re-arm. The timer lives on
+    // this thread's loop and dies with it in teardown.
+    CFRunLoopTimerRef watchdog = CFRunLoopTimerCreateWithHandler(
+        kCFAllocatorDefault, CFAbsoluteTimeGetCurrent() + 5.0, /* interval */ 5.0, 0, 0,
+        ^(CFRunLoopTimerRef) {
+          if (gEventTap != nullptr && gListening.load() && !CGEventTapIsEnabled(gEventTap)) {
+            CGEventTapEnable(gEventTap, true);
+          }
+        });
+    CFRunLoopAddTimer(gRunLoop, watchdog, kCFRunLoopCommonModes);
+    CFRelease(watchdog);
     // Readiness is signalled from *inside* the running loop. A flag set here,
     // before CFRunLoopRun, would let a fast teardown issue CFRunLoopStop
     // against a loop that has not started — a stop that lands on nothing and
