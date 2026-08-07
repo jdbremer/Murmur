@@ -62,9 +62,10 @@ describe('isAllowedHost', () => {
 
 describe('sidecar release hosts', () => {
   /**
-   * The sidecar install fetches an *executable*, so it gets its own list rather
-   * than widening the model allowlist — "we only talk to Hugging Face" has to
-   * keep meaning what the Help panel says it means.
+   * The sidecar install fetches an *executable*, so it keeps its own list. The
+   * model allowlist now also covers Murmur's release assets (Parakeet's ONNX
+   * lives there), but the separation still means something: only the sidecar
+   * list may serve a binary that gets executed.
    */
   it('allows GitHub releases and their asset CDN, nothing else', () => {
     expect(isSidecarReleaseHost('github.com')).toBe(true)
@@ -73,9 +74,19 @@ describe('sidecar release hosts', () => {
     expect(isSidecarReleaseHost('evil.example')).toBe(false)
     // Must not inherit the model allowlist, or the separation is decorative.
     expect(isSidecarReleaseHost('huggingface.co')).toBe(false)
-    // And the model allowlist must not inherit these.
-    expect(isAllowedHost('github.com')).toBe(false)
     expect(sidecarReleaseHosts()).toContain('github.com')
+  })
+
+  it('lets model downloads reach Murmur’s own release assets', () => {
+    // Parakeet forced this: NVIDIA publishes .nemo, safetensors and a GGUF but
+    // no ONNX, so the ONNX conversion is ours and lives on a release of this
+    // repo. The two lists still differ — the sidecar list is executables only —
+    // but "models come from Hugging Face" is no longer the whole truth, and the
+    // Help panel says so too.
+    expect(isAllowedHost('github.com')).toBe(true)
+    expect(isAllowedHost('release-assets.githubusercontent.com')).toBe(true)
+    expect(isAllowedHost('evil.example')).toBe(false)
+    expect(isAllowedHost('github.com.evil.example')).toBe(false)
   })
 
   it('re-validates every redirect hop instead of following blindly', async () => {
@@ -120,7 +131,7 @@ describe('assertAllowedUrl', () => {
       assertAllowedUrl('https://evil.example/model.bin')
     } catch (error) {
       expect((error as BlockedHostError).host).toBe('evil.example')
-      expect((error as BlockedHostError).message).toContain('only talks to Hugging Face')
+      expect((error as BlockedHostError).message).toContain('only downloads models from')
     }
   })
 

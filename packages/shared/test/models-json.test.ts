@@ -48,11 +48,15 @@ describe('resources/catalog/models.json', () => {
     expect(polish.length).toBeGreaterThan(0)
   })
 
-  it('records why Parakeet is absent (PLAN §6.2 vs the provenance policy)', () => {
-    // PLAN names Parakeet the recommended default, so its absence must be
-    // explained in the file itself, not only in a commit message.
-    expect(catalog.models.some((model) => model.id.includes('parakeet'))).toBe(false)
-    expect(catalog.notes ?? '').toContain('Parakeet')
+  it('says who converted Parakeet, since it is the one entry we built ourselves', () => {
+    // Every other entry points at weights their publisher packaged. This one is
+    // NVIDIA's weights in a container Murmur produced, so the file has to answer
+    // "who converted this" rather than leave it to a commit message.
+    const parakeet = catalog.models.find((model) => model.id.includes('parakeet'))
+    expect(parakeet).toBeDefined()
+    expect(parakeet?.org).toBe('NVIDIA')
+    expect(parakeet?.license).toBe('CC-BY-4.0')
+    expect(parakeet?.notes ?? '').toContain('export_parakeet.py')
     expect(catalog.notes ?? '').toContain('export-parakeet.md')
   })
 
@@ -70,15 +74,27 @@ describe('resources/catalog/models.json', () => {
     }
   })
 
-  it('uses only pinned Hugging Face revision URLs', () => {
+  it('pins every URL to an immutable revision or release tag', () => {
+    // Two shapes, because Parakeet's ONNX is Murmur's own conversion and cannot
+    // live on Hugging Face. Both are immutable: a Hugging Face revision is a
+    // commit hash, and the model release tag is never re-cut. Combined with the
+    // sha256 check, a moved file is a failed download rather than a silent swap.
     for (const model of catalog.models) {
       for (const file of model.files) {
         const url = new URL(file.url)
         expect(url.protocol, model.id).toBe('https:')
-        expect(url.hostname, model.id).toBe('huggingface.co')
-        // /<owner>/<repo>/resolve/<40-hex-revision>/<path>
-        expect(url.pathname, `${model.id}/${file.filename} is not revision-pinned`).toMatch(
-          /\/resolve\/[0-9a-f]{40}\//,
+
+        if (url.hostname === 'huggingface.co') {
+          // /<owner>/<repo>/resolve/<40-hex-revision>/<path>
+          expect(url.pathname, `${model.id}/${file.filename} is not revision-pinned`).toMatch(
+            /\/resolve\/[0-9a-f]{40}\//,
+          )
+          continue
+        }
+
+        expect(url.hostname, model.id).toBe('github.com')
+        expect(url.pathname, `${model.id}/${file.filename}`).toMatch(
+          /^\/jdbremer\/Murmur\/releases\/download\/models-[\w.-]+\//,
         )
       }
     }
@@ -130,11 +146,19 @@ describe('resources/catalog/models.json', () => {
       // The ONNX host needs an encoder, a decoder and a tokenizer.
       'onnx-runtime': (model) => {
         const names = model.files.map((file) => file.filename)
-        return (
+        // A transducer is three graphs plus its vocabulary and the export's own
+        // config; an encoder-decoder is two graphs plus a tokenizer.
+        const transducer =
+          names.includes('encoder.onnx') &&
+          names.includes('decoder.onnx') &&
+          names.includes('joint.onnx') &&
+          names.includes('vocab.json') &&
+          names.includes('config.json')
+        const encoderDecoder =
           names.some((name) => name.includes('encoder_model')) &&
           names.some((name) => name.includes('decoder_model')) &&
           names.includes('tokenizer.json')
-        )
+        return transducer || encoderDecoder
       },
     }
 

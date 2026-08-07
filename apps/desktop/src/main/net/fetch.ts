@@ -42,6 +42,15 @@ import { scrubSecrets } from '../logging'
  */
 const ALLOWED_HOSTS: readonly string[] = Object.freeze([
   'huggingface.co',
+  // Murmur's own release assets. Parakeet is the reason: NVIDIA publishes
+  // `.nemo`, `safetensors` and a GGUF but no ONNX, so the ONNX conversion is
+  // ours and has to live somewhere the app can fetch. A release on this repo
+  // beats a personal model-hub account — same audit trail as the app itself,
+  // and no extra party to trust. GitHub 302s assets to its own CDN, which is
+  // listed rather than followed blindly.
+  'github.com',
+  'objects.githubusercontent.com',
+  'release-assets.githubusercontent.com',
   'cdn-lfs.huggingface.co',
   'cdn-lfs.hf.co',
   'cdn-lfs-us-1.hf.co',
@@ -67,8 +76,8 @@ export class BlockedHostError extends Error {
 
   constructor(url: string, host: string) {
     super(
-      `Refused to contact "${host}" — Murmur only talks to Hugging Face download hosts ` +
-        `(PLAN §10.2). Blocked URL: ${url}`,
+      `Refused to contact "${host}" — Murmur only downloads models from Hugging Face ` +
+        `and its own GitHub release assets (PLAN §10.2). Blocked URL: ${url}`,
     )
     this.host = host
     this.url = url

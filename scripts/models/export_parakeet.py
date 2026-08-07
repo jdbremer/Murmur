@@ -55,6 +55,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="nvidia/parakeet-tdt-0.6b-v3")
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Also emit per-channel int8 graphs — what the catalog ships.",
+    )
     return parser.parse_args()
 
 
@@ -217,6 +222,29 @@ def main() -> int:
               f"{len(meta['durations'])}; PARAKEET_DURATIONS must change with it.",
               file=sys.stderr)
         return 1
+
+    if args.quantize:
+        # **Per-channel, and it is not optional.** Plain dynamic int8 loses
+        # words: measured against transformers on 10 utterances it scored 8/10
+        # exact, turning "Please add murmur" into "Plead murmur". Per-channel
+        # with reduced range scores 10/10 at the same 631 MB and the same 17x
+        # realtime, so the only thing default quantisation buys is errors.
+        from onnxruntime.quantization import QuantType, quantize_dynamic  # noqa: PLC0415
+
+        quantised = args.out.parent / f"{args.out.name}-int8"
+        quantised.mkdir(parents=True, exist_ok=True)
+        for name in ("encoder", "decoder", "joint"):
+            print(f"quantising {name}")
+            quantize_dynamic(
+                str(args.out / f"{name}.onnx"),
+                str(quantised / f"{name}.onnx"),
+                weight_type=QuantType.QInt8,
+                per_channel=True,
+                reduce_range=True,
+            )
+        for name in ("config.json", "vocab.json"):
+            (quantised / name).write_bytes((args.out / name).read_bytes())
+        print(f"quantised graphs in {quantised}")
 
     for f in sorted(args.out.iterdir()):
         print(f"  {f.name}  {f.stat().st_size / 1e6:.1f} MB")

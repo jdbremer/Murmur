@@ -146,8 +146,16 @@ export function HelpSection(): React.JSX.Element {
           <span className="select-text font-mono text-[12px] text-ink-muted">{dataLocation()}</span>
         </Row>
         <Row
+          label="Setup"
+          hint="Walks through the permissions, a pair of models and one practice sentence again. Nothing is reset — it is the same screens, not a fresh install."
+        >
+          <Button onClick={() => void window.murmur.settings.set({ onboardingCompleted: false })}>
+            Run setup again
+          </Button>
+        </Row>
+        <Row
           label="Network activity"
-          hint="Model downloads from Hugging Face, and updates from GitHub when you press the button. Nothing else — no telemetry, no accounts, nothing on a timer."
+          hint="Model downloads from Hugging Face and from Murmur\u2019s own GitHub releases, and updates from GitHub when you press the button. Nothing else \u2014 no telemetry, no accounts, nothing on a timer."
         >
           <Badge tone="positive">Only when you ask</Badge>
         </Row>

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-07T13:44:19Z",
-  "notes": "Generated and verified against live Hugging Face metadata. Every URL is pinned to a repository revision and every sha256 is the file's real digest (LFS oid, or computed locally for small non-LFS files). Parakeet-TDT is deliberately absent: NVIDIA publishes .nemo checkpoints, not ONNX, and Murmur's provenance policy does not list community conversions. See scripts/models/export-parakeet.md for the first-party export we will run and host.",
+  "updatedAt": "2026-08-07T15:18:48Z",
+  "notes": "Generated and verified against live Hugging Face metadata. Every URL is pinned to a repository revision and every sha256 is the file's real digest (LFS oid, or computed locally for small non-LFS files). Parakeet-TDT ships as a first-party ONNX conversion: NVIDIA publishes .nemo, safetensors and a GGUF but no ONNX, so Murmur exports it (scripts/models/export-parakeet.md) and hosts the result on its own GitHub release rather than listing a community re-upload. Those files are pinned by tag and sha256 rather than by a Hugging Face revision, because they are not on Hugging Face.",
   "originPolicy": ["US"],
   "models": [
     {
@@ -407,6 +407,52 @@
         }
       ],
       "notes": "Google's own quantisation-aware-trained GGUF, and the largest polish entry in the catalog. Served without a Hugging Face token, so it is pinned first-party. The repo's mmproj (vision) file is deliberately not downloaded — polishing is text-only."
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "kind": "stt",
+      "engine": "onnx-runtime",
+      "displayName": "Parakeet-TDT 0.6B v3",
+      "org": "NVIDIA",
+      "origin": "US",
+      "license": "CC-BY-4.0",
+      "sizeBytes": 631462259,
+      "ramTierGb": 8,
+      "languages": ["en", "multi"],
+      "quant": "int8",
+      "files": [
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-parakeet-tdt-0.6b-v3/encoder.onnx",
+          "sha256": "41ded91d5d62ba1ac10318129daf4390d1241bed744d1845c9a8c72f852f9cdd",
+          "bytes": 613749291,
+          "filename": "encoder.onnx"
+        },
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-parakeet-tdt-0.6b-v3/decoder.onnx",
+          "sha256": "8ba79921d1212827e9cb35c19d7787e8ca52366caf24258c60e9a29a09969adb",
+          "bytes": 12311563,
+          "filename": "decoder.onnx"
+        },
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-parakeet-tdt-0.6b-v3/joint.onnx",
+          "sha256": "15012eb1183e53c559b59f2f957113d93754345730d86363bf337bbc8c64ca78",
+          "bytes": 5322212,
+          "filename": "joint.onnx"
+        },
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-parakeet-tdt-0.6b-v3/config.json",
+          "sha256": "85fa61ded27f6ea7aa20137de5a3ab7d1ebd5a9c245194a2e47ae67ab823fd93",
+          "bytes": 539,
+          "filename": "config.json"
+        },
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-parakeet-tdt-0.6b-v3/vocab.json",
+          "sha256": "3eb2f73e8853dce5156c2ed97c0b1bb84eb4ebd201eb1761d15977fc1ea31490",
+          "bytes": 78654,
+          "filename": "vocab.json"
+        }
+      ],
+      "notes": "Weights are NVIDIA's, unmodified, from nvidia/parakeet-tdt-0.6b-v3 (CC-BY-4.0). NVIDIA publishes .nemo, safetensors and a GGUF but no ONNX, so the conversion is Murmur's: exported by scripts/models/export_parakeet.py and hosted on this repo's own release rather than a third-party re-upload, so \"who converted this\" has an answer. Quantised per-channel — plain int8 scored 8/10 exact against the reference and turned \"Please add murmur\" into \"Plead murmur\"; per-channel scores 10/10 at the same size. A transducer stays silent through silence instead of inventing text, which matters most for meeting capture, where most of an hour is nobody speaking."
     }
   ]
 }
