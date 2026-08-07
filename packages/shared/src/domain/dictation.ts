@@ -62,6 +62,34 @@ export const DictationErrorCodeSchema = z.enum([
 export type DictationErrorCode = z.infer<typeof DictationErrorCodeSchema>
 
 /**
+ * What the *pill* says for each failure — two or three words, never a sentence.
+ *
+ * The pill is a glance surface a few hundred pixels wide, and the `message` on
+ * the event is not safe to put in it: some failures carry a whole instruction
+ * ("No speech-to-text model is ready. Pick one in the Hub.") and others carry
+ * whatever an engine or a sidecar put in `error.message`, which has no length
+ * bound at all. Rendering that meant the pill grew until it hit its cap and
+ * then truncated — reliably eliding the actionable half, since the instruction
+ * is always at the end.
+ *
+ * So the pill renders this label, keyed off the code and therefore bounded by
+ * construction, and the full `message` goes to the Hub toast, which has room
+ * for a sentence and a follow-up hint. Screen readers still get the message:
+ * the pill's aria-label is the long form (see `describeBar`).
+ */
+export const DICTATION_ERROR_LABEL: Record<DictationErrorCode, string> = {
+  'no-speech': 'Didn’t catch that',
+  'mic-unavailable': 'No microphone',
+  'secure-input': 'Secure field',
+  'stt-failed': 'No speech model',
+  'polish-failed': 'Polishing failed',
+  'insert-failed': 'Could not type',
+  timeout: 'Took too long',
+  cancelled: 'Cancelled',
+  unknown: 'Something broke',
+}
+
+/**
  * What main broadcasts to the Bar (and Hub) on every state change.
  *
  * `listening` carries the current normalised mic amplitude so a Bar that

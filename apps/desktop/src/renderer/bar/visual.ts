@@ -1,4 +1,9 @@
-import { MOMENTARY_HOLD_MS, type BarVisibility, type DictationEvent } from '@murmur/shared'
+import {
+  DICTATION_ERROR_LABEL,
+  MOMENTARY_HOLD_MS,
+  type BarVisibility,
+  type DictationEvent,
+} from '@murmur/shared'
 
 /**
  * The Bar's state → pixels mapping (PLAN §2.1) — pure, so it can be tested.
@@ -236,13 +241,19 @@ function describeBase(event: DictationEvent): BarVisual {
         recording: false,
       }
     case 'error':
+      // The short, code-keyed label — never the event's `message`. See
+      // DICTATION_ERROR_LABEL: the message can be a full instruction or an
+      // unbounded string from an engine, and putting either here grew the pill
+      // until it truncated away the part that told the user what to do. The
+      // long form still reaches the user, through the Hub toast and (below)
+      // through the pill's own aria-label.
       return {
         shape: 'message',
-        width: errorWidth(event.message),
+        width: errorWidth(DICTATION_ERROR_LABEL[event.code]),
         height: BAR.height,
         background: BAR_ERROR_BACKGROUND,
         border: BAR_ERROR_BORDER,
-        label: event.message,
+        label: DICTATION_ERROR_LABEL[event.code],
         glow: BAR_GLOW.error,
         handsFree: false,
         command: false,

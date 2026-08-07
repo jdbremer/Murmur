@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DictationEvent } from '@murmur/shared'
+import { DICTATION_ERROR_LABEL, type DictationEvent } from '@murmur/shared'
 
 import {
   BAR,
@@ -70,11 +70,38 @@ describe('describeBar', () => {
     expect(visual.ariaLabel).toBe('Inserted 27 characters')
   })
 
-  it('tints warm red and carries the message on failure', () => {
+  it('tints warm red and shows the short label on failure', () => {
     const visual = describeBar(failed)
     expect(visual.shape).toBe('message')
     expect(visual.background).toBe(BAR_ERROR_BACKGROUND)
-    expect(visual.label).toBe("Didn't catch that")
+    expect(visual.label).toBe(DICTATION_ERROR_LABEL['no-speech'])
+    // The long form is not lost — it is what assistive tech reads out.
+    expect(visual.ariaLabel).toBe(failed.message)
+  })
+
+  it('never widens the pill for a long message, whatever its source', () => {
+    // Regression: the pill used to render `event.message`, so a failure that
+    // carried an instruction ("…Pick one in the Hub.") or an unbounded engine
+    // string grew the capsule until it truncated away the actionable half.
+    const wordy: DictationEvent = {
+      state: 'error',
+      code: 'stt-failed',
+      message: 'No speech-to-text model is ready. Pick one in the Hub.',
+    }
+    const unbounded: DictationEvent = {
+      state: 'error',
+      code: 'unknown',
+      message: `sidecar refused the request: ${'x'.repeat(400)}`,
+    }
+    expect(describeBar(wordy).width).toBe(BAR.errorMinWidth)
+    expect(describeBar(unbounded).width).toBe(BAR.errorMinWidth)
+  })
+
+  it('keeps every error label short enough to leave the pill at its minimum', () => {
+    // The whole point of the code→label map: no failure can grow the capsule.
+    for (const label of Object.values(DICTATION_ERROR_LABEL)) {
+      expect(errorWidth(label)).toBe(BAR.errorMinWidth)
+    }
   })
 
   it('widens on hover to make room for the controls, and grows slightly', () => {

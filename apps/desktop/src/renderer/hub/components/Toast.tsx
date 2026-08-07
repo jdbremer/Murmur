@@ -1,13 +1,31 @@
 import { useEffect, useState } from 'react'
 
-import type { DictationEvent } from '@murmur/shared'
+import type { DictationErrorCode, DictationEvent } from '@murmur/shared'
+
+/**
+ * What to do about it, for the failures where that is not obvious.
+ *
+ * This is the long half of the split described in `DICTATION_ERROR_LABEL`: the
+ * pill shows two or three words because it has room for two or three words,
+ * and the explanation lands here, where a sentence fits and nothing is on a
+ * 2.5 s timer to be read before it disappears.
+ */
+const TOAST_HINT: Partial<Record<DictationErrorCode, string>> = {
+  'stt-failed': 'Open Models to download and select a speech-to-text model.',
+  'polish-failed': 'The transcript was inserted unpolished. Check the polishing model in Models.',
+  'secure-input':
+    'macOS blocks typing into password fields. Dictate somewhere else, or paste it yourself.',
+  'mic-unavailable':
+    'Check the microphone in Settings, and that no other app is holding the device.',
+  'insert-failed': 'Murmur needs Accessibility permission to type. Check Help.',
+}
 
 /**
  * Lightweight Hub toast for dictation failures (no model, secure field, etc.).
  * Subscribes to the same `dictation.state` stream as the Bar.
  */
 export function DictationToast(): React.JSX.Element | null {
-  const [toast, setToast] = useState<{ message: string; code: string } | null>(null)
+  const [toast, setToast] = useState<{ message: string; code: DictationErrorCode } | null>(null)
 
   useEffect(() => {
     const unsub = window.murmur.dictation.subscribe((event: DictationEvent) => {
@@ -47,10 +65,9 @@ export function DictationToast(): React.JSX.Element | null {
         </svg>
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-medium text-ink">{toast.message}</p>
-          {toast.code === 'stt-failed' ? (
+          {TOAST_HINT[toast.code] ? (
             <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
-              Open <span className="font-medium text-ink">Models</span> to download and select a
-              speech-to-text model.
+              {TOAST_HINT[toast.code]}
             </p>
           ) : null}
         </div>
