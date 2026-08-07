@@ -101,6 +101,7 @@ Before an entry goes in the catalog:
    per-feature mean and standard deviation. Anyone repeating this on a future
    checkpoint should assume the same and re-run the parity test rather than
    trust the constants.
+
 2. **Decode parity.** Transcribe the NeMo reference set with
    `nemo_asr.models.ASRModel.transcribe()`, then with our ONNX loop, and assert
    identical strings. Not "similar" — identical. Greedy decoding is
