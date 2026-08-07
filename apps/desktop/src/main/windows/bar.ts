@@ -24,15 +24,25 @@ export const BAR_WIDTH = 360
  * nothing.
  */
 export const BAR_HEIGHT = 200
-/** Gap between the pill and the bottom edge of the display (PLAN §2.1). */
+/** Gap between the pill and whatever is below it (PLAN §2.1). */
 export const BAR_MARGIN_BOTTOM = 10
 
 const isMac = process.platform === 'darwin'
 
 /**
- * Bottom-centre of the display under the cursor, measured against `bounds`
- * rather than `workArea`: the pill floats *above* the Dock, it does not dodge
- * it.
+ * Bottom-centre of the display under the cursor.
+ *
+ * The vertical edge comes from `workArea`, so the pill clears the Dock instead
+ * of landing on top of it. It used to measure against `bounds` — deliberately,
+ * on the theory that a HUD should float over the Dock rather than dodge it —
+ * but with the Dock at the bottom and not auto-hiding, that puts an opaque
+ * capsule squarely over the icons it covers. Losing a Dock icon to a pill you
+ * cannot move is worse than the small gap this leaves when the Dock is hidden.
+ * A Dock on the left or right does not change `workArea`'s bottom edge, so
+ * those setups land exactly where they always did.
+ *
+ * `x` stays measured against `bounds`: centred on the *screen* is what reads as
+ * centred, and a 360 px capsule never reaches a side Dock anyway.
  *
  * Cursor rather than primary because a pill on the primary display is simply
  * not visible to someone working on their second monitor. On a single-display
@@ -47,10 +57,10 @@ const isMac = process.platform === 'darwin'
  */
 export function barBounds(): Rectangle {
   const point = screen.getCursorScreenPoint()
-  const { bounds } = screen.getDisplayNearestPoint(point)
+  const { bounds, workArea } = screen.getDisplayNearestPoint(point)
   return {
     x: Math.round(bounds.x + (bounds.width - BAR_WIDTH) / 2),
-    y: Math.round(bounds.y + bounds.height - BAR_HEIGHT - BAR_MARGIN_BOTTOM),
+    y: Math.round(workArea.y + workArea.height - BAR_HEIGHT - BAR_MARGIN_BOTTOM),
     width: BAR_WIDTH,
     height: BAR_HEIGHT,
   }
