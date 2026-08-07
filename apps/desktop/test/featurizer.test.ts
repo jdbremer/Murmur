@@ -33,9 +33,24 @@ describe('mel scale', () => {
     }
   })
 
-  it('uses the Slaney/HTK 2595·log10 convention', () => {
-    expect(hzToMel(1000)).toBeCloseTo(2595 * Math.log10(1 + 1000 / 700), 9)
+  it('uses the Slaney scale by default, not HTK — they are different curves', () => {
+    // Verified against the filterbank NVIDIA ships: `librosa.filters.mel` is
+    // called with `htk=False`, so below 1 kHz the scale is *linear* at
+    // 200/3 Hz per mel, and 1 kHz lands exactly on the breakpoint at mel 15.
+    // The famous 2595·log10 formula is HTK's, and using it here put every
+    // filter at the wrong frequency while still producing plausible audio.
     expect(hzToMel(0)).toBe(0)
+    expect(hzToMel(1000)).toBeCloseTo(15, 9)
+    expect(hzToMel(500)).toBeCloseTo(500 / (200 / 3), 9)
+    expect(hzToMel(1000, 'htk')).toBeCloseTo(2595 * Math.log10(1 + 1000 / 700), 9)
+    expect(hzToMel(1000)).not.toBeCloseTo(hzToMel(1000, 'htk'), 1)
+  })
+
+  it('round-trips Hz → mel → Hz on both scales', () => {
+    for (const hz of [0, 100, 999, 1000, 1001, 4000, 8000]) {
+      expect(melToHz(hzToMel(hz))).toBeCloseTo(hz, 6)
+      expect(melToHz(hzToMel(hz, 'htk'), 'htk')).toBeCloseTo(hz, 6)
+    }
   })
 
   it('is monotonic and compressive', () => {
@@ -127,16 +142,25 @@ describe('melFilterbank', () => {
 })
 
 describe('hannWindow', () => {
-  it('is periodic, starting at 0 and peaking mid-window', () => {
-    const window = hannWindow(8)
+  it('defaults to the symmetric window, which is what torch calls periodic=False', () => {
+    // Parakeet's extractor asks for `torch.hann_window(400, periodic=False)`.
+    // The symmetric window closes back to 0 at its last sample; the periodic
+    // one does not. Getting this backwards shifts every STFT coefficient.
+    const window = hannWindow(9)
     expect(window[0]).toBeCloseTo(0, 9)
     expect(window[4]).toBeCloseTo(1, 9)
-    // Periodic (not symmetric): the last sample is not 0.
+    expect(window[8]).toBeCloseTo(0, 9)
+  })
+
+  it('still offers the periodic window explicitly', () => {
+    const window = hannWindow(8, 'periodic')
+    expect(window[0]).toBeCloseTo(0, 9)
+    expect(window[4]).toBeCloseTo(1, 9)
     expect(window[7]).toBeGreaterThan(0)
   })
 
   it('is symmetric about its peak', () => {
-    const window = hannWindow(16)
+    const window = hannWindow(17)
     for (let index = 1; index < 8; index += 1) {
       expect(window[8 - index]).toBeCloseTo(window[8 + index] ?? 0, 9)
     }
@@ -249,9 +273,11 @@ describe('computeLogMel', () => {
   it('produces one frame per hop with nMels bands', () => {
     // 1 s at 16 kHz, 10 ms hop → ~100 frames (centre-padded).
     const features = computeLogMel(tone(1000, 440, 0.3))
-    expect(features.nMels).toBe(80)
-    expect(features.frames).toBeGreaterThan(95)
-    expect(features.frames).toBeLessThan(105)
+    // 128 bands: Parakeet-TDT v3's extractor declares `feature_size: 128`.
+    expect(features.nMels).toBe(128)
+    // Exactly floor(samples / hop) — the model's valid length, not the
+    // `floor(n/hop) + 1` that torch.stft emits and then masks.
+    expect(features.frames).toBe(100)
     expect(features.data.length).toBe(features.frames * features.nMels)
   })
 
@@ -296,15 +322,17 @@ describe('toChannelsFirst', () => {
 })
 
 describe('PARAKEET_MEL', () => {
-  it('records NeMo’s documented constants', () => {
+  it('records the constants Parakeet-TDT v3 actually ships', () => {
     expect(PARAKEET_MEL).toMatchObject({
       sampleRate: 16_000,
       nFft: 512,
       winLength: 400, // 25 ms
       hopLength: 160, // 10 ms
-      nMels: 80,
+      nMels: 128,
       preEmphasis: 0.97,
       normalize: 'per_feature',
+      window: 'symmetric',
+      padMode: 'constant',
       // Slaney is librosa's default, which NeMo passes through as `mel_norm`.
       // Confirmed by the parity check in scripts/models/export-parakeet.md
       // before a Parakeet entry may be added (PLAN §16).

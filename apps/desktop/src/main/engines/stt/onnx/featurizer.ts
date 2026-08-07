@@ -27,7 +27,11 @@ export interface MelConfig {
   winLength: number
   /** Hop in samples. NeMo: `window_stride = 0.01 s` → 160. */
   hopLength: number
-  /** Number of mel bands. NeMo Conformer/Parakeet: 80. */
+  /**
+   * Number of mel bands. **Parakeet-TDT v3 uses 128**, not the 80 of NeMo's
+   * older Conformer recipes — its `processor_config.json` says
+   * `feature_size: 128` and its filter matrix is `[128, 257]`.
+   */
   nMels: number
   /** Lowest mel-filter edge, Hz. */
   fMin: number
@@ -39,6 +43,22 @@ export interface MelConfig {
   preEmphasis: number
   /** Per-utterance mean/variance normalisation, as NeMo's `normalize: per_feature`. */
   normalize: 'per_feature' | 'none'
+  /**
+   * Hann window symmetry. `torch.hann_window(..., periodic=False)` — which is
+   * what Parakeet's extractor uses — is the **symmetric** window, dividing by
+   * `length - 1`. The periodic variant divides by `length` and is the usual
+   * default elsewhere, which is exactly why this is spelled out: the two differ
+   * by one sample of phase and quietly shift every coefficient.
+   */
+  window: 'symmetric' | 'periodic'
+  /**
+   * How the signal is extended so frame `k` is centred on sample `k * hop`.
+   * Parakeet goes through `torch.stft(..., pad_mode='constant')`, i.e. zeros.
+   * Reflection is the more common choice in speech front-ends and is wrong
+   * here — it changes the first and last few frames only, which is the kind of
+   * error that survives a listening test and shows up as a dropped first word.
+   */
+  padMode: 'constant' | 'reflect'
   /**
    * Filterbank normalisation.
    *
@@ -68,13 +88,15 @@ export const PARAKEET_MEL: MelConfig = Object.freeze({
   nFft: 512,
   winLength: 400,
   hopLength: 160,
-  nMels: 80,
+  nMels: 128,
   fMin: 0,
   fMax: 8_000,
   logZeroGuard: 2 ** -24,
   preEmphasis: 0.97,
   normalize: 'per_feature',
   melNorm: 'slaney',
+  window: 'symmetric',
+  padMode: 'constant',
 })
 
 export interface MelFeatures {
@@ -88,13 +110,32 @@ export interface MelFeatures {
 // Building blocks (pure, individually testable)
 // ---------------------------------------------------------------------------
 
-/** Slaney-style Hz → mel, the convention NeMo and torchaudio share. */
-export function hzToMel(hz: number): number {
-  return 2595 * Math.log10(1 + hz / 700)
+/**
+ * Hz → mel on the **Slaney** scale — linear below 1 kHz, logarithmic above.
+ *
+ * This is `librosa.filters.mel(..., htk=False)`, which is what Parakeet's
+ * feature extractor calls, and it is *not* the formula most references print.
+ * The familiar `2595 · log10(1 + hz/700)` is the **HTK** scale; naming a
+ * function "Slaney" and giving it the HTK formula produces a filterbank whose
+ * bands sit at the wrong frequencies — subtly, so audio still transcribes,
+ * just worse. At 128 bands it also leaves the first filter empty, which is the
+ * symptom that gives it away.
+ */
+const MEL_F_SP = 200 / 3
+const MEL_MIN_LOG_HZ = 1_000
+const MEL_MIN_LOG_MEL = MEL_MIN_LOG_HZ / MEL_F_SP
+const MEL_LOG_STEP = Math.log(6.4) / 27
+
+export function hzToMel(hz: number, scale: 'slaney' | 'htk' = 'slaney'): number {
+  if (scale === 'htk') return 2595 * Math.log10(1 + hz / 700)
+  if (hz < MEL_MIN_LOG_HZ) return hz / MEL_F_SP
+  return MEL_MIN_LOG_MEL + Math.log(hz / MEL_MIN_LOG_HZ) / MEL_LOG_STEP
 }
 
-export function melToHz(mel: number): number {
-  return 700 * (10 ** (mel / 2595) - 1)
+export function melToHz(mel: number, scale: 'slaney' | 'htk' = 'slaney'): number {
+  if (scale === 'htk') return 700 * (10 ** (mel / 2595) - 1)
+  if (mel < MEL_MIN_LOG_MEL) return mel * MEL_F_SP
+  return MEL_MIN_LOG_HZ * Math.exp(MEL_LOG_STEP * (mel - MEL_MIN_LOG_MEL))
 }
 
 /**
@@ -141,12 +182,26 @@ export function melFilterbank(config: MelConfig): Float32Array {
 }
 
 /** Periodic Hann window — the variant used for spectral analysis. */
-export function hannWindow(length: number): Float32Array {
+export function hannWindow(
+  length: number,
+  kind: 'symmetric' | 'periodic' = 'symmetric',
+): Float32Array {
   const window = new Float32Array(length)
+  // `periodic` divides by `length`, `symmetric` by `length - 1`. Torch calls
+  // the latter `periodic=False`, which is what Parakeet's extractor requests.
+  const denominator = kind === 'periodic' ? length : Math.max(1, length - 1)
   for (let index = 0; index < length; index += 1) {
-    window[index] = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / length)
+    window[index] = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / denominator)
   }
   return window
+}
+
+/** Zero-extension, matching `torch.stft(..., pad_mode='constant')`. */
+export function constantPad(pcm: Float32Array, pad: number): Float32Array {
+  if (pad <= 0 || pcm.length === 0) return pcm
+  const out = new Float32Array(pcm.length + pad * 2)
+  out.set(pcm, pad)
+  return out
 }
 
 /**
@@ -235,21 +290,39 @@ export function powerSpectrum(frame: Float32Array, nFft: number): Float32Array {
  */
 export function computeLogMel(pcm: Float32Array, config: MelConfig = PARAKEET_MEL): MelFeatures {
   const emphasised = applyPreEmphasis(pcm, config.preEmphasis)
-  const padded = reflectPad(emphasised, Math.floor(config.nFft / 2))
+  const padded =
+    config.padMode === 'reflect'
+      ? reflectPad(emphasised, Math.floor(config.nFft / 2))
+      : constantPad(emphasised, Math.floor(config.nFft / 2))
 
-  const frames = Math.max(0, Math.floor((padded.length - config.nFft) / config.hopLength) + 1)
-  const window = hannWindow(config.winLength)
+  // `torch.stft(center=True)` yields `floor(n / hop) + 1` frames, but Parakeet's
+  // extractor declares only `floor(n / hop)` of them valid and masks the last to
+  // zero before normalising. That trailing frame sits almost entirely in the
+  // zero padding, so its log-mel is the floor value (`log 2⁻²⁴` ≈ -16.6);
+  // including it drags the per-feature mean and inflates the standard
+  // deviation, shifting *every* output. Emitting the valid count directly is
+  // both simpler than carrying a mask and what the encoder actually consumes.
+  const frames = Math.max(0, Math.floor(pcm.length / config.hopLength))
+  const window = hannWindow(config.winLength, config.window)
   const filters = melFilterbank(config)
   const bins = Math.floor(config.nFft / 2) + 1
 
   const out = new Float32Array(frames * config.nMels)
   const windowed = new Float32Array(config.nFft)
 
+  // With `winLength < nFft` the window is **centred** in the FFT frame, not
+  // left-aligned: `torch.stft` pads the window to `nFft` symmetrically, so the
+  // 400-sample Hann sits at offset (512 - 400) / 2 = 56. Left-aligning it reads
+  // a different 400 samples of signal per frame — not merely a phase shift, so
+  // taking the magnitude does not hide it.
+  const windowOffset = Math.floor((config.nFft - config.winLength) / 2)
+
   for (let frame = 0; frame < frames; frame += 1) {
     const start = frame * config.hopLength
     windowed.fill(0)
     for (let index = 0; index < config.winLength; index += 1) {
-      windowed[index] = (padded[start + index] ?? 0) * (window[index] ?? 0)
+      windowed[windowOffset + index] =
+        (padded[start + windowOffset + index] ?? 0) * (window[index] ?? 0)
     }
 
     const power = powerSpectrum(windowed, config.nFft)

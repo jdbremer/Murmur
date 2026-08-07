@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-05T00:00:00.000Z",
+  "updatedAt": "2026-08-07T13:44:19Z",
   "notes": "Generated and verified against live Hugging Face metadata. Every URL is pinned to a repository revision and every sha256 is the file's real digest (LFS oid, or computed locally for small non-LFS files). Parakeet-TDT is deliberately absent: NVIDIA publishes .nemo checkpoints, not ONNX, and Murmur's provenance policy does not list community conversions. See scripts/models/export-parakeet.md for the first-party export we will run and host.",
   "originPolicy": ["US"],
   "models": [
@@ -25,7 +25,7 @@
         }
       ],
       "recommended": true,
-      "notes": "OpenAI's Whisper large-v3-turbo, quantised to q5_0 and distributed as GGML by the whisper.cpp project's own model repo (ggerganov/whisper.cpp). Multilingual quality bar; recommended on 16 GB+ machines (PLAN \u00a76.2)."
+      "notes": "OpenAI's Whisper large-v3-turbo, quantised to q5_0 and distributed as GGML by the whisper.cpp project's own model repo (ggerganov/whisper.cpp). Multilingual quality bar; recommended on 16 GB+ machines (PLAN §6.2)."
     },
     {
       "id": "whisper-small-en",
@@ -48,7 +48,7 @@
         }
       ],
       "recommended": true,
-      "notes": "English-only Whisper small. The 8 GB-tier default and the M1 bring-up model (PLAN \u00a76.2). GGML conversion from the whisper.cpp model repo."
+      "notes": "English-only Whisper small. The 8 GB-tier default and the M1 bring-up model (PLAN §6.2). GGML conversion from the whisper.cpp model repo."
     },
     {
       "id": "whisper-tiny-en",
@@ -70,7 +70,7 @@
           "filename": "ggml-tiny.en.bin"
         }
       ],
-      "notes": "Smallest Whisper. Intel-Mac / low-RAM fallback (PLAN \u00a714 tier C)."
+      "notes": "Smallest Whisper. Intel-Mac / low-RAM fallback (PLAN §14 tier C)."
     },
     {
       "id": "distil-whisper-large-v3.5",
@@ -92,7 +92,7 @@
           "filename": "ggml-model.bin"
         }
       ],
-      "notes": "First-party GGML release from the Distil-Whisper team (Hugging Face, New York). ~2x large-v3 speed at near-parity English accuracy. The repo ships one unquantised ggml-model.bin (1.4 GB), not the ~750 MB quantised estimate in PLAN \u00a76.2."
+      "notes": "First-party GGML release from the Distil-Whisper team (Hugging Face, New York). ~2x large-v3 speed at near-parity English accuracy. The repo ships one unquantised ggml-model.bin (1.4 GB), not the ~750 MB quantised estimate in PLAN §6.2."
     },
     {
       "id": "moonshine-base-onnx",
@@ -138,7 +138,7 @@
           "filename": "generation_config.json"
         }
       ],
-      "notes": "Official ONNX export from Moonshine AI (formerly Useful Sensors, Mountain View CA). Weights come from moonshine-ai/moonshine; the tokenizer and generation config from the matching transformers repo. Takes raw 16 kHz audio \u2014 no mel front-end."
+      "notes": "Official ONNX export from Moonshine AI (formerly Useful Sensors, Mountain View CA). Weights come from moonshine-ai/moonshine; the tokenizer and generation config from the matching transformers repo. Takes raw 16 kHz audio — no mel front-end."
     },
     {
       "id": "moonshine-tiny-onnx",
@@ -207,7 +207,7 @@
         }
       ],
       "recommended": true,
-      "notes": "Google's quantisation-aware-trained Gemma 3 4B, GGUF-packaged by lmstudio-community. Google's own google/gemma-3-4b-it-qat-q4_0-gguf repo is licence-gated and returns 401 without a Hugging Face token, so it cannot be fetched by Murmur's anonymous downloader. Recommended polish default on 16 GB+ (PLAN \u00a77.2)."
+      "notes": "Google's quantisation-aware-trained Gemma 3 4B, GGUF-packaged by lmstudio-community. Google's own google/gemma-3-4b-it-qat-q4_0-gguf repo is licence-gated and returns 401 without a Hugging Face token, so it cannot be fetched by Murmur's anonymous downloader. Recommended polish default on 16 GB+ (PLAN §7.2)."
     },
     {
       "id": "gemma-3-1b-it-qat-q4_0",
@@ -230,7 +230,7 @@
         }
       ],
       "recommended": true,
-      "notes": "Low-RAM polish default (PLAN \u00a77.2). Same provenance note as the 4B entry: lmstudio-community GGUF of Google's official QAT weights, because Google's own GGUF repo is licence-gated."
+      "notes": "Low-RAM polish default (PLAN §7.2). Same provenance note as the 4B entry: lmstudio-community GGUF of Google's official QAT weights, because Google's own GGUF repo is licence-gated."
     },
     {
       "id": "phi-4-mini-instruct-q4_k_m",
@@ -252,7 +252,7 @@
           "filename": "Phi-4-mini-instruct-Q4_K_M.gguf"
         }
       ],
-      "notes": "MIT-licensed \u2014 the cleanest licence for strict environments (PLAN \u00a77.2). Microsoft publishes ONNX but no first-party GGUF, so this is the lmstudio-community quantisation of microsoft/Phi-4-mini-instruct."
+      "notes": "MIT-licensed — the cleanest licence for strict environments (PLAN §7.2). Microsoft publishes ONNX but no first-party GGUF, so this is the lmstudio-community quantisation of microsoft/Phi-4-mini-instruct."
     },
     {
       "id": "llama-3.2-3b-instruct-q4_k_m",
@@ -318,7 +318,7 @@
           "filename": "olmo-2-1124-7B-instruct-Q4_K_M.gguf"
         }
       ],
-      "notes": "First-party GGUF from AI2. Fully open (data + weights) under Apache-2.0 \u2014 the easiest compliance story in the catalogue (PLAN \u00a77.2)."
+      "notes": "First-party GGUF from AI2. Fully open (data + weights) under Apache-2.0 — the easiest compliance story in the catalogue (PLAN §7.2)."
     },
     {
       "id": "granite-3.3-2b-instruct-q4_k_m",
@@ -340,7 +340,73 @@
           "filename": "granite-3.3-2b-instruct-Q4_K_M.gguf"
         }
       ],
-      "notes": "First-party GGUF from IBM, Apache-2.0. Enterprise-friendly (PLAN \u00a77.2)."
+      "notes": "First-party GGUF from IBM, Apache-2.0. Enterprise-friendly (PLAN §7.2)."
+    },
+    {
+      "id": "granite-4.1-3b-instruct-q4_k_m",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Granite 4.1 3B Instruct",
+      "org": "IBM",
+      "origin": "US",
+      "license": "Apache-2.0",
+      "sizeBytes": 2099501664,
+      "ramTierGb": 16,
+      "languages": ["en", "multi"],
+      "quant": "q4_k_m",
+      "files": [
+        {
+          "url": "https://huggingface.co/ibm-granite/granite-4.1-3b-GGUF/resolve/ab4701481089b58a082ef63cc1cee738887293ff/granite-4.1-3b-Q4_K_M.gguf",
+          "sha256": "662b0626cd58f443baea23559b469df6576a81d349649c59413b36a9fb32eb29",
+          "bytes": 2099501664,
+          "filename": "granite-4.1-3b-Q4_K_M.gguf"
+        }
+      ],
+      "notes": "First-party GGUF from IBM, Apache-2.0. Successor to the Granite 3.3 2B entry, which stays listed so an existing install is not orphaned. Granite is tuned for instruction-following over open-ended generation, which is what a polish pass wants: the failure that matters here is a model improving a sentence rather than cleaning it up (PLAN §7.2)."
+    },
+    {
+      "id": "gemma-4-e2b-it-qat-q4_0",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Gemma 4 E2B-it (QAT)",
+      "org": "Google",
+      "origin": "US",
+      "license": "Gemma",
+      "sizeBytes": 3349516256,
+      "ramTierGb": 16,
+      "languages": ["en", "multi"],
+      "quant": "q4_0",
+      "files": [
+        {
+          "url": "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf",
+          "sha256": "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634",
+          "bytes": 3349516256,
+          "filename": "gemma-4-E2B_q4_0-it.gguf"
+        }
+      ],
+      "notes": "Google's own quantisation-aware-trained GGUF. Unlike the Gemma 3 QAT repo, this one serves without a Hugging Face token, so it is pinned first-party rather than to a community re-package. The repo's mmproj file is the vision projector and is deliberately not downloaded — polishing is text-only, and it would add ~1 GB for nothing."
+    },
+    {
+      "id": "gemma-4-e4b-it-qat-q4_0",
+      "kind": "polish",
+      "engine": "llama-cpp",
+      "displayName": "Gemma 4 E4B-it (QAT)",
+      "org": "Google",
+      "origin": "US",
+      "license": "Gemma",
+      "sizeBytes": 5154941280,
+      "ramTierGb": 16,
+      "languages": ["en", "multi"],
+      "quant": "q4_0",
+      "files": [
+        {
+          "url": "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/4b4a2c1d584be7264f87aac328a1bc739ce81b6c/gemma-4-E4B_q4_0-it.gguf",
+          "sha256": "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee",
+          "bytes": 5154941280,
+          "filename": "gemma-4-E4B_q4_0-it.gguf"
+        }
+      ],
+      "notes": "Google's own quantisation-aware-trained GGUF, and the largest polish entry in the catalog. Served without a Hugging Face token, so it is pinned first-party. The repo's mmproj (vision) file is deliberately not downloaded — polishing is text-only."
     }
   ]
 }
