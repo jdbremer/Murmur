@@ -45,8 +45,11 @@ export const AUDIO = {
    * and back-to-back dictation is the common case a warm stream exists for.
    */
   warmIdleMs: 60_000,
-  /** Hands-free auto-finalise after this much trailing silence (PLAN §5). */
-  handsFreeSilenceMs: 800,
+  // No hands-free silence threshold: a latched session ends when the user
+  // says so (tap again, or Esc), never because they stopped to think. The
+  // SilenceTracker still exists — meeting capture segments on it, and every
+  // utterance is still silence-trimmed before STT — it simply no longer
+  // decides when dictation is over.
   /** How often the Bar's waveform is fed, in milliseconds. */
   levelIntervalMs: 33,
 } as const

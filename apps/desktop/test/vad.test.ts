@@ -12,6 +12,11 @@ import {
 } from '../src/main/audio/vad'
 import { concat, roomTone, silence, speechLike, tone } from './helpers/pcm'
 
+/** An arbitrary trailing-silence window: this exercises the tracker's
+ *  contract, not a product policy (hands-free no longer finalises on silence,
+ *  and meeting capture brings its own MEETING.segmentSilenceMs). */
+const FINALISE_MS = 800
+
 /**
  * VAD tests (PLAN §5).
  *
@@ -137,7 +142,7 @@ describe('SilenceTracker', () => {
     for (let index = 0; index < 30; index += 1) tracker.push(frame(quiet, index))
 
     expect(tracker.sawSpeech).toBe(false)
-    expect(tracker.shouldFinalise(AUDIO.handsFreeSilenceMs)).toBe(false)
+    expect(tracker.shouldFinalise(FINALISE_MS)).toBe(false)
   })
 
   it('finalises after the configured trailing silence, once speech has happened', () => {
@@ -146,14 +151,14 @@ describe('SilenceTracker', () => {
     const speech = speechLike(1000)
     for (let index = 0; index < 10; index += 1) tracker.push(frame(speech, index))
     expect(tracker.sawSpeech).toBe(true)
-    expect(tracker.shouldFinalise(AUDIO.handsFreeSilenceMs)).toBe(false)
+    expect(tracker.shouldFinalise(FINALISE_MS)).toBe(false)
 
     // 900 ms of quiet at 100 ms per frame.
     const quiet = roomTone(1000)
     for (let index = 0; index < 9; index += 1) tracker.push(frame(quiet, index))
 
-    expect(tracker.trailingSilenceMs).toBeGreaterThanOrEqual(AUDIO.handsFreeSilenceMs)
-    expect(tracker.shouldFinalise(AUDIO.handsFreeSilenceMs)).toBe(true)
+    expect(tracker.trailingSilenceMs).toBeGreaterThanOrEqual(FINALISE_MS)
+    expect(tracker.shouldFinalise(FINALISE_MS)).toBe(true)
   })
 
   it('resets trailing silence when speech resumes', () => {

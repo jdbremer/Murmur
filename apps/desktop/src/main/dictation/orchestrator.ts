@@ -376,10 +376,14 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       return
     }
 
-    if (this.#handsFree && this.#silence.shouldFinalise(AUDIO.handsFreeSilenceMs)) {
-      this.#log.debug('hands-free auto-finalise on trailing silence')
-      void this.#finish()
-    }
+    // Silence does **not** end a hands-free session.
+    //
+    // It used to: ~800 ms of quiet finalised the utterance and, because
+    // finishing clears the latch, dropped the user out of the mode entirely
+    // after a single sentence. Pausing to think is not a decision to stop
+    // talking, and the pill's own tooltip — "tap your key again or press Esc
+    // to stop" — promises the user owns that decision. Now they do. The only
+    // automatic end is AUDIO.maxUtteranceMs, handled by the cap above.
   }
 
   /** The capture renderer could not open the mic. */

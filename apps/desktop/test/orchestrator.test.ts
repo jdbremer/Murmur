@@ -479,7 +479,10 @@ describe('cancellation', () => {
 })
 
 describe('hands-free (PLAN §5)', () => {
-  it('ignores the key release and auto-finalises on trailing silence', async () => {
+  it('keeps listening through a pause — silence never ends the session', async () => {
+    // It used to finalise after ~800 ms of quiet, and because finishing clears
+    // the latch that dropped the user out of hands-free after one sentence.
+    // Pausing to think is not a decision to stop talking.
     orchestrator.begin({ handsFree: true })
     expect(orchestrator.handsFree).toBe(true)
 
@@ -487,10 +490,19 @@ describe('hands-free (PLAN §5)', () => {
     orchestrator.end() // a release must not stop hands-free
     expect(orchestrator.phase).toBe('listening')
 
-    // ~900 ms of quiet crosses the 800 ms auto-finalise threshold.
-    feed(orchestrator, roomTone(1000))
-    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+    // Several seconds of quiet — far past the old threshold.
+    feed(orchestrator, roomTone(4000))
+    expect(orchestrator.phase).toBe('listening')
+    expect(orchestrator.handsFree).toBe(true)
+    expect(harness.stt.transcribeCalls).toHaveLength(0)
 
+    // Speaking again after the pause continues the same utterance.
+    feed(orchestrator, speechLike(1200))
+    expect(orchestrator.phase).toBe('listening')
+
+    // Only the user ends it.
+    orchestrator.stopHandsFree()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
     expect(harness.stt.transcribeCalls).toHaveLength(1)
     expectSettledIdle()
   })

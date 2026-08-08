@@ -187,7 +187,7 @@ Sequencing: Windows right after macOS v1.0 (well-trodden mechanics). Linux last 
 
 - Format: 16 kHz mono Float32 (what every candidate STT model wants). Downsample in an `AudioWorklet`; ship ~100 ms frames over IPC.
 - Pre-roll ring buffer: capture starts *on hotkey-down*, but keep a ~300 ms rolling pre-buffer once the mic stream is warm so first syllables aren't clipped; mic stream is opened lazily on first dictation and kept warm for a configurable idle window (default 5 min) to avoid cold-start latency.
-- **VAD (no-ML, policy-clean)**: an energy/spectral gate in the WebRTC-VAD lineage, implemented in-process — trims leading/trailing silence before STT and auto-finalizes hands-free utterances after ~800 ms of silence; hard cap per-utterance length (default 5 min, configurable). Deliberately *not* Silero VAD (non-US origin): the US-only policy holds even for utility models.
+- **VAD (no-ML, policy-clean)**: an energy/spectral gate in the WebRTC-VAD lineage, implemented in-process — trims leading/trailing silence before STT and segments meeting capture; hard cap per-utterance length (default 5 min, configurable). It deliberately does **not** end a hands-free session: silence is a pause for thought, not a decision to stop, and §2.1 promises the user ends the mode themselves (tap again or Esc). Deliberately *not* Silero VAD (non-US origin): the US-only policy holds even for utility models.
 - Echo/noise: rely on macOS voice-processing input (`echoCancellation: true` constraint) — good enough v1; revisit if AirPods/laptop-mic feedback complaints appear.
 - Audio is held in memory only and discarded after transcription unless the user opts into retention (§10).
 
@@ -411,8 +411,8 @@ Hub Home with search (FTS5), copy/delete, stats (words, WPM, streak), per-app ca
 **Accept:** 1k-row history searches < 50 ms; stats match hand-computed fixtures; export produces valid JSON/CSV.
 
 ### M5 — Latency & streaming upgrades (weeks 11–12)
-Streaming STT (NVIDIA NeMo streaming models on ONNX Runtime; evaluate Moonshine's streaming mode) with live partial text in the Bar, hands-free double-tap mode with VAD auto-finalize, prompt caching for polish, Intel-Mac performance pass.
-**Accept:** perceived latency (release → text) ≤ 1 s with streaming pipeline on M-series; hands-free dictates three consecutive utterances without touching the keyboard.
+Streaming STT (NVIDIA NeMo streaming models on ONNX Runtime; evaluate Moonshine's streaming mode) with live partial text in the Bar, hands-free double-tap mode, prompt caching for polish, Intel-Mac performance pass.
+**Accept:** perceived latency (release → text) ≤ 1 s with streaming pipeline on M-series; hands-free dictates three consecutive utterances without touching the keyboard, pauses between them included — the session ends on the user's tap, not on silence.
 
 ### M6 — Distribution & easy install (week 13)
 Release automation: tag → CI builds, signs, notarizes, staples, and publishes the universal DMG to **GitHub Releases** with SHA-256 checksums; auto-update via electron-updater with beta→stable channels (opt-in, off by default for corporate installs); **Homebrew cask** (`brew install --cask murmur`); a one-page **download site** (GitHub Pages) with an OS-detecting download button, checksums, and the IT one-pager (network/telemetry statement) linked; SBOM, user docs, license audit of bundled components, v1.0 tag.
