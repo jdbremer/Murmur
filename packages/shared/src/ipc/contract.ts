@@ -181,12 +181,18 @@ export const invokeContract = {
   /**
    * Put text on the system clipboard.
    *
-   * Through main rather than `navigator.clipboard`, which cannot work here:
-   * the Hub is loaded with `loadFile`, and a `file://` origin is not a secure
-   * context, so the async Clipboard API is unavailable in exactly the packaged
-   * builds users run. The permission handler in security.ts refuses the
-   * matching `clipboard-sanitized-write` request too. Electron's own clipboard
-   * has neither constraint.
+   * Through main rather than `navigator.clipboard`, which is present and
+   * callable in the renderer but always fails: `security.ts` refuses every
+   * permission that is not audio media, and that includes Chromium's
+   * `clipboard-sanitized-write`. The DOM call rejects with "Write permission
+   * denied".
+   *
+   * Worth being precise about, because the obvious guess is wrong: `file://`
+   * *is* a secure context in Electron (`window.isSecureContext === true` in
+   * all three renderers), so the async Clipboard API is not the problem — the
+   * deny-by-default permission policy is, and that policy is deliberate.
+   * Going through main keeps it that way: one audited channel that writes the
+   * clipboard, rather than a blanket permission granted to page script.
    */
   'app.copyText': { request: z.object({ text: z.string() }), response: z.void() },
 

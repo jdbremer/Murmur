@@ -110,7 +110,8 @@ export function HomeSection(): React.JSX.Element {
 
   const copy = async (record: DictationRecord): Promise<void> => {
     // Through main, not `navigator.clipboard` — see the `app.copyText`
-    // contract. The DOM API silently did nothing in packaged builds.
+    // contract. The DOM API is present here but its permission is refused, so
+    // it rejected on every packaged build.
     try {
       await window.murmur.app.copyText({ text: record.polishedText ?? record.rawText })
       setCopiedId(record.id)
