@@ -178,6 +178,17 @@ export const invokeContract = {
   'app.devMode': { request: z.void(), response: z.boolean() },
   'app.quit': { request: z.void(), response: z.void() },
   'app.openHub': { request: z.void(), response: z.void() },
+  /**
+   * Put text on the system clipboard.
+   *
+   * Through main rather than `navigator.clipboard`, which cannot work here:
+   * the Hub is loaded with `loadFile`, and a `file://` origin is not a secure
+   * context, so the async Clipboard API is unavailable in exactly the packaged
+   * builds users run. The permission handler in security.ts refuses the
+   * matching `clipboard-sanitized-write` request too. Electron's own clipboard
+   * has neither constraint.
+   */
+  'app.copyText': { request: z.object({ text: z.string() }), response: z.void() },
 
   // --- settings ----------------------------------------------------------
   'settings.get': { request: z.void(), response: SettingsSchema },

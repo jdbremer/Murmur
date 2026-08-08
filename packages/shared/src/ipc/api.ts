@@ -41,6 +41,8 @@ export interface MurmurApi {
     devMode(): Promise<Res<'app.devMode'>>
     quit(): Promise<void>
     openHub(): Promise<void>
+    /** Copy text to the system clipboard (see the contract for why not the DOM API). */
+    copyText(payload: Req<'app.copyText'>): Promise<void>
   }
 
   readonly settings: {

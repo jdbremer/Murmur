@@ -109,9 +109,18 @@ export function HomeSection(): React.JSX.Element {
   }
 
   const copy = async (record: DictationRecord): Promise<void> => {
-    await navigator.clipboard.writeText(record.polishedText ?? record.rawText)
-    setCopiedId(record.id)
-    setTimeout(() => setCopiedId(null), 1_200)
+    // Through main, not `navigator.clipboard` — see the `app.copyText`
+    // contract. The DOM API silently did nothing in packaged builds.
+    try {
+      await window.murmur.app.copyText({ text: record.polishedText ?? record.rawText })
+      setCopiedId(record.id)
+      setTimeout(() => setCopiedId(null), 1_200)
+    } catch (cause) {
+      // A copy that fails must say so. This one failed silently for every
+      // packaged user, because the caller discarded the rejected promise and
+      // the button only ever said "Copied" on the success path.
+      setError(cause instanceof Error ? cause.message : String(cause))
+    }
   }
 
   return (

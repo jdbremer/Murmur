@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync } from 'node:fs'
 
-import { app, dialog, shell } from 'electron'
+import { app, clipboard, dialog, shell } from 'electron'
 
 import type { MainIpc } from '@murmur/shared'
 
@@ -136,6 +136,9 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   })
   ipc.handle('app.openHub', () => {
     windows.showHub()
+  })
+  ipc.handle('app.copyText', ({ text }) => {
+    clipboard.writeText(text)
   })
 
   // Download progress arrives continuously; pushing it beats having the Hub

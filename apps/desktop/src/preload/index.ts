@@ -31,6 +31,7 @@ const api: MurmurApi = {
     devMode: () => ipc.invoke('app.devMode'),
     quit: () => ipc.invoke('app.quit'),
     openHub: () => ipc.invoke('app.openHub'),
+    copyText: (payload) => ipc.invoke('app.copyText', payload),
   },
 
   settings: {
