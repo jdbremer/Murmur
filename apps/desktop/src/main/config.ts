@@ -25,8 +25,26 @@ export const AUDIO = {
   maxUtteranceMs: 5 * 60_000,
   /** Rolling pre-buffer kept while the mic is warm so first syllables survive. */
   preRollMs: 300,
-  /** Mic stream stays open this long after the last utterance (PLAN §5). */
-  warmIdleMs: 5 * 60_000,
+  /**
+   * Mic stream stays open this long after the last utterance (PLAN §5).
+   *
+   * A minute, not the five it was. macOS lights its orange microphone
+   * indicator for as long as *any* stream is open, so this value is also how
+   * long Murmur tells the user it is listening after they have stopped — and
+   * five minutes of that, for a tool used in short bursts, reads as a bug even
+   * though the audio never leaves a 300 ms ring buffer.
+   *
+   * The window buys a warm device on the next press. Measured on this machine,
+   * cold `getUserMedia` costs ~170 ms to open plus ~19 ms to the first non-zero
+   * sample — ~210 ms worst case, most of which is hidden by the gap between
+   * pressing a key and starting to speak. That is a small enough price to pay
+   * once a minute, and {@link AUDIO.preRollMs} covers what remains.
+   *
+   * Not shorter, because the measurement is of a built-in mic: a Bluetooth
+   * headset has to switch profile and can take an order of magnitude longer,
+   * and back-to-back dictation is the common case a warm stream exists for.
+   */
+  warmIdleMs: 60_000,
   /** Hands-free auto-finalise after this much trailing silence (PLAN §5). */
   handsFreeSilenceMs: 800,
   /** How often the Bar's waveform is fed, in milliseconds. */
