@@ -30,13 +30,19 @@ body {
   background-color: transparent;
 }
 
-.bar-pill {
+.bar-pill,
+.nub-orb,
+.nub-tray {
   pointer-events: auto;
 }
 
 /* Nothing in the Bar is selectable or draggable — it is chrome, not content. */
 .bar-pill,
-.bar-pill * {
+.bar-pill *,
+.nub-orb,
+.nub-orb *,
+.nub-tray,
+.nub-tray * {
   user-select: none;
   -webkit-user-drag: none;
 }
@@ -68,6 +74,106 @@ body {
   to {
     opacity: 0;
     transform: translateY(10px) scale(0.92);
+  }
+}
+
+/*
+ * The corner orb's entrance and exit.
+ *
+ * It scales out of the screen corner itself rather than rising off the bottom
+ * edge, which is the whole illusion: something round is behind the panel, and
+ * dictation pushes it a little further into view. `transform-origin` is the
+ * corner it is pinned to, so the growth has no sideways travel at all.
+ */
+.nub-anchor {
+  animation: nub-emerge 280ms cubic-bezier(0.34, 1.4, 0.6, 1) both;
+}
+
+.nub-stage[data-corner='bottomLeft'] .nub-anchor {
+  transform-origin: 0% 100%;
+}
+
+.nub-stage[data-corner='bottomRight'] .nub-anchor {
+  transform-origin: 100% 100%;
+}
+
+.nub-stage[data-leaving='true'] .nub-anchor {
+  animation: nub-retreat 170ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+.nub-stage[data-leaving='true'] {
+  pointer-events: none;
+}
+
+@keyframes nub-emerge {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+}
+
+@keyframes nub-retreat {
+  to {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+}
+
+/*
+ * The start / stop flourish (settings: `barFlourish`).
+ *
+ * One ring, two directions. Starting, it blooms outward past the shape and
+ * fades — the visual equivalent of the start chime, and the only confirmation
+ * available to someone who is looking at the app they are dictating into rather
+ * than at the pill. Stopping, it falls inward and lands on the shape, which
+ * reads as the utterance being gathered up rather than dropped.
+ *
+ * The element is remounted for each ring (React keys it), because restarting a
+ * CSS animation is otherwise a matter of forcing a reflow at exactly the right
+ * moment.
+ */
+.bar-flourish,
+.nub-flourish {
+  animation: flourish-bloom 620ms cubic-bezier(0.16, 0.9, 0.3, 1) both;
+}
+
+.bar-flourish[data-kind='stop'],
+.nub-flourish[data-kind='stop'] {
+  animation: flourish-collapse 460ms cubic-bezier(0.32, 0, 0.2, 1) both;
+}
+
+/*
+ * The opacity is held up through the middle rather than fading linearly. The
+ * growth is deliberately front-loaded — that is what makes it read as a push
+ * rather than a swell — but pairing an eased scale with an eased fade spent
+ * most of the ring's life at an opacity too low to see, so the two curves are
+ * separated here.
+ */
+@keyframes flourish-bloom {
+  from {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  55% {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.85);
+  }
+}
+
+@keyframes flourish-collapse {
+  from {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+  45% {
+    opacity: 0.6;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.94);
   }
 }
 
@@ -125,6 +231,8 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .bar-stage,
   .bar-stage[data-leaving='true'],
+  .nub-anchor,
+  .nub-stage[data-leaving='true'] .nub-anchor,
   .bar-controls,
   .bar-menu {
     animation-name: bar-fade;
@@ -132,12 +240,21 @@ body {
     animation-timing-function: linear;
   }
 
-  .bar-stage[data-leaving='true'] {
+  .bar-stage[data-leaving='true'],
+  .nub-stage[data-leaving='true'] .nub-anchor {
     animation-direction: reverse;
   }
 
   .bar-dot-pulse {
     animation: none;
+  }
+
+  /* Belt and braces: Bar.tsx never mounts a ring under Reduce Motion, so this
+     only matters if that ever regresses. A ring that scales 85% outward is the
+     single most motion-y thing on screen. */
+  .bar-flourish,
+  .nub-flourish {
+    display: none;
   }
 }
 

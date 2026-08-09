@@ -384,6 +384,15 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
         synthetic: true,
       })
     })
+    ipc.handle('debug.barWindow', () => {
+      const window = windows.bar()
+      return {
+        visible: window.isVisible(),
+        bounds: window.getBounds(),
+        alwaysOnTop: window.isAlwaysOnTop(),
+        visibleOnAllWorkspaces: window.isVisibleOnAllWorkspaces(),
+      }
+    })
     ipc.handle('debug.warmMic', () => {
       context.audio.warm(settings.get().micDeviceId)
     })

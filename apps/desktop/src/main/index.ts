@@ -208,7 +208,13 @@ async function bootstrap(): Promise<void> {
   })
 
   // -- windows + IPC -------------------------------------------------------
-  windows.start()
+  // The layout is read as a function, not a value: the Bar window is placed
+  // again on every show and on every display change, and by then the user may
+  // have moved it from the bottom-centre pill to a corner orb.
+  windows.start(() => ({
+    style: settings.get().barStyle,
+    corner: settings.get().barCorner,
+  }))
   const injector = new TextInjector({ native })
 
   // The typed IPC surface is created here rather than inside
@@ -618,6 +624,11 @@ async function bootstrap(): Promise<void> {
     if (previous.micDeviceId !== next.micDeviceId) audio.setDevice(next.micDeviceId)
     if (previous.launchAtLogin !== next.launchAtLogin) applyLaunchAtLogin(next)
     if (previous.appearance !== next.appearance) applyAppearance(next)
+    // Style and corner move the *window*, not just what is drawn in it, so the
+    // renderer changing shape is only half the switch.
+    if (previous.barStyle !== next.barStyle || previous.barCorner !== next.barCorner) {
+      windows.refreshBarBounds()
+    }
     if (
       previous.sttModelId !== next.sttModelId ||
       previous.polishModelId !== next.polishModelId ||

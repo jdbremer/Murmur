@@ -8,9 +8,12 @@ import {
   BAR_ERROR_BACKGROUND,
   BarPresenter,
   describeBar,
+  describeNub,
   errorWidth,
+  flourishFor,
   holdMsFor,
   isBarVisible,
+  NUB,
 } from '../src/renderer/bar/visual'
 
 /**
@@ -132,6 +135,89 @@ describe('describeBar', () => {
     for (const event of [listening, processing, inserted, failed]) {
       expect(describeBar(event).announce).toBe(true)
     }
+  })
+})
+
+describe('describeNub', () => {
+  it('is the pill in polar coordinates — same shapes, same colours, same words', () => {
+    for (const event of [{ state: 'idle' } as const, listening, processing, inserted, failed]) {
+      const pill = describeBar(event)
+      const orb = describeNub(event)
+      expect(orb.shape).toBe(pill.shape)
+      expect(orb.background).toBe(pill.background)
+      expect(orb.border).toBe(pill.border)
+      expect(orb.glow).toBe(pill.glow)
+      expect(orb.label).toBe(pill.label)
+      expect(orb.ariaLabel).toBe(pill.ariaLabel)
+      expect(orb.announce).toBe(pill.announce)
+    }
+  })
+
+  it('shows a sliver when idle and most of itself while listening', () => {
+    expect(describeNub({ state: 'idle' }).radius).toBe(NUB.idleRadius)
+    expect(describeNub(listening).radius).toBe(NUB.listeningRadius)
+    expect(describeNub(listening).radius).toBeGreaterThan(describeNub({ state: 'idle' }).radius * 2)
+  })
+
+  it('never grows past the window it is drawn in', () => {
+    // The window is 320 × 300 (main/windows/bar-layout.ts) and the orb grows
+    // out of a corner of it, so a radius near either dimension would clip.
+    for (const event of [{ state: 'idle' } as const, listening, processing, inserted, failed]) {
+      for (const hovered of [false, true]) {
+        expect(describeNub(event, hovered).radius).toBeLessThanOrEqual(NUB.maxRadius)
+      }
+    }
+    expect(NUB.maxRadius).toBeLessThan(300)
+  })
+
+  it('grows on hover, like the pill widens', () => {
+    expect(describeNub(listening, true).radius).toBe(NUB.listeningRadius + NUB.hoverGrowth)
+    expect(describeNub(listening, true).shape).toBe(describeNub(listening).shape)
+  })
+
+  it('keeps the fan hidden until the orb is big enough to reveal it', () => {
+    // The canvas is fixed-size and clipped by the disc, so the idle orb must be
+    // smaller than the fan's inner radius or the rays peek out while nothing is
+    // happening — and larger than the idle dots, or there is nothing to see.
+    expect(NUB.idleRadius).toBeLessThan(NUB.fanRadius)
+    expect(NUB.idleRadius).toBeGreaterThan(NUB.idleDotRadius + 2)
+    // …and the listening orb must clear the longest ray, or the fan is cropped.
+    expect(NUB.listeningRadius).toBeGreaterThan(NUB.fanRadius + NUB.rayMaxLength)
+    // The canvas has to cover the largest disc it is ever clipped by.
+    expect(NUB.canvas).toBeGreaterThanOrEqual(NUB.listeningRadius + NUB.hoverGrowth)
+  })
+
+  it('keeps the corner state lights inside the smallest disc they can appear on', () => {
+    // The dots sit 6 px and 17 px from the corner (Nub.tsx) and are 5 px across.
+    // An idle orb is the smallest they ever have to fit inside.
+    const furthest = Math.hypot(17 + 5, 6 + 5)
+    expect(furthest).toBeLessThan(NUB.idleRadius)
+  })
+
+  it('carries the meeting-recording light, exactly as the pill does', () => {
+    expect(describeNub(listening, false, true).recording).toBe(true)
+    expect(describeNub(listening).recording).toBe(false)
+  })
+})
+
+describe('flourishFor', () => {
+  it('rings once on the way into listening and once on the way out', () => {
+    expect(flourishFor('idle', 'listening')).toBe('start')
+    expect(flourishFor('listening', 'processing')).toBe('stop')
+    expect(flourishFor('listening', 'idle')).toBe('stop')
+  })
+
+  it('stays silent for every transition the user already has a signal for', () => {
+    expect(flourishFor('processing', 'inserting')).toBeNull()
+    expect(flourishFor('inserting', 'inserted')).toBeNull()
+    expect(flourishFor('inserted', 'idle')).toBeNull()
+    expect(flourishFor('processing', 'error')).toBeNull()
+  })
+
+  it('does not re-ring while listening carries on', () => {
+    // `listening` re-fires with every level update; a ring per frame would be
+    // a strobe rather than a flourish.
+    expect(flourishFor('listening', 'listening')).toBeNull()
   })
 })
 

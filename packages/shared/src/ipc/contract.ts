@@ -380,6 +380,30 @@ export const invokeContract = {
     }),
   },
   /**
+   * Agent / Dev: what the window server actually did with the Bar's window.
+   *
+   * The renderer can report that its own frame did not move and that it is
+   * still painting; it cannot see whether the window is still on every Space,
+   * still above everything, or still on screen at all. Those answers live in
+   * main, and a window that has quietly stopped following the user between
+   * Spaces looks identical from the inside — which is exactly how long it took
+   * to find that it had.
+   */
+  'debug.barWindow': {
+    request: z.void(),
+    response: z.object({
+      visible: z.boolean(),
+      bounds: z.object({
+        x: z.number(),
+        y: z.number(),
+        width: z.number(),
+        height: z.number(),
+      }),
+      alwaysOnTop: z.boolean(),
+      visibleOnAllWorkspaces: z.boolean(),
+    }),
+  },
+  /**
    * Agent / Dev: run the real TextInjector path with a fixed phrase (G5 paste
    * proof). Focus the target app first; does not run STT.
    */

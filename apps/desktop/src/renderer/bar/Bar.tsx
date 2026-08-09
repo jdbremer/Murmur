@@ -1,26 +1,54 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AudioDevice, BarVisibility, DictationEvent } from '@murmur/shared'
+import type {
+  AudioDevice,
+  BarCorner,
+  BarStyle,
+  BarVisibility,
+  DictationEvent,
+} from '@murmur/shared'
 
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { BarCanvas, CheckPulse } from './BarCanvas'
 import { barHeights } from './level'
-import { BAR, BAR_SHADOW, BarPresenter, describeBar, isBarVisible, type BarVisual } from './visual'
+import { Nub } from './Nub'
+import { Controls, MicMenu, StatusDot } from './parts'
+import {
+  BAR,
+  BAR_FLOURISH_BORDER,
+  BAR_FLOURISH_GLOW,
+  BAR_SHADOW,
+  BarPresenter,
+  describeBar,
+  describeNub,
+  flourishFor,
+  isBarVisible,
+  NUB,
+  type BarVisual,
+  type Flourish,
+} from './visual'
 
 /**
- * How long the exit animation gets before the pill unmounts. Must stay inside
- * the ~250 ms grace main leaves between a momentary hold expiring and the
- * window being hidden (see applyBarVisibility in main/index.ts).
+ * How long the exit animation gets before the indicator unmounts. Must stay
+ * inside the ~250 ms grace main leaves between a momentary hold expiring and
+ * the window being hidden (see applyBarVisibility in main/index.ts).
  */
 const EXIT_MS = 170
 
+/** How long a start / stop ring lives before it is taken out of the DOM. */
+const FLOURISH_MS = 620
+
 /**
- * The floating dictation pill (PLAN §2.1).
+ * The floating dictation indicator (PLAN §2.1).
  *
  * A faithful recreation of the reference product's bar, built from our own code
  * and artwork: a near-black capsule that morphs — never jumps — between five
  * states, with a canvas waveform fed by the microphone at 30 Hz and
- * interpolated to 60.
+ * interpolated to 60. Since the corner style landed there are two drawings of
+ * that one machine — the bottom-centre pill and a quarter-disc orb peeking out
+ * of a bottom corner — and everything above the drawing is shared: this
+ * component owns the state, the settings, the hover hit-testing and the
+ * flourish, and hands the result to whichever shape the user chose.
  *
  * Three properties of this window shape the code more than anything else:
  *
@@ -31,7 +59,7 @@ const EXIT_MS = 170
  *  2. **It is click-through.** Main sets `setIgnoreMouseEvents(true, forward)`,
  *     mouse *moves* still arrive, and this component hit-tests them against the
  *     capsule to decide when the window should accept clicks. Get that wrong
- *     and a 360 px strip of the user's screen stops working.
+ *     and a strip of the user's screen stops working.
  *  3. **Momentary states are held here.** Main emits `inserted` and `error` and
  *     immediately settles to `idle`; {@link BarPresenter} keeps them on screen
  *     for the durations PLAN §2.1 gives them.
@@ -43,6 +71,9 @@ export function Bar(): React.JSX.Element | null {
   const [deadline, setDeadline] = useState<number | null>(null)
   const [visibility, setVisibility] = useState<BarVisibility>('showWhileDictating')
   const visibilityRef = useRef<BarVisibility>('showWhileDictating')
+  const [style, setStyle] = useState<BarStyle>('pill')
+  const [corner, setCorner] = useState<BarCorner>('bottomLeft')
+  const [flourishEnabled, setFlourishEnabled] = useState(true)
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [devices, setDevices] = useState<AudioDevice[]>([])
@@ -59,7 +90,7 @@ export function Bar(): React.JSX.Element | null {
     const next = presenter.current.present(now)
     setEvent(next)
     setDeadline(presenter.current.expiresAt())
-    // A pill that is about to disappear must not take an open menu with it.
+    // An indicator that is about to disappear must not take an open menu with it.
     if (!isBarVisible(visibilityRef.current, next)) setMenuOpen(false)
   }, [])
 
@@ -105,10 +136,16 @@ export function Bar(): React.JSX.Element | null {
   useEffect(() => {
     const apply = (settings: {
       barVisibility: BarVisibility
+      barStyle: BarStyle
+      barCorner: BarCorner
+      barFlourish: boolean
       micDeviceId: string | null
     }): void => {
       visibilityRef.current = settings.barVisibility
       setVisibility(settings.barVisibility)
+      setStyle(settings.barStyle)
+      setCorner(settings.barCorner)
+      setFlourishEnabled(settings.barFlourish)
       setMicDeviceId(settings.micDeviceId)
     }
     void window.murmur.settings.get().then(apply).catch(noop)
@@ -142,14 +179,29 @@ export function Bar(): React.JSX.Element | null {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [menuOpen])
 
-  const visual = useMemo(
-    () => describeBar(event, hovered || menuOpen, recording),
-    [event, hovered, menuOpen, recording],
-  )
   const visible = isBarVisible(visibility, event, recording)
 
+  // -- the start / stop flourish --------------------------------------------
+  // Keyed rather than toggled: two utterances in quick succession must each get
+  // their own ring, and only remounting the element restarts a CSS animation.
+  const previousState = useRef<DictationEvent['state']>('idle')
+  const [flourish, setFlourish] = useState<{ kind: Flourish; key: number } | null>(null)
+  useEffect(() => {
+    const kind = flourishFor(previousState.current, event.state)
+    previousState.current = event.state
+    // Reduce Motion suppresses it outright: a ring that travels and scales is
+    // precisely what that preference is asking not to see (PLAN §15.5).
+    if (!kind || !flourishEnabled || reducedMotion) return
+    setFlourish((current) => ({ kind, key: (current?.key ?? 0) + 1 }))
+  }, [event.state, flourishEnabled, reducedMotion])
+  useEffect(() => {
+    if (!flourish) return
+    const timer = setTimeout(() => setFlourish(null), FLOURISH_MS)
+    return () => clearTimeout(timer)
+  }, [flourish])
+
   // -- entrance / exit -------------------------------------------------------
-  // `visible` flips instantly; `present` lingers for EXIT_MS so the capsule can
+  // `visible` flips instantly; `present` lingers for EXIT_MS so the shape can
   // sink away instead of vanishing. Main keeps the window up long enough.
   const [present, setPresent] = useState(visible)
   // Becoming visible again is adopted during render, not in an effect, so a new
@@ -174,14 +226,16 @@ export function Bar(): React.JSX.Element | null {
 
   useEffect(() => {
     const onMove = (moveEvent: MouseEvent): void => {
-      const inside =
-        visible &&
-        (hits(pillRef.current, moveEvent.clientX, moveEvent.clientY) ||
-          hits(panelRef.current, moveEvent.clientX, moveEvent.clientY))
+      const { clientX, clientY } = moveEvent
+      const onShape =
+        style === 'corner'
+          ? hitsOrb(pillRef.current, corner, clientX, clientY)
+          : hits(pillRef.current, clientX, clientY)
+      const inside = visible && (onShape || hits(panelRef.current, clientX, clientY))
       setHovered(inside)
-      // Moving off the pill+menu closes the menu — there is no other way out:
-      // this window is focusable:false, so it never gets a blur or an outside
-      // click, and holding the whole 360×200 window interactive while a menu
+      // Moving off the indicator+menu closes the menu — there is no other way
+      // out: this window is focusable:false, so it never gets a blur or an
+      // outside click, and holding the whole window interactive while a menu
       // sits open would swallow clicks meant for the app underneath.
       if (menuOpen && !inside) setMenuOpen(false)
       setInteractive(inside)
@@ -199,16 +253,73 @@ export function Bar(): React.JSX.Element | null {
       window.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseleave', onLeave)
     }
-  }, [menuOpen, setInteractive, visible])
+  }, [corner, menuOpen, setInteractive, style, visible])
 
-  // A pill that goes away must not leave the window swallowing clicks.
+  // An indicator that goes away must not leave the window swallowing clicks.
   useEffect(() => {
     if (!visible) setInteractive(false)
   }, [setInteractive, visible])
 
+  const showControls = hovered || menuOpen
+  const pillVisual = useMemo(
+    () => describeBar(event, showControls, recording),
+    [event, showControls, recording],
+  )
+  const nubVisual = useMemo(
+    () => describeNub(event, showControls, recording),
+    [event, showControls, recording],
+  )
+
   if (!visible && !present) return null
 
-  const showControls = hovered || menuOpen
+  const onCancel = (): void => {
+    setMenuOpen(false)
+    void window.murmur.dictation.cancel().catch(noop)
+  }
+  const onHub = (): void => {
+    setMenuOpen(false)
+    void window.murmur.app.openHub().catch(noop)
+  }
+  const onSelectDevice = (deviceId: string | null): void => {
+    setMenuOpen(false)
+    void window.murmur.settings.set({ micDeviceId: deviceId }).catch(noop)
+  }
+
+  if (style === 'corner') {
+    return (
+      <div
+        className="nub-stage relative h-full w-full"
+        data-corner={corner}
+        data-leaving={visible ? undefined : 'true'}
+      >
+        {/* The page is taller than the screen: the window deliberately hangs
+            below it so macOS's window-corner rounding falls off the panel (see
+            NUB.overhang). This box trims that overhang away, so everything
+            inside can be positioned against the *screen's* bottom edge —
+            including the entrance animation, which has to grow out of the
+            screen's corner and not out of a point below it. */}
+        <div className="nub-anchor absolute inset-x-0 top-0" style={{ bottom: NUB.overhang }}>
+          <Nub
+            visual={nubVisual}
+            corner={corner}
+            levelRef={levelRef}
+            reducedMotion={reducedMotion}
+            showControls={showControls}
+            menuOpen={menuOpen}
+            devices={devices}
+            micDeviceId={micDeviceId}
+            orbRef={pillRef}
+            panelRef={panelRef}
+            flourish={flourish}
+            onCancel={onCancel}
+            onMic={() => setMenuOpen((open) => !open)}
+            onHub={onHub}
+            onSelectDevice={onSelectDevice}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -217,87 +328,104 @@ export function Bar(): React.JSX.Element | null {
     >
       {menuOpen ? (
         <MicMenu
+          className="mb-2"
           panelRef={panelRef}
           devices={devices}
           selected={micDeviceId}
-          onSelect={(deviceId) => {
-            setMenuOpen(false)
-            void window.murmur.settings.set({ micDeviceId: deviceId }).catch(noop)
-          }}
+          onSelect={onSelectDevice}
         />
       ) : null}
 
-      <div
-        ref={pillRef}
-        data-testid="bar-pill"
-        data-state={event.state}
-        data-shape={visual.shape}
-        role="status"
-        aria-live={visual.announce ? 'polite' : 'off'}
-        aria-label={visual.ariaLabel}
-        className="bar-pill relative flex items-center justify-center overflow-hidden rounded-full"
-        style={{
-          width: visual.width,
-          height: visual.height,
-          background: visual.background,
-          border: `1px solid ${visual.border}`,
-          boxShadow: visual.glow ? `${BAR_SHADOW}, ${visual.glow}` : BAR_SHADOW,
-          backdropFilter: 'blur(14px)',
-          color: 'rgba(255,255,255,0.94)',
-          transition: reducedMotion
-            ? 'opacity 120ms linear, background-color 120ms linear'
-            : [
-                `width ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
-                `height ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
-                `background-color ${BAR.morphMs}ms ease-out`,
-                `border-color ${BAR.morphMs}ms ease-out`,
-                // The glow blooms and fades slower than the morph, so a state
-                // change reads as a wash of colour rather than a switch.
-                `box-shadow ${BAR.morphMs * 2}ms ease-out`,
-                `opacity ${BAR.morphMs}ms ease-out`,
-              ].join(', '),
-        }}
-      >
-        {/* Glass: a top-lit sheen over the capsule, under everything else. */}
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-full"
-          style={{
-            background:
-              'linear-gradient(to bottom, rgba(255,255,255,0.085), rgba(255,255,255,0.015) 55%, rgba(0,0,0,0.06))',
-          }}
-        />
-        {/* The interior slides left to make room for the hover controls rather
-            than being overlapped by them. min-w-0 keeps a long error message
-            truncating inside the capsule instead of overflowing it.
-            Half the controls' footprint is exactly the shift that re-centres
-            the interior in what is left of the capsule. */}
-        <div
-          className="relative flex min-w-0 max-w-full items-center justify-center"
-          style={{
-            transform: showControls ? `translateX(-${BAR.controlsWidth / 2}px)` : 'none',
-            transition: reducedMotion ? 'none' : `transform ${BAR.morphMs}ms ease-out`,
-          }}
-        >
-          <BarInterior visual={visual} levelRef={levelRef} reducedMotion={reducedMotion} />
-        </div>
-        {visual.recording ? <RecordingDot /> : null}
-        {visual.handsFree ? <HandsFreeDot /> : null}
-        {visual.command ? <CommandDot /> : null}
-        {showControls ? (
-          <Controls
-            menuOpen={menuOpen}
-            onCancel={() => {
-              setMenuOpen(false)
-              void window.murmur.dictation.cancel().catch(noop)
-            }}
-            onMic={() => setMenuOpen((open) => !open)}
-            onHub={() => {
-              setMenuOpen(false)
-              void window.murmur.app.openHub().catch(noop)
+      <div className="relative">
+        {/* The start / stop ring. A sibling of the capsule rather than a child:
+            the capsule clips its own overflow, and the whole point of the ring
+            is that it leaves. */}
+        {flourish ? (
+          <span
+            key={flourish.key}
+            aria-hidden="true"
+            className="bar-flourish pointer-events-none absolute inset-0 rounded-full"
+            data-kind={flourish.kind}
+            style={{
+              border: `1.5px solid ${BAR_FLOURISH_BORDER}`,
+              boxShadow: BAR_FLOURISH_GLOW,
             }}
           />
         ) : null}
+
+        <div
+          ref={pillRef}
+          data-testid="bar-pill"
+          data-state={event.state}
+          data-shape={pillVisual.shape}
+          role="status"
+          aria-live={pillVisual.announce ? 'polite' : 'off'}
+          aria-label={pillVisual.ariaLabel}
+          className="bar-pill relative flex items-center justify-center overflow-hidden rounded-full"
+          style={{
+            width: pillVisual.width,
+            height: pillVisual.height,
+            background: pillVisual.background,
+            border: `1px solid ${pillVisual.border}`,
+            boxShadow: pillVisual.glow ? `${BAR_SHADOW}, ${pillVisual.glow}` : BAR_SHADOW,
+            backdropFilter: 'blur(14px)',
+            color: 'rgba(255,255,255,0.94)',
+            transition: reducedMotion
+              ? 'opacity 120ms linear, background-color 120ms linear'
+              : [
+                  `width ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
+                  `height ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
+                  `background-color ${BAR.morphMs}ms ease-out`,
+                  `border-color ${BAR.morphMs}ms ease-out`,
+                  // The glow blooms and fades slower than the morph, so a state
+                  // change reads as a wash of colour rather than a switch.
+                  `box-shadow ${BAR.morphMs * 2}ms ease-out`,
+                  `opacity ${BAR.morphMs}ms ease-out`,
+                ].join(', '),
+          }}
+        >
+          {/* Glass: a top-lit sheen over the capsule, under everything else. */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              background:
+                'linear-gradient(to bottom, rgba(255,255,255,0.085), rgba(255,255,255,0.015) 55%, rgba(0,0,0,0.06))',
+            }}
+          />
+          {/* The interior slides left to make room for the hover controls rather
+              than being overlapped by them. min-w-0 keeps a long error message
+              truncating inside the capsule instead of overflowing it.
+              Half the controls' footprint is exactly the shift that re-centres
+              the interior in what is left of the capsule. */}
+          <div
+            className="relative flex min-w-0 max-w-full items-center justify-center"
+            style={{
+              transform: showControls ? `translateX(-${BAR.controlsWidth / 2}px)` : 'none',
+              transition: reducedMotion ? 'none' : `transform ${BAR.morphMs}ms ease-out`,
+            }}
+          >
+            <BarInterior visual={pillVisual} levelRef={levelRef} reducedMotion={reducedMotion} />
+          </div>
+          {pillVisual.recording ? (
+            <StatusDot kind="recording" className="right-[7px] top-1/2 -translate-y-1/2" />
+          ) : null}
+          {pillVisual.handsFree ? (
+            <StatusDot kind="handsFree" className="left-[7px] top-1/2 -translate-y-1/2" />
+          ) : null}
+          {pillVisual.command ? (
+            <StatusDot kind="command" className="left-[7px] top-1/2 -translate-y-1/2" />
+          ) : null}
+          {showControls ? (
+            <Controls
+              className="absolute right-[6px] top-1/2 -translate-y-1/2"
+              menuOpen={menuOpen}
+              onCancel={onCancel}
+              onMic={() => setMenuOpen((open) => !open)}
+              onHub={onHub}
+            />
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -391,219 +519,11 @@ function StaticLevel({
   )
 }
 
-/** Command mode: this utterance edits the selection, not types over it. */
-function CommandDot(): React.JSX.Element {
-  return (
-    <span
-      title="Editing your selection — speak the instruction"
-      className="bar-dot-pulse absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
-      style={{ background: '#7aa2ff', boxShadow: '0 0 6px rgba(122,162,255,0.85)' }}
-    />
-  )
-}
-
-/** The latched hands-free indicator (PLAN §2.1). */
-/**
- * The meeting-recording indicator.
- *
- * On the right, opposite the hands-free dot, so both can show at once — you
- * can dictate hands-free in the middle of a call. Red and steady rather than
- * pulsing: this is the universal "recording" signal, and a blinking light is
- * easier to mistake for an animation than for a state.
- *
- * It is the only always-visible sign that other people are being recorded, so
- * `isBarVisible` forces the pill on screen whenever it is lit — including when
- * the user has set the Bar to Hidden.
- */
-function RecordingDot(): React.JSX.Element {
-  return (
-    <span
-      title="Recording this meeting"
-      className="absolute right-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
-      style={{ background: '#f87171', boxShadow: '0 0 6px rgba(248,113,113,0.85)' }}
-    />
-  )
-}
-
-function HandsFreeDot(): React.JSX.Element {
-  return (
-    <span
-      title="Hands-free — tap your key again or press Esc to stop"
-      className="bar-dot-pulse absolute left-[7px] top-1/2 size-[5px] -translate-y-1/2 rounded-full"
-      style={{ background: '#6ee7a8', boxShadow: '0 0 6px rgba(110,231,168,0.8)' }}
-    />
-  )
-}
-
-/** Hover controls: cancel · mic picker · open Hub (PLAN §2.1). */
-function Controls({
-  onCancel,
-  onMic,
-  onHub,
-  menuOpen,
-}: {
-  onCancel: () => void
-  onMic: () => void
-  onHub: () => void
-  menuOpen: boolean
-}): React.JSX.Element {
-  return (
-    <div className="bar-controls absolute right-[6px] top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
-      <ControlButton label="Cancel dictation" onClick={onCancel} destructive>
-        <path d="M6 6l12 12M18 6L6 18" />
-      </ControlButton>
-      <ControlButton label="Choose microphone" onClick={onMic} pressed={menuOpen}>
-        <path d="M12 4a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0v-5A2.5 2.5 0 0 1 12 4zM6 11a6 6 0 0 0 12 0M12 17v3" />
-      </ControlButton>
-      <ControlButton label="Open the Murmur hub" onClick={onHub}>
-        <path d="M5 5h6M5 5v6M5 5l7 7M19 19h-6M19 19v-6M19 19l-7-7" />
-      </ControlButton>
-    </div>
-  )
-}
-
-function ControlButton({
-  label,
-  onClick,
-  pressed,
-  destructive = false,
-  children,
-}: {
-  label: string
-  onClick: () => void
-  pressed?: boolean
-  /**
-   * Throws the current utterance away. Warm on hover rather than always red:
-   * three identical grey glyphs give the eye no way to tell the one that
-   * discards your dictation from the two that do not — and it is the leftmost,
-   * where the pointer arrives first.
-   */
-  destructive?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={[
-        'grid size-[18px] cursor-pointer place-items-center rounded-full transition-all duration-150',
-        'active:scale-90',
-        destructive
-          ? 'hover:bg-red-500/25 hover:text-red-200 active:bg-red-500/35'
-          : 'hover:bg-white/15 hover:text-white active:bg-white/20',
-        pressed ? 'bg-white/15 text-white' : 'text-white/70',
-      ].join(' ')}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        className="size-[11px]"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {children}
-      </svg>
-    </button>
-  )
-}
-
-/**
- * The mic picker, opening upward into the transparent space above the pill —
- * which is why the Bar window is taller than the capsule (see windows/bar.ts).
- */
-function MicMenu({
-  panelRef,
-  devices,
-  selected,
-  onSelect,
-}: {
-  panelRef: React.RefObject<HTMLDivElement | null>
-  devices: AudioDevice[]
-  selected: string | null
-  onSelect: (deviceId: string | null) => void
-}): React.JSX.Element {
-  return (
-    <div
-      ref={panelRef}
-      role="menu"
-      aria-label="Microphone"
-      className="bar-pill bar-menu mb-2 max-h-[150px] w-[240px] overflow-y-auto rounded-xl p-1 text-[11px] text-white/90"
-      style={{
-        background: 'rgba(19,19,24,0.96)',
-        border: '1px solid rgba(255,255,255,0.10)',
-        boxShadow: BAR_SHADOW,
-        backdropFilter: 'blur(14px)',
-      }}
-    >
-      <p className="px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">
-        Microphone
-      </p>
-      <MicOption label="System default" active={selected === null} onClick={() => onSelect(null)} />
-      {devices.map((device, index) => (
-        <MicOption
-          key={device.deviceId}
-          label={device.label || `Microphone ${index + 1}`}
-          active={selected === device.deviceId}
-          onClick={() => onSelect(device.deviceId)}
-        />
-      ))}
-      {devices.length === 0 ? (
-        <p className="px-2 py-1.5 text-white/50">
-          No microphones listed yet — grant access and they appear here.
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function MicOption({
-  label,
-  active,
-  onClick,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      role="menuitemradio"
-      aria-checked={active}
-      onClick={onClick}
-      className={[
-        'flex w-full cursor-pointer items-center gap-1.5 truncate rounded-lg px-2 py-1.5 text-left transition-colors duration-100',
-        active ? 'bg-white/15 text-white' : 'text-white/80 hover:bg-white/10 active:bg-white/15',
-      ].join(' ')}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        className={`size-[10px] shrink-0 ${active ? 'opacity-100' : 'opacity-0'}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="m5 12.5 4.5 4.5L19 7" />
-      </svg>
-      <span className="truncate">{label}</span>
-    </button>
-  )
-}
-
 function hits(element: HTMLElement | null, x: number, y: number): boolean {
   if (!element) return false
   const rect = element.getBoundingClientRect()
   // A few pixels of slack so the pointer cannot fall through the seam between
-  // the pill and the menu sitting above it.
+  // the indicator and the menu sitting above it.
   const slack = 4
   return (
     x >= rect.left - slack &&
@@ -611,6 +531,19 @@ function hits(element: HTMLElement | null, x: number, y: number): boolean {
     y >= rect.top - slack &&
     y <= rect.bottom + slack
   )
+}
+
+/**
+ * The corner orb is a quarter-disc, so its bounding box over-claims by a fifth
+ * — and every pixel over-claimed is a pixel of the user's screen that stops
+ * accepting clicks while the orb is out. Measure the radius instead.
+ */
+function hitsOrb(element: HTMLElement | null, corner: BarCorner, x: number, y: number): boolean {
+  if (!element) return false
+  const rect = element.getBoundingClientRect()
+  const originX = corner === 'bottomLeft' ? rect.left : rect.right
+  const slack = 4
+  return Math.hypot(x - originX, y - rect.bottom) <= Math.max(rect.width, rect.height) + slack
 }
 
 function noop(): void {

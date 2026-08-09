@@ -68,6 +68,79 @@ export const BAR = {
   shimmerPeriodMs: 1100,
 } as const
 
+/**
+ * The corner orb — the alternative to the pill (settings: `barStyle: 'corner'`).
+ *
+ * A quarter-disc pinned into a bottom corner of the screen, as if a small round
+ * object were sitting behind the panel with only its edge showing. It runs the
+ * same five states as the pill and shares its colours; only the geometry
+ * differs, so everything below is radii rather than widths.
+ *
+ * The one number that is not free: the containing window is 320 × 300 (see
+ * `main/windows/bar-layout.ts`), and the orb grows from the corner, so no
+ * radius may approach either of those.
+ */
+export const NUB = {
+  /** The sliver that shows when nothing is happening. */
+  idleRadius: 26,
+  /** Listening is the state the shape exists to make obvious. */
+  listeningRadius: 70,
+  processingRadius: 58,
+  insertingRadius: 54,
+  insertedRadius: 54,
+  errorRadius: 54,
+  /** Hovering grows it, the way hovering widens the pill. */
+  hoverGrowth: 12,
+  /** Nothing may reach the window edge (320 × 300). */
+  maxRadius: 120,
+  /**
+   * How far the window hangs *below* the screen, so macOS's window-corner
+   * rounding is off-panel and cannot clip the orb's point. The screen's bottom
+   * edge is therefore this far up from the bottom of the page, and everything
+   * the corner style draws is positioned against that line rather than against
+   * the page.
+   *
+   * Must equal `NUB_OVERHANG` in `main/windows/bar-layout.ts` — the two are a
+   * pair, and `bar-layout.test.ts` asserts they have not drifted.
+   */
+  overhang: 24,
+  /**
+   * The canvas is fixed at this size and clipped by the disc, exactly as the
+   * pill's is — that is what makes the fan look like it *emerges* from behind
+   * the corner as the orb grows, rather than being redrawn at a new scale 60
+   * times a second during a 170 ms morph.
+   */
+  canvas: 92,
+  /** Slightly slower than the pill's: a bigger travel needs a longer beat. */
+  morphMs: 170,
+  /** The listening fan: rays radiating from the corner. */
+  rays: 18,
+  rayWidth: 2,
+  /**
+   * Where the rays start, and how far they reach at full volume.
+   *
+   * Deliberately close to the rim — about two thirds out. Sitting the fan
+   * halfway made the orb read as a small dial inside a large empty disc; out
+   * here it reads as the edge of the thing responding, which is what a
+   * waveform hugging the end of a capsule does.
+   */
+  fanRadius: 44,
+  rayMinLength: 2,
+  rayMaxLength: 20,
+  /**
+   * The fan's angular span in degrees, measured from the screen edge the orb
+   * sits against. Held off 0 and 90 so the outermost rays are not lying flat
+   * along the bezel, which reads as a rendering fault rather than as a taper.
+   */
+  spanStartDegrees: 9,
+  spanEndDegrees: 81,
+  /** Where the processing arc sweeps, and the idle dots sit — each about two
+   * thirds of the way out of its own state's disc, like the fan. */
+  arcRadius: 40,
+  idleDotRadius: 17,
+  idleDots: 3,
+} as const
+
 /** Near-black, per PLAN §2.1. */
 export const BAR_BACKGROUND = 'rgba(17,17,22,0.92)'
 /** Warm red for the error state. */
@@ -83,6 +156,17 @@ export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.32)'
  */
 export const BAR_SHADOW =
   '0 2px 6px rgba(0,0,0,0.30), 0 12px 32px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.07)'
+
+/**
+ * The start / stop ring's edge, and the bloom it carries.
+ *
+ * The listening indigo rather than plain white: a white hairline expanding over
+ * a white document is invisible at exactly the moment the ring exists to be
+ * seen, and the ring is announcing the state whose glow this already is. The
+ * bloom is what keeps it legible over dark windows too.
+ */
+export const BAR_FLOURISH_BORDER = 'rgba(129,140,248,0.7)'
+export const BAR_FLOURISH_GLOW = '0 0 14px rgba(129,140,248,0.32)'
 
 /**
  * A soft state-coloured halo layered onto {@link BAR_SHADOW}: cool while
@@ -262,6 +346,72 @@ function describeBase(event: DictationEvent): BarVisual {
         recording: false,
       }
   }
+}
+
+// ---------------------------------------------------------------------------
+// The corner orb
+// ---------------------------------------------------------------------------
+
+/**
+ * The orb's appearance for one dictation event.
+ *
+ * Everything but the geometry is the pill's — same shapes, same colours, same
+ * aria labels — because they are two drawings of one state machine, and a user
+ * who switches styles should not have to relearn what green means.
+ */
+export interface NubVisual extends Omit<BarVisual, 'width' | 'height'> {
+  /** Radius of the quarter-disc, in CSS px, measured from the screen corner. */
+  radius: number
+}
+
+export function describeNub(event: DictationEvent, hovered = false, recording = false): NubVisual {
+  const base = describeBase(event)
+  const radius = Math.min(NUB.maxRadius, nubRadius(event) + (hovered ? NUB.hoverGrowth : 0))
+  const { width: _width, height: _height, ...rest } = base
+  return { ...rest, radius, recording }
+}
+
+function nubRadius(event: DictationEvent): number {
+  switch (event.state) {
+    case 'idle':
+      return NUB.idleRadius
+    case 'listening':
+      return NUB.listeningRadius
+    case 'processing':
+      return NUB.processingRadius
+    case 'inserting':
+      return NUB.insertingRadius
+    case 'inserted':
+      return NUB.insertedRadius
+    case 'error':
+      return NUB.errorRadius
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The start / stop flourish
+// ---------------------------------------------------------------------------
+
+/** A ring blooming outward as dictation starts, or collapsing as it stops. */
+export type Flourish = 'start' | 'stop'
+
+/**
+ * Which flourish — if any — a state transition earns.
+ *
+ * Only the edges of `listening` count. Not `processing`, not `inserted`: those
+ * already have their own signals (the shimmer, the ✓), and a ring on every
+ * transition would turn a punctuation mark into wallpaper. This is the moment
+ * the user's key press either took or did not, which is the one thing they
+ * cannot otherwise confirm without looking away from what they are typing into.
+ */
+export function flourishFor(
+  previous: DictationEvent['state'],
+  next: DictationEvent['state'],
+): Flourish | null {
+  if (previous === next) return null
+  if (next === 'listening') return 'start'
+  if (previous === 'listening') return 'stop'
+  return null
 }
 
 /** ~6.2 px per character at 11 px type, plus padding and the warning glyph. */
