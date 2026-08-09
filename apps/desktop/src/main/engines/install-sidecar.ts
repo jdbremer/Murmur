@@ -21,7 +21,7 @@ import { Readable } from 'node:stream'
 import { type ReadableStream as WebReadableStream } from 'node:stream/web'
 
 import { createLogger } from '../logging'
-import { sidecarReleaseFetch } from '../net/fetch'
+import { type AllowlistedFetchOptions, sidecarReleaseFetch } from '../net/fetch'
 import { resolveSidecarBinary } from './sidecar'
 
 const execFileAsync = promisify(execFile)
@@ -169,6 +169,11 @@ export interface InstallSidecarResult {
  */
 const inFlight = new Map<SidecarKind, Promise<InstallSidecarResult>>()
 
+export interface InstallSidecarOptions {
+  /** Overrides `globalThis.fetch`; tests pass a fake. */
+  fetchImpl?: AllowlistedFetchOptions['fetchImpl']
+}
+
 /**
  * Download an official Windows prebuild and unpack into the install dir.
  * Only runs on win32; other platforms return a clear error (use build-*.sh).
@@ -177,13 +182,16 @@ export function installSidecarBinary(
   which: SidecarKind,
   appPath: string,
   userDataPath?: string,
+  options: InstallSidecarOptions = {},
 ): Promise<InstallSidecarResult> {
   const existing = inFlight.get(which)
   if (existing) return existing
 
-  const run = installSidecarBinaryUncoordinated(which, appPath, userDataPath).finally(() => {
-    inFlight.delete(which)
-  })
+  const run = installSidecarBinaryUncoordinated(which, appPath, userDataPath, options).finally(
+    () => {
+      inFlight.delete(which)
+    },
+  )
   inFlight.set(which, run)
   return run
 }
@@ -191,7 +199,8 @@ export function installSidecarBinary(
 async function installSidecarBinaryUncoordinated(
   which: SidecarKind,
   appPath: string,
-  userDataPath?: string,
+  userDataPath: string | undefined,
+  options: InstallSidecarOptions,
 ): Promise<InstallSidecarResult> {
   if (process.platform !== 'win32') {
     return {
@@ -219,7 +228,7 @@ async function installSidecarBinaryUncoordinated(
   try {
     if (!existsSync(zipPath) || statSync(zipPath).size < 1000) {
       log.info(`downloading ${url}`)
-      await downloadFile(url, zipPath)
+      await downloadFile(url, zipPath, options.fetchImpl)
     } else {
       log.info(`using cached ${zipPath}`)
     }
@@ -345,9 +354,13 @@ async function installSidecarBinaryUncoordinated(
  * broken archive forever, and the only cure would be finding the cache dir by
  * hand.
  */
-async function downloadFile(url: string, dest: string): Promise<void> {
+async function downloadFile(
+  url: string,
+  dest: string,
+  fetchImpl?: AllowlistedFetchOptions['fetchImpl'],
+): Promise<void> {
   const partial = `${dest}.part`
-  const response = await sidecarReleaseFetch(url)
+  const response = await sidecarReleaseFetch(url, { ...(fetchImpl ? { fetchImpl } : {}) })
   if (!response.ok || !response.body) {
     throw new Error(`Download failed (${response.status}) for ${url}`)
   }
