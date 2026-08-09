@@ -35,8 +35,12 @@ import {
  */
 const EXIT_MS = 170
 
-/** How long a start / stop ring lives before it is taken out of the DOM. */
-const FLOURISH_MS = 620
+/**
+ * How long a start / stop ring lives before it is taken out of the DOM. Must
+ * outlast the longest flourish animation in bar.css (the 420 ms bloom), or the
+ * ring is unmounted mid-flight.
+ */
+const FLOURISH_MS = 460
 
 /**
  * The floating dictation indicator (PLAN §2.1).

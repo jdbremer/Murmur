@@ -181,19 +181,19 @@ export function Nub({
         {visual.handsFree ? (
           <StatusDot
             kind="handsFree"
-            style={{ bottom: 6, ...(left ? { left: 17 } : { right: 17 }) }}
+            style={{ bottom: 4, ...(left ? { left: 11 } : { right: 11 }) }}
           />
         ) : null}
         {visual.command ? (
           <StatusDot
             kind="command"
-            style={{ bottom: 6, ...(left ? { left: 17 } : { right: 17 }) }}
+            style={{ bottom: 4, ...(left ? { left: 11 } : { right: 11 }) }}
           />
         ) : null}
         {visual.recording ? (
           <StatusDot
             kind="recording"
-            style={{ bottom: 17, ...(left ? { left: 6 } : { right: 6 }) }}
+            style={{ bottom: 11, ...(left ? { left: 4 } : { right: 4 }) }}
           />
         ) : null}
       </div>
@@ -220,7 +220,9 @@ function NubInterior({
   reducedMotion: boolean
   left: boolean
 }): React.JSX.Element {
-  const diagonal = { bottom: 19, ...(left ? { left: 19 } : { right: 19 }) }
+  // Far enough from the corner to sit in the body of the disc, close enough
+  // that a 14 px glyph still clears the arc at `activeRadius`.
+  const diagonal = { bottom: 8, ...(left ? { left: 8 } : { right: 8 }) }
 
   if (visual.shape === 'check') {
     return (

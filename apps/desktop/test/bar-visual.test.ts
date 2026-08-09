@@ -153,10 +153,29 @@ describe('describeNub', () => {
     }
   })
 
-  it('shows a sliver when idle and most of itself while listening', () => {
+  it('grows enough to read as listening, and not enough to be an event', () => {
+    const idle = describeNub({ state: 'idle' }).radius
+    const heard = describeNub(listening).radius
+    expect(idle).toBe(NUB.idleRadius)
+    expect(heard).toBe(NUB.activeRadius)
+    // Both bounds are the design, and the upper one is the harder-won half:
+    // earlier versions nearly tripled, and the growth itself became the event
+    // — something lunged out of the corner on every key press. Big enough to
+    // be unmistakable at a glance, small enough to stay furniture.
+    expect(heard).toBeGreaterThan(idle * 1.5)
+    expect(heard).toBeLessThan(idle * 2.1)
+  })
+
+  it('holds one size for every state but idle', () => {
+    // The disc is entered once and left once. Sizing each state separately —
+    // as the pill does, because it has a width to spend — made the corner of
+    // the screen breathe in and out four times per utterance.
+    const active = [listening, processing, { state: 'inserting' } as const, inserted, failed]
+    for (const event of active) {
+      expect(describeNub(event).radius).toBe(NUB.activeRadius)
+      expect(describeNub(event, true).radius).toBe(NUB.activeRadius + NUB.hoverGrowth)
+    }
     expect(describeNub({ state: 'idle' }).radius).toBe(NUB.idleRadius)
-    expect(describeNub(listening).radius).toBe(NUB.listeningRadius)
-    expect(describeNub(listening).radius).toBeGreaterThan(describeNub({ state: 'idle' }).radius * 2)
   })
 
   it('never grows past the window it is drawn in', () => {
@@ -171,7 +190,7 @@ describe('describeNub', () => {
   })
 
   it('grows on hover, like the pill widens', () => {
-    expect(describeNub(listening, true).radius).toBe(NUB.listeningRadius + NUB.hoverGrowth)
+    expect(describeNub(listening, true).radius).toBe(NUB.activeRadius + NUB.hoverGrowth)
     expect(describeNub(listening, true).shape).toBe(describeNub(listening).shape)
   })
 
@@ -181,16 +200,16 @@ describe('describeNub', () => {
     // happening — and larger than the idle dots, or there is nothing to see.
     expect(NUB.idleRadius).toBeLessThan(NUB.fanRadius)
     expect(NUB.idleRadius).toBeGreaterThan(NUB.idleDotRadius + 2)
-    // …and the listening orb must clear the longest ray, or the fan is cropped.
-    expect(NUB.listeningRadius).toBeGreaterThan(NUB.fanRadius + NUB.rayMaxLength)
+    // …and the active orb must clear the longest ray, or the fan is cropped.
+    expect(NUB.activeRadius).toBeGreaterThan(NUB.fanRadius + NUB.rayMaxLength)
     // The canvas has to cover the largest disc it is ever clipped by.
-    expect(NUB.canvas).toBeGreaterThanOrEqual(NUB.listeningRadius + NUB.hoverGrowth)
+    expect(NUB.canvas).toBeGreaterThanOrEqual(NUB.activeRadius + NUB.hoverGrowth)
   })
 
   it('keeps the corner state lights inside the smallest disc they can appear on', () => {
-    // The dots sit 6 px and 17 px from the corner (Nub.tsx) and are 5 px across.
+    // The dots sit 4 px and 11 px from the corner (Nub.tsx) and are 5 px across.
     // An idle orb is the smallest they ever have to fit inside.
-    const furthest = Math.hypot(17 + 5, 6 + 5)
+    const furthest = Math.hypot(11 + 5, 4 + 5)
     expect(furthest).toBeLessThan(NUB.idleRadius)
   })
 

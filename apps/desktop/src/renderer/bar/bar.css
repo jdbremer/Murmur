@@ -134,20 +134,26 @@ body {
  */
 .bar-flourish,
 .nub-flourish {
-  animation: flourish-bloom 620ms cubic-bezier(0.16, 0.9, 0.3, 1) both;
+  animation: flourish-bloom 420ms cubic-bezier(0.16, 0.9, 0.3, 1) both;
 }
 
 .bar-flourish[data-kind='stop'],
 .nub-flourish[data-kind='stop'] {
-  animation: flourish-collapse 460ms cubic-bezier(0.32, 0, 0.2, 1) both;
+  animation: flourish-collapse 340ms cubic-bezier(0.32, 0, 0.2, 1) both;
 }
 
 /*
+ * Deliberately tight. Two earlier versions threw the ring out to 1.85× and
+ * then 1.32×, and both read as a shockwave rather than a punctuation mark —
+ * they pulled the eye away from the app being dictated into, which is the one
+ * thing this must not do. A hair over the shape's own size is enough: what
+ * registers in peripheral vision is that something moved at the edge, not how
+ * far it went.
+ *
  * The opacity is held up through the middle rather than fading linearly. The
- * growth is deliberately front-loaded — that is what makes it read as a push
- * rather than a swell — but pairing an eased scale with an eased fade spent
- * most of the ring's life at an opacity too low to see, so the two curves are
- * separated here.
+ * growth is front-loaded — that is what makes it read as a push rather than a
+ * swell — but pairing an eased scale with an eased fade spent most of the
+ * ring's life at an opacity too low to see, so the two curves are separated.
  */
 @keyframes flourish-bloom {
   from {
@@ -159,21 +165,21 @@ body {
   }
   to {
     opacity: 0;
-    transform: scale(1.85);
+    transform: scale(1.14);
   }
 }
 
 @keyframes flourish-collapse {
   from {
     opacity: 0;
-    transform: scale(1.6);
+    transform: scale(1.16);
   }
   45% {
     opacity: 0.6;
   }
   to {
     opacity: 0;
-    transform: scale(0.94);
+    transform: scale(0.985);
   }
 }
 

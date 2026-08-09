@@ -82,15 +82,27 @@ export const BAR = {
  */
 export const NUB = {
   /** The sliver that shows when nothing is happening. */
-  idleRadius: 26,
-  /** Listening is the state the shape exists to make obvious. */
-  listeningRadius: 70,
-  processingRadius: 58,
-  insertingRadius: 54,
-  insertedRadius: 54,
-  errorRadius: 54,
+  idleRadius: 22,
+  /**
+   * Every state that is not idle, at one size.
+   *
+   * The pill sizes each state separately — it has a width to spend, and a
+   * short "Inserting" deserves less of it than a live waveform. The orb has no
+   * such argument to make: the states differ in what is *drawn* inside it, and
+   * resizing the disc between them meant the corner of the screen breathed in
+   * and out four times per utterance. One size, entered once and left once, so
+   * the only motion during a dictation is the fan responding to your voice.
+   *
+   * Small on purpose, too. Earlier versions went to 70 and then 46, and both
+   * made the growth itself the event — something lunged out of the corner on
+   * every key press. Under twice the idle sliver is enough to read as *on* at
+   * a glance while staying furniture rather than a performance; the fan,
+   * `arcRadius` and `idleDotRadius` are all sized as fractions of these two
+   * radii, so moving either means moving those with it.
+   */
+  activeRadius: 42,
   /** Hovering grows it, the way hovering widens the pill. */
-  hoverGrowth: 12,
+  hoverGrowth: 6,
   /** Nothing may reach the window edge (320 × 300). */
   maxRadius: 120,
   /**
@@ -110,11 +122,17 @@ export const NUB = {
    * the corner as the orb grows, rather than being redrawn at a new scale 60
    * times a second during a 170 ms morph.
    */
-  canvas: 92,
+  canvas: 56,
   /** Slightly slower than the pill's: a bigger travel needs a longer beat. */
   morphMs: 170,
   /** The listening fan: rays radiating from the corner. */
-  rays: 18,
+  /**
+   * Ray count follows the fan's radius: the rays are spread over a fixed 72°,
+   * so their spacing is `fanRadius × span / (rays − 1)`. Eighteen of them at
+   * this radius would sit ~2 px apart — solid, not a fan — so the count came
+   * down with the geometry to keep the ~3 px gap the pill's waveform has.
+   */
+  rays: 11,
   rayWidth: 2,
   /**
    * Where the rays start, and how far they reach at full volume.
@@ -124,9 +142,9 @@ export const NUB = {
    * here it reads as the edge of the thing responding, which is what a
    * waveform hugging the end of a capsule does.
    */
-  fanRadius: 44,
+  fanRadius: 27,
   rayMinLength: 2,
-  rayMaxLength: 20,
+  rayMaxLength: 12,
   /**
    * The fan's angular span in degrees, measured from the screen edge the orb
    * sits against. Held off 0 and 90 so the outermost rays are not lying flat
@@ -136,8 +154,8 @@ export const NUB = {
   spanEndDegrees: 81,
   /** Where the processing arc sweeps, and the idle dots sit — each about two
    * thirds of the way out of its own state's disc, like the fan. */
-  arcRadius: 40,
-  idleDotRadius: 17,
+  arcRadius: 26,
+  idleDotRadius: 13,
   idleDots: 3,
 } as const
 
@@ -371,21 +389,9 @@ export function describeNub(event: DictationEvent, hovered = false, recording = 
   return { ...rest, radius, recording }
 }
 
+/** Out, or in. The orb has exactly two sizes — see {@link NUB.activeRadius}. */
 function nubRadius(event: DictationEvent): number {
-  switch (event.state) {
-    case 'idle':
-      return NUB.idleRadius
-    case 'listening':
-      return NUB.listeningRadius
-    case 'processing':
-      return NUB.processingRadius
-    case 'inserting':
-      return NUB.insertingRadius
-    case 'inserted':
-      return NUB.insertedRadius
-    case 'error':
-      return NUB.errorRadius
-  }
+  return event.state === 'idle' ? NUB.idleRadius : NUB.activeRadius
 }
 
 // ---------------------------------------------------------------------------
