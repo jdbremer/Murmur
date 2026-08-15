@@ -190,6 +190,25 @@ export type PolishingLevel = z.infer<typeof PolishingLevelSchema>
 export const BarVisibilitySchema = z.enum(['showWhileDictating', 'always', 'hidden'])
 export type BarVisibility = z.infer<typeof BarVisibilitySchema>
 
+/**
+ * Which shape the dictation indicator takes.
+ *
+ * `pill` is the bottom-centre capsule of PLAN §2.1. `corner` is the same state
+ * machine drawn as a small orb that peeks out from behind a bottom corner of
+ * the screen — far less of the screen covered, at the cost of the error text
+ * having nowhere to sit until you look at it.
+ *
+ * One enum rather than a boolean because a third shape is plausible (a
+ * menu-bar-adjacent drop, a top-centre notch) and a `barIsCorner` flag would
+ * have to be migrated the day one arrives.
+ */
+export const BarStyleSchema = z.enum(['pill', 'corner'])
+export type BarStyle = z.infer<typeof BarStyleSchema>
+
+/** Which corner the `corner` style peeks out of. Ignored by the pill. */
+export const BarCornerSchema = z.enum(['bottomLeft', 'bottomRight'])
+export type BarCorner = z.infer<typeof BarCornerSchema>
+
 export const AppearanceSchema = z.enum(['system', 'light', 'dark'])
 export type Appearance = z.infer<typeof AppearanceSchema>
 
@@ -295,6 +314,17 @@ const settingsFields = {
   historyRetention: RetentionPolicySchema,
   launchAtLogin: z.boolean(),
   barVisibility: BarVisibilitySchema,
+  barStyle: BarStyleSchema,
+  barCorner: BarCornerSchema,
+  /**
+   * The flourish that marks the two moments the user cannot see for
+   * themselves: a ring blooming outward when dictation starts and collapsing
+   * inward when it stops.
+   *
+   * On by default, and suppressed entirely under Reduce Motion — it is pure
+   * travel-and-scale, which is exactly what that preference is about.
+   */
+  barFlourish: z.boolean(),
   /** Catalog id of the active STT model; `null` until onboarding picks one. */
   sttModelId: z.string().min(1).nullable(),
   /** Catalog id of the active polish model; `null` when polishing is off. */
@@ -350,6 +380,9 @@ export const SettingsSchema = z.object({
   })),
   launchAtLogin: settingsFields.launchAtLogin.default(false),
   barVisibility: settingsFields.barVisibility.default('showWhileDictating'),
+  barStyle: settingsFields.barStyle.default('pill'),
+  barCorner: settingsFields.barCorner.default('bottomLeft'),
+  barFlourish: settingsFields.barFlourish.default(true),
   sttModelId: settingsFields.sttModelId.default(null),
   polishModelId: settingsFields.polishModelId.default(null),
   externalEndpoint: settingsFields.externalEndpoint.default(null),

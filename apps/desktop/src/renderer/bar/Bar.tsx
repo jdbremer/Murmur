@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AudioDevice, BarVisibility, DictationEvent, HotkeyKey } from '@murmur/shared'
+import type {
+  AudioDevice,
+  BarCorner,
+  BarStyle,
+  BarVisibility,
+  DictationEvent,
+  HotkeyKey,
+} from '@murmur/shared'
 
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { BarCanvas, CheckPulse } from './BarCanvas'
 import { barHeights } from './level'
+import { Nub } from './Nub'
 import {
   BAR,
+  BAR_FLOURISH_BORDER,
+  BAR_FLOURISH_GLOW,
   BAR_HALO,
   BAR_IDLE_BACKGROUND,
   BAR_IDLE_BORDER,
@@ -15,12 +25,16 @@ import {
   CLUSTER,
   describeBar,
   describeCluster,
+  describeNub,
+  flourishFor,
   HOVER_ZONE,
   isBarVisible,
+  NUB,
   type BarVisual,
   type ClusterAction,
   type ClusterButton,
   type ClusterSpec,
+  type Flourish,
 } from './visual'
 
 /**
@@ -29,6 +43,13 @@ import {
  * window being hidden (see applyBarVisibility in main/index.ts).
  */
 const EXIT_MS = 170
+
+/**
+ * How long a start / stop ring lives before it is taken out of the DOM. Must
+ * outlast the longest flourish animation in bar.css (the 420 ms bloom), or the
+ * ring is unmounted mid-flight.
+ */
+const FLOURISH_MS = 460
 
 /**
  * The floating dictation pill (PLAN §2.1).
@@ -65,6 +86,13 @@ export function Bar(): React.JSX.Element | null {
   const [deadline, setDeadline] = useState<number | null>(null)
   const [visibility, setVisibility] = useState<BarVisibility>('showWhileDictating')
   const visibilityRef = useRef<BarVisibility>('showWhileDictating')
+  const [style, setStyle] = useState<BarStyle>('pill')
+  const [corner, setCorner] = useState<BarCorner>('bottomLeft')
+  /** The start / stop ring (settings: barFlourish), keyed so it can replay. */
+  const [flourish, setFlourish] = useState<{ kind: Flourish; key: number } | null>(null)
+  const flourishEnabledRef = useRef(true)
+  const flourishKey = useRef(0)
+  const previousState = useRef<DictationEvent['state']>('idle')
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [devices, setDevices] = useState<AudioDevice[]>([])
@@ -102,6 +130,14 @@ export function Bar(): React.JSX.Element | null {
       presenter.current.receive(next, Date.now())
       if (next.state === 'listening') levelRef.current = next.level
       if (next.state === 'idle') levelRef.current = 0
+      // The ring marks the edges of `listening` — from the *machine's* events,
+      // not the presenter's held view, so it fires the moment the key lands.
+      const kind = flourishFor(previousState.current, next.state)
+      previousState.current = next.state
+      if (kind && flourishEnabledRef.current) {
+        flourishKey.current += 1
+        setFlourish({ kind, key: flourishKey.current })
+      }
       settle(Date.now())
     }
 
@@ -117,6 +153,13 @@ export function Bar(): React.JSX.Element | null {
     }
   }, [settle])
 
+  // The ring removes itself once its animation has finished.
+  useEffect(() => {
+    if (flourish === null) return
+    const timer = setTimeout(() => setFlourish(null), FLOURISH_MS)
+    return () => clearTimeout(timer)
+  }, [flourish])
+
   // The held ✓ / error visual expiring is the one state change that no event
   // drives, so it gets a timer of its own.
   useEffect(() => {
@@ -129,11 +172,17 @@ export function Bar(): React.JSX.Element | null {
   useEffect(() => {
     const apply = (settings: {
       barVisibility: BarVisibility
+      barStyle: BarStyle
+      barCorner: BarCorner
+      barFlourish: boolean
       micDeviceId: string | null
       hotkey: { key: HotkeyKey }
     }): void => {
       visibilityRef.current = settings.barVisibility
       setVisibility(settings.barVisibility)
+      setStyle(settings.barStyle)
+      setCorner(settings.barCorner)
+      flourishEnabledRef.current = settings.barFlourish
       setMicDeviceId(settings.micDeviceId)
       setHotkeyKey(settings.hotkey.key)
     }
@@ -170,6 +219,9 @@ export function Bar(): React.JSX.Element | null {
 
   const showCluster = hovered || menuOpen
   const visual = useMemo(() => describeBar(event, recording), [event, recording])
+  // Hover deliberately does not grow the orb: the cluster is the hover
+  // response for both shapes, and two answers to one gesture is one too many.
+  const nubVisual = useMemo(() => describeNub(event, false, recording), [event, recording])
   const cluster = useMemo(() => describeCluster(event), [event])
   const visible = isBarVisible(visibility, event, recording)
   // The states that cast light on the desktop behind the pill. `event` is the
@@ -258,7 +310,9 @@ export function Bar(): React.JSX.Element | null {
       // states would fight each other at ~60 Hz.
       const inside = hoveredRef.current
         ? hits(zoneRef.current, clientX, clientY) || hits(panelRef.current, clientX, clientY)
-        : hits(pillRef.current, clientX, clientY, 8)
+        : style === 'corner'
+          ? hitsOrb(pillRef.current, corner, clientX, clientY)
+          : hits(pillRef.current, clientX, clientY, 8)
 
       if (inside && visible) {
         clearTimer(closeTimer)
@@ -301,7 +355,7 @@ export function Bar(): React.JSX.Element | null {
       clearTimer(openTimer)
       clearTimer(closeTimer)
     }
-  }, [setInteractive, visible])
+  }, [corner, setInteractive, style, visible])
 
   // A pill that goes away must not leave the window swallowing clicks — and
   // must not leave the handler believing the cluster is still up, or a timer
@@ -360,6 +414,81 @@ export function Bar(): React.JSX.Element | null {
         void window.murmur.app.openHub().catch(noop)
         return
     }
+  }
+
+  if (style === 'corner') {
+    const left = corner === 'bottomLeft'
+    return (
+      <div
+        className="nub-stage relative h-full w-full"
+        data-corner={corner}
+        data-leaving={visible ? undefined : 'true'}
+      >
+        {/* The window hangs NUB.overhang below the screen so macOS's own
+            window-corner rounding falls off the panel (see bar-layout.ts).
+            This box trims that overhang away, so everything inside anchors to
+            the real bottom edge of the screen. */}
+        <div className="nub-anchor absolute inset-x-0 top-0" style={{ bottom: NUB.overhang }}>
+          {/* The stay-zone, corner-anchored. Taller than the pill's: the
+              cluster and its tooltip stand on top of the orb's radius. */}
+          <div
+            ref={zoneRef}
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0"
+            style={{
+              width: 300,
+              height: NUB.activeRadius + HOVER_ZONE.height,
+              ...(left ? { left: 0 } : { right: 0 }),
+            }}
+          />
+
+          <Nub
+            visual={nubVisual}
+            corner={corner}
+            levelRef={levelRef}
+            reducedMotion={reducedMotion}
+            orbRef={pillRef}
+            clusterUp={showCluster || clusterPresent}
+            flourish={flourish}
+          />
+
+          {menuOpen ? (
+            <div
+              className={`absolute ${left ? 'left-2.5' : 'right-2.5'}`}
+              style={{
+                bottom: nubVisual.radius + 12 + CLUSTER.chipSize + 8,
+              }}
+            >
+              <MicMenu
+                panelRef={panelRef}
+                devices={devices}
+                selected={micDeviceId}
+                onSelect={(deviceId) => {
+                  setMenuOpen(false)
+                  void window.murmur.settings.set({ micDeviceId: deviceId }).catch(noop)
+                }}
+              />
+            </div>
+          ) : null}
+
+          {clusterPresent ? (
+            <div
+              className={`absolute ${left ? 'left-2.5' : 'right-2.5'}`}
+              style={{ bottom: nubVisual.radius + 12 }}
+            >
+              <Cluster
+                spec={cluster}
+                anchor={left ? 'left' : 'right'}
+                hotkeyHint={HOTKEY_HINT[hotkeyKey] ?? null}
+                menuOpen={menuOpen}
+                leaving={!showCluster}
+                onAction={onClusterAction}
+              />
+            </div>
+          ) : null}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -476,6 +605,28 @@ export function Bar(): React.JSX.Element | null {
           {visual.command ? <CommandDot /> : null}
         </div>
 
+        {/* The start / stop ring, remounted per flourish (the key). An outer
+            span carries the centring translate; the inner one animates scale —
+            composed on one element the keyframes' transform would overwrite
+            the translate and throw the ring half a pill-width sideways. */}
+        {flourish ? (
+          <span
+            key={flourish.key}
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2"
+            style={{ width: visual.width, height: visual.height }}
+          >
+            <span
+              className="bar-flourish block h-full w-full rounded-full"
+              data-kind={flourish.kind}
+              style={{
+                border: `1.5px solid ${BAR_FLOURISH_BORDER}`,
+                boxShadow: BAR_FLOURISH_GLOW,
+              }}
+            />
+          </span>
+        ) : null}
+
         {clusterPresent ? (
           <Cluster
             spec={cluster}
@@ -544,12 +695,19 @@ function Halo({
  */
 function Cluster({
   spec,
+  anchor = 'center',
   hotkeyHint,
   menuOpen,
   leaving,
   onAction,
 }: {
   spec: ClusterSpec
+  /**
+   * Where the row grows out of: the pill's bottom-centre, or the orb's
+   * corner. Sets the morph's transform-origin (bar.css), so the row inflates
+   * out of whichever shape it is standing in for.
+   */
+  anchor?: 'left' | 'center' | 'right'
   /** Short label for the configured hotkey ("fn", "⌘"), or null to omit. */
   hotkeyHint: string | null
   menuOpen: boolean
@@ -577,7 +735,8 @@ function Cluster({
     <div
       data-testid="bar-cluster"
       data-leaving={leaving ? 'true' : undefined}
-      className="bar-cluster absolute bottom-0 flex items-center"
+      data-anchor={anchor === 'center' ? undefined : anchor}
+      className={`bar-cluster flex items-center ${anchor === 'center' ? 'absolute bottom-0' : 'relative'}`}
       style={{ gap: CLUSTER.gap, height: spec.height }}
       onMouseLeave={() => setTip((current) => ({ hover: null, last: current.last }))}
     >
@@ -958,6 +1117,28 @@ function MicOption({
       <span className="truncate">{label}</span>
     </button>
   )
+}
+
+/**
+ * The corner orb is a quarter-disc, so its bounding box over-claims by a fifth
+ * of its area — the empty square outside the arc. Hit-test it as what it is:
+ * within `radius + slack` of the screen corner it is pinned to.
+ */
+function hitsOrb(
+  element: HTMLElement | null,
+  corner: BarCorner,
+  x: number,
+  y: number,
+  slack = 10,
+): boolean {
+  if (!element) return false
+  const rect = element.getBoundingClientRect()
+  const originX = corner === 'bottomLeft' ? rect.left : rect.right
+  const originY = rect.bottom
+  const reach = rect.width + slack
+  const dx = x - originX
+  const dy = y - originY
+  return dx * dx + dy * dy <= reach * reach
 }
 
 function hits(element: HTMLElement | null, x: number, y: number, slack = 4): boolean {

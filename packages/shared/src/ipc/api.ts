@@ -206,6 +206,8 @@ export interface MurmurApi {
     injectSystemPcm(request?: Req<'debug.injectSystemPcm'>): Promise<Res<'debug.injectSystemPcm'>>
     /** Machine-readable status for the agent loop. */
     snapshot(): Promise<Res<'debug.snapshot'>>
+    /** What macOS actually did with the Bar's window (level, Spaces, bounds). */
+    barWindow(): Promise<Res<'debug.barWindow'>>
     /** Paste a fixed phrase via the real injector (Notepad G5). */
     insertText(request?: Req<'debug.insertText'>): Promise<Res<'debug.insertText'>>
   }

@@ -69,6 +69,16 @@ const BAR_VISIBILITY = [
   { value: 'hidden' as const, label: 'Hidden' },
 ]
 
+const BAR_STYLE = [
+  { value: 'pill' as const, label: 'Pill, bottom centre' },
+  { value: 'corner' as const, label: 'Orb, in a corner' },
+]
+
+const BAR_CORNER = [
+  { value: 'bottomLeft' as const, label: 'Bottom left' },
+  { value: 'bottomRight' as const, label: 'Bottom right' },
+]
+
 const APPEARANCE = [
   { value: 'system' as const, label: 'System' },
   { value: 'light' as const, label: 'Light' },
@@ -253,7 +263,7 @@ export function SettingsSection(): React.JSX.Element {
       <Card className="mb-6">
         <Row
           label="Show the bar"
-          hint="The floating pill at the bottom of the screen. Hidden does not disable dictation."
+          hint="The floating indicator. Hidden does not disable dictation."
           htmlFor="settings-bar"
         >
           <Select
@@ -262,6 +272,44 @@ export function SettingsSection(): React.JSX.Element {
             value={settings.barVisibility}
             options={BAR_VISIBILITY}
             onChange={(barVisibility) => void update({ barVisibility })}
+          />
+        </Row>
+        <Row
+          label="Shape"
+          hint="The pill sits at the bottom of the screen. The orb peeks out from behind a corner and covers far less — but an error only shows its label while you hover it."
+          htmlFor="settings-bar-style"
+        >
+          <Select
+            id="settings-bar-style"
+            label="Bar shape"
+            value={settings.barStyle}
+            options={BAR_STYLE}
+            onChange={(barStyle) => void update({ barStyle })}
+          />
+        </Row>
+        {settings.barStyle === 'corner' ? (
+          <Row
+            label="Corner"
+            hint="Pick the side away from your Dock, or the one you look at least."
+            htmlFor="settings-bar-corner"
+          >
+            <Select
+              id="settings-bar-corner"
+              label="Bar corner"
+              value={settings.barCorner}
+              options={BAR_CORNER}
+              onChange={(barCorner) => void update({ barCorner })}
+            />
+          </Row>
+        ) : null}
+        <Row
+          label="Start and stop flourish"
+          hint="A ring blooms outward when dictation starts and settles inward when it stops. Off automatically if you have Reduce Motion on."
+        >
+          <Toggle
+            label="Start and stop flourish"
+            checked={settings.barFlourish}
+            onChange={(barFlourish) => void update({ barFlourish })}
           />
         </Row>
         <Row label="Theme" htmlFor="settings-appearance">

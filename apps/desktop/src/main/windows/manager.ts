@@ -1,7 +1,8 @@
 import { app, type BrowserWindow, screen, type WebContents } from 'electron'
 
 import { createAudioWindow } from './audio'
-import { createBarWindow, repositionBar } from './bar'
+import { anchorBar, createBarWindow, keepBarEverywhere, repositionBar } from './bar'
+import { DEFAULT_BAR_LAYOUT, type BarLayout } from './bar-layout'
 import { createHubWindow } from './hub'
 import { createNotesWindow } from './notes'
 
@@ -16,17 +17,26 @@ export class WindowManager {
   #bar: BrowserWindow | null = null
   #audio: BrowserWindow | null = null
   #notes: BrowserWindow | null = null
+  /**
+   * Where the Bar window belongs, read fresh every time it is placed.
+   *
+   * A function rather than a value because the manager is constructed before
+   * the settings store exists, and because the answer changes underneath it —
+   * the user can switch style or corner at any moment.
+   */
+  #barLayout: () => BarLayout = () => DEFAULT_BAR_LAYOUT
 
   /** Create the always-on windows. Call once, after `app.whenReady()`. */
-  start(): void {
+  start(barLayout?: () => BarLayout): void {
+    if (barLayout) this.#barLayout = barLayout
     this.bar()
     this.audio()
 
-    // Keep the pill anchored when displays change (PLAN §2.1 "follows the
+    // Keep the indicator anchored when displays change (PLAN §2.1 "follows the
     // active display" — Stage 2 extends this to the focused display).
-    screen.on('display-metrics-changed', () => this.#repositionBar())
-    screen.on('display-added', () => this.#repositionBar())
-    screen.on('display-removed', () => this.#repositionBar())
+    screen.on('display-metrics-changed', () => this.refreshBarBounds())
+    screen.on('display-added', () => this.refreshBarBounds())
+    screen.on('display-removed', () => this.refreshBarBounds())
   }
 
   hub(): BrowserWindow {
@@ -37,13 +47,24 @@ export class WindowManager {
       // (⌘Q, Edit shortcuts) and the Dock's own Quit, so even a user whose
       // menu-bar icon is hidden behind the notch can always leave. The Bar
       // stays Dock-less: it is chrome, not a window the user "has open".
-      if (process.platform === 'darwin') void app.dock?.show()
+      if (process.platform === 'darwin') {
+        void app.dock?.show()
+        // Showing the Dock icon transforms the process, and a transform resets
+        // the window levels of everything the process owns. Put the Bar's back.
+        // Safe to re-run: `keepBarEverywhere` no longer transforms anything
+        // itself, so it cannot take the icon away again.
+        if (this.#bar && !this.#bar.isDestroyed()) keepBarEverywhere(this.#bar)
+      }
       this.#hub.on('closed', () => {
         this.#hub = null
-        // Only when nothing else of ours is on screen: the Scratchpad needs the
-        // app menu just as much, and hiding the Dock icon out from under it
-        // takes ⌘W and the Edit shortcuts with it.
-        if (process.platform === 'darwin' && this.#notes === null) app.dock?.hide()
+        if (process.platform === 'darwin') {
+          // Only when nothing else of ours is on screen: the Scratchpad needs
+          // the app menu just as much, and hiding the Dock icon out from under
+          // it takes ⌘W and the Edit shortcuts with it.
+          if (this.#notes === null) app.dock?.hide()
+          // Hiding it transforms the process back, resetting the levels again.
+          if (this.#bar && !this.#bar.isDestroyed()) keepBarEverywhere(this.#bar)
+        }
       })
     }
     return this.#hub
@@ -59,7 +80,7 @@ export class WindowManager {
 
   bar(): BrowserWindow {
     if (!this.#bar || this.#bar.isDestroyed()) {
-      this.#bar = createBarWindow()
+      this.#bar = createBarWindow(this.#barLayout())
       this.#bar.on('closed', () => {
         this.#bar = null
       })
@@ -76,8 +97,13 @@ export class WindowManager {
   showBar(): void {
     const window = this.bar()
     if (!window.isVisible()) {
-      repositionBar(window)
+      const wanted = repositionBar(window, this.#barLayout())
       window.showInactive()
+      // Ordering the window in is what lets macOS constrain it out of the Dock's
+      // strip, so the anchor has to be re-asserted on the far side of the show,
+      // not before it. The same rectangle, deliberately: recomputing would read
+      // the cursor a second time and could answer with a different display.
+      anchorBar(window, wanted)
       // Windows sometimes no-ops showInactive on a never-shown transparent
       // window. Retry on the next tick rather than falling back to
       // show()+blur(): show() activates the pill, and blur() only releases it
@@ -86,7 +112,9 @@ export class WindowManager {
       // corrupts the frontmost-app capture the orchestrator just took.
       if (!window.isVisible() && process.platform === 'win32') {
         setImmediate(() => {
-          if (!window.isDestroyed() && !window.isVisible()) window.showInactive()
+          if (window.isDestroyed() || window.isVisible()) return
+          window.showInactive()
+          anchorBar(window, wanted)
         })
       }
     } else {
@@ -107,11 +135,19 @@ export class WindowManager {
       this.#notes = createNotesWindow()
       // Same Dock reasoning as the Hub: while a real window of ours is open the
       // app needs a Dock icon, and with it the app menu — ⌘W, ⌘Q, and the Edit
-      // shortcuts a text editor is unusable without.
-      if (process.platform === 'darwin') void app.dock?.show()
+      // shortcuts a text editor is unusable without. And the same window-level
+      // caveat: the dock.show() transform resets the Bar's panel levels, so
+      // they are re-asserted on both edges of the Scratchpad's life too.
+      if (process.platform === 'darwin') {
+        void app.dock?.show()
+        if (this.#bar && !this.#bar.isDestroyed()) keepBarEverywhere(this.#bar)
+      }
       this.#notes.on('closed', () => {
         this.#notes = null
-        if (process.platform === 'darwin' && this.#hub === null) app.dock?.hide()
+        if (process.platform === 'darwin') {
+          if (this.#hub === null) app.dock?.hide()
+          if (this.#bar && !this.#bar.isDestroyed()) keepBarEverywhere(this.#bar)
+        }
       })
     }
     return this.#notes
@@ -162,7 +198,17 @@ export class WindowManager {
     this.#notes = null
   }
 
-  #repositionBar(): void {
-    if (this.#bar && !this.#bar.isDestroyed()) repositionBar(this.#bar)
+  /**
+   * Re-anchor the Bar window now.
+   *
+   * Called on display changes and whenever the style or corner setting moves —
+   * the latter is the case that cannot wait for the next `showBar()`, since a
+   * user with the Bar set to Always is watching the thing they just changed.
+   */
+  refreshBarBounds(): void {
+    if (!this.#bar || this.#bar.isDestroyed()) return
+    // Anchored as well as positioned: a visible window is not constrained the
+    // way an appearing one is, but this runs while it may be either.
+    anchorBar(this.#bar, repositionBar(this.#bar, this.#barLayout()))
   }
 }

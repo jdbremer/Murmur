@@ -11,10 +11,13 @@ import {
   CLUSTER,
   describeBar,
   describeCluster,
+  describeNub,
   errorWidth,
+  flourishFor,
   holdMsFor,
   HOVER_ZONE,
   isBarVisible,
+  NUB,
 } from '../src/renderer/bar/visual'
 
 /**
@@ -353,5 +356,107 @@ describe('describeCluster', () => {
         expect(chip.label.length).toBeGreaterThan(0)
       }
     }
+  })
+})
+
+describe('describeNub', () => {
+  it('is the pill in polar coordinates — same shapes, same colours, same words', () => {
+    for (const event of [{ state: 'idle' } as const, listening, processing, inserted, failed]) {
+      const pill = describeBar(event)
+      const orb = describeNub(event)
+      expect(orb.shape).toBe(pill.shape)
+      expect(orb.background).toBe(pill.background)
+      expect(orb.border).toBe(pill.border)
+      expect(orb.glow).toBe(pill.glow)
+      expect(orb.label).toBe(pill.label)
+      expect(orb.ariaLabel).toBe(pill.ariaLabel)
+      expect(orb.announce).toBe(pill.announce)
+    }
+  })
+
+  it('grows enough to read as listening, and not enough to be an event', () => {
+    const idle = describeNub({ state: 'idle' }).radius
+    const heard = describeNub(listening).radius
+    expect(idle).toBe(NUB.idleRadius)
+    expect(heard).toBe(NUB.activeRadius)
+    // Both bounds are the design, and the upper one is the harder-won half:
+    // earlier versions nearly tripled, and the growth itself became the event
+    // — something lunged out of the corner on every key press. Big enough to
+    // be unmistakable at a glance, small enough to stay furniture.
+    expect(heard).toBeGreaterThan(idle * 1.5)
+    expect(heard).toBeLessThan(idle * 2.1)
+  })
+
+  it('holds one size for every state but idle', () => {
+    // The disc is entered once and left once. Sizing each state separately —
+    // as the pill does, because it has a width to spend — made the corner of
+    // the screen breathe in and out four times per utterance.
+    const active = [listening, processing, { state: 'inserting' } as const, inserted, failed]
+    for (const event of active) {
+      expect(describeNub(event).radius).toBe(NUB.activeRadius)
+      expect(describeNub(event, true).radius).toBe(NUB.activeRadius + NUB.hoverGrowth)
+    }
+    expect(describeNub({ state: 'idle' }).radius).toBe(NUB.idleRadius)
+  })
+
+  it('never grows past the window it is drawn in', () => {
+    // The window is 320 × 300 (main/windows/bar-layout.ts) and the orb grows
+    // out of a corner of it, so a radius near either dimension would clip.
+    for (const event of [{ state: 'idle' } as const, listening, processing, inserted, failed]) {
+      for (const hovered of [false, true]) {
+        expect(describeNub(event, hovered).radius).toBeLessThanOrEqual(NUB.maxRadius)
+      }
+    }
+    expect(NUB.maxRadius).toBeLessThan(300)
+  })
+
+  it('grows on hover, like the pill widens', () => {
+    expect(describeNub(listening, true).radius).toBe(NUB.activeRadius + NUB.hoverGrowth)
+    expect(describeNub(listening, true).shape).toBe(describeNub(listening).shape)
+  })
+
+  it('keeps the fan hidden until the orb is big enough to reveal it', () => {
+    // The canvas is fixed-size and clipped by the disc, so the idle orb must be
+    // smaller than the fan's inner radius or the rays peek out while nothing is
+    // happening — and larger than the idle dots, or there is nothing to see.
+    expect(NUB.idleRadius).toBeLessThan(NUB.fanRadius)
+    expect(NUB.idleRadius).toBeGreaterThan(NUB.idleDotRadius + 2)
+    // …and the active orb must clear the longest ray, or the fan is cropped.
+    expect(NUB.activeRadius).toBeGreaterThan(NUB.fanRadius + NUB.rayMaxLength)
+    // The canvas has to cover the largest disc it is ever clipped by.
+    expect(NUB.canvas).toBeGreaterThanOrEqual(NUB.activeRadius + NUB.hoverGrowth)
+  })
+
+  it('keeps the corner state lights inside the smallest disc they can appear on', () => {
+    // The dots sit 4 px and 11 px from the corner (Nub.tsx) and are 5 px across.
+    // An idle orb is the smallest they ever have to fit inside.
+    const furthest = Math.hypot(11 + 5, 4 + 5)
+    expect(furthest).toBeLessThan(NUB.idleRadius)
+  })
+
+  it('carries the meeting-recording light, exactly as the pill does', () => {
+    expect(describeNub(listening, false, true).recording).toBe(true)
+    expect(describeNub(listening).recording).toBe(false)
+  })
+})
+
+describe('flourishFor', () => {
+  it('rings once on the way into listening and once on the way out', () => {
+    expect(flourishFor('idle', 'listening')).toBe('start')
+    expect(flourishFor('listening', 'processing')).toBe('stop')
+    expect(flourishFor('listening', 'idle')).toBe('stop')
+  })
+
+  it('stays silent for every transition the user already has a signal for', () => {
+    expect(flourishFor('processing', 'inserting')).toBeNull()
+    expect(flourishFor('inserting', 'inserted')).toBeNull()
+    expect(flourishFor('inserted', 'idle')).toBeNull()
+    expect(flourishFor('processing', 'error')).toBeNull()
+  })
+
+  it('does not re-ring while listening carries on', () => {
+    // `listening` re-fires with every level update; a ring per frame would be
+    // a strobe rather than a flourish.
+    expect(flourishFor('listening', 'listening')).toBeNull()
   })
 })
