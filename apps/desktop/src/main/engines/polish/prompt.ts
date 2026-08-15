@@ -35,6 +35,17 @@ export interface PromptInputs {
   profile: StyleProfile
   /** Enabled dictionary entries; replacements have already been applied. */
   dictionary: readonly DictionaryEntry[]
+  /**
+   * Extra spellings to preserve, from vibe coding's read of the open editor
+   * (PLAN §18.3). Empty unless the user opted in and an allowlisted IDE is in
+   * front.
+   *
+   * They join the dictionary terms in the same "spell these exactly" line
+   * rather than getting one of their own: to the model they are the same kind
+   * of instruction, and a second list would only compete with the first for the
+   * model's attention and for the prompt budget.
+   */
+  extraSpellings?: readonly string[]
   /** `auto` means "whatever the transcript is in". */
   language: string
 }
@@ -255,7 +266,7 @@ export function buildPolishPrompt(inputs: PromptInputs): BuiltPrompt {
   if (custom) style.push(custom)
   sections.push(style.join('\n'))
 
-  const terms = dictionaryTerms(inputs.dictionary)
+  const terms = dictionaryTerms(inputs.dictionary, 60, inputs.extraSpellings ?? [])
   if (terms.length > 0) {
     sections.push(
       `Spell these exactly as written when they appear: ${terms.join(', ')}.\n` +
@@ -279,8 +290,19 @@ export function languageRule(language: string): string {
   )
 }
 
-/** Enabled terms, deduplicated, longest first so the model sees the specific ones. */
-export function dictionaryTerms(entries: readonly DictionaryEntry[], limit = 60): string[] {
+/**
+ * Enabled terms, deduplicated, longest first so the model sees the specific ones.
+ *
+ * `extra` is appended *after* the dictionary and truncated by the same limit,
+ * which makes the precedence explicit: the user's own dictionary is a standing
+ * instruction, while code context is a guess about the file that happens to be
+ * open. When the budget runs out, the guess is what goes.
+ */
+export function dictionaryTerms(
+  entries: readonly DictionaryEntry[],
+  limit = 60,
+  extra: readonly string[] = [],
+): string[] {
   const seen = new Set<string>()
   const terms: string[] = []
   for (const entry of entries) {
@@ -291,7 +313,16 @@ export function dictionaryTerms(entries: readonly DictionaryEntry[], limit = 60)
     seen.add(term.toLowerCase())
     terms.push(term)
   }
-  return terms.sort((a, b) => b.length - a.length).slice(0, limit)
+  const ranked = terms.sort((a, b) => b.length - a.length)
+
+  for (const candidate of extra) {
+    const term = candidate.trim()
+    if (!term || seen.has(term.toLowerCase())) continue
+    seen.add(term.toLowerCase())
+    ranked.push(term)
+  }
+
+  return ranked.slice(0, limit)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,38 @@
+/*
+ * The Scratchpad window.
+ *
+ * An ordinary window, unlike the Bar: it takes focus, it is what the dictation
+ * pipeline pastes into, and it inherits the theme wholesale from theme.css.
+ * Only two things need saying here.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/*
+ * The title strip is the window's drag handle on macOS, where the frame is
+ * hidden. Every interactive thing inside it has to opt back out, or the buttons
+ * become part of the drag region and stop being clickable.
+ */
+.notes-drag {
+  -webkit-app-region: drag;
+}
+
+.notes-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * The floating Copy pill — solid near-black in both themes, like the
+ * reference. Not a theme token on purpose: this is the one control in the
+ * window that mimics the Bar's material rather than the Hub's.
+ */
+.notes-copy {
+  background: rgba(17, 17, 22, 0.97);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    0 6px 18px rgba(0, 0, 0, 0.25);
+}

@@ -6,7 +6,11 @@ import {
   AppCategorySchema,
   DictationRecordSchema,
   DictionaryEntrySchema,
+  INSIGHTS_MAX_APPS,
+  INSIGHTS_MAX_DAYS,
+  InsightsSchema,
   MeetingRecordSchema,
+  NoteSchema,
   SnippetSchema,
   StyleProfileSchema,
   createDefaultStyleProfiles,
@@ -18,7 +22,14 @@ import {
   type HistoryPage,
   type HistoryQuery,
   type HistoryStats,
+  type Insights,
+  type InsightsFixes,
   type MeetingRecord,
+  type Note,
+  type NoteDraft,
+  type NoteList,
+  type NotePatch,
+  type NoteQuery,
   type Snippet,
   type SnippetDraft,
   type SnippetPatch,
@@ -27,7 +38,15 @@ import {
   type StyleProfileSet,
 } from '@murmur/shared'
 
-import { averageWpm, computeStreak, countedText, countWords, dayKey } from './stats'
+import {
+  averageWpm,
+  computeStreak,
+  countedText,
+  countWords,
+  dayKey,
+  longestStreak,
+  streakEndDay,
+} from './stats'
 
 /**
  * Repositories over the SQLite schema (PLAN §9).
@@ -48,6 +67,7 @@ interface DictationRow {
   raw_text: string
   polished_text: string | null
   app_bundle_id: string | null
+  app_name: string | null
   app_category: string
   duration_ms: number
   stt_model: string
@@ -70,6 +90,7 @@ function toRecord(row: DictationRow): DictationRecord {
     rawText: row.raw_text,
     polishedText: row.polished_text,
     appBundleId: row.app_bundle_id,
+    appName: row.app_name,
     appCategory: AppCategorySchema.catch('other').parse(row.app_category),
     durationMs: row.duration_ms,
     sttModelId: row.stt_model,
@@ -85,6 +106,28 @@ function toRecord(row: DictationRow): DictationRecord {
 /** What the orchestrator hands over after a successful dictation. */
 export type DictationDraft = Omit<DictationRecord, 'id'> & { id?: string }
 
+/** No fixes at all — command mode runs neither transform. */
+export const NO_FIXES: InsightsFixes = Object.freeze({
+  dictionaryFixes: 0,
+  snippetExpansions: 0,
+  wordsCleaned: 0,
+})
+
+export interface InsertOptions {
+  /**
+   * What the pipeline corrected on the way to this row. Counted where it
+   * happens rather than re-derived here: only the orchestrator knows how many
+   * replacement rules actually fired.
+   */
+  fixes?: InsightsFixes
+  /**
+   * False when the user has switched per-app collection off. Only the
+   * `app_usage` write is skipped — the word, streak and fix counters are the
+   * same lifetime totals Murmur has always kept and are not the new collection.
+   */
+  collectAppUsage?: boolean
+}
+
 export class DictationsRepository {
   readonly #db: Database
 
@@ -92,19 +135,20 @@ export class DictationsRepository {
     this.#db = db
   }
 
-  insert(draft: DictationDraft): DictationRecord {
+  insert(draft: DictationDraft, options: InsertOptions = {}): DictationRecord {
     const record = DictationRecordSchema.parse({ ...draft, id: draft.id ?? randomUUID() })
+    const fixes = options.fixes ?? NO_FIXES
 
-    // The row and the lifetime counters move together or not at all: a crash
-    // between them would leave the header permanently disagreeing with the
-    // history below it, and nothing ever recomputes the counters to notice.
+    // The row and every counter move together or not at all: a crash between
+    // them would leave the Insights numbers permanently disagreeing with the
+    // history below them, and nothing ever recomputes the counters to notice.
     this.#db.transaction(() => {
       this.#db
         .prepare(
           `INSERT INTO dictations
-             (id, ts, raw_text, polished_text, app_bundle_id, app_category,
+             (id, ts, raw_text, polished_text, app_bundle_id, app_name, app_category,
               duration_ms, stt_model, polish_model, timings_json)
-           VALUES (@id, @ts, @rawText, @polishedText, @appBundleId, @appCategory,
+           VALUES (@id, @ts, @rawText, @polishedText, @appBundleId, @appName, @appCategory,
                    @durationMs, @sttModelId, @polishModelId, @timingsJson)`,
         )
         .run({
@@ -113,6 +157,7 @@ export class DictationsRepository {
           rawText: record.rawText,
           polishedText: record.polishedText,
           appBundleId: record.appBundleId,
+          appName: record.appName,
           appCategory: record.appCategory,
           durationMs: record.durationMs,
           sttModelId: record.sttModelId,
@@ -126,16 +171,61 @@ export class DictationsRepository {
       this.#db
         .prepare(
           `UPDATE lifetime_stats
-              SET total_words = total_words + ?,
-                  timed_words = timed_words + ?,
-                  spoken_ms   = spoken_ms + ?
+              SET total_words        = total_words + ?,
+                  timed_words        = timed_words + ?,
+                  spoken_ms          = spoken_ms + ?,
+                  dictionary_fixes   = dictionary_fixes + ?,
+                  snippet_expansions = snippet_expansions + ?,
+                  words_cleaned      = words_cleaned + ?
             WHERE id = 1`,
         )
-        .run(words, timed ? words : 0, timed ? record.durationMs : 0)
+        .run(
+          words,
+          timed ? words : 0,
+          timed ? record.durationMs : 0,
+          fixes.dictionaryFixes,
+          fixes.snippetExpansions,
+          fixes.wordsCleaned,
+        )
 
+      // Upsert rather than insert-then-update: the day row may predate schema
+      // v5 (migration 2 created day rows with no counters at all).
       this.#db
-        .prepare(`INSERT OR IGNORE INTO dictation_days (day) VALUES (?)`)
-        .run(dayKey(record.ts))
+        .prepare(
+          `INSERT INTO dictation_days (day, words, dictations, spoken_ms) VALUES (?, ?, 1, ?)
+           ON CONFLICT(day) DO UPDATE SET
+             words      = words + excluded.words,
+             dictations = dictations + 1,
+             spoken_ms  = spoken_ms + excluded.spoken_ms`,
+        )
+        .run(dayKey(record.ts), words, record.durationMs)
+
+      if (options.collectAppUsage === false || !record.appBundleId) return
+
+      // `display_name` is refreshed on every dictation so a rename — or a row
+      // backfilled with the bundle id as a placeholder — heals the next time
+      // the user dictates into that app.
+      this.#db
+        .prepare(
+          `INSERT INTO app_usage
+             (bundle_id, display_name, category, words, dictations, spoken_ms, last_used_at)
+           VALUES (?, ?, ?, ?, 1, ?, ?)
+           ON CONFLICT(bundle_id) DO UPDATE SET
+             display_name = excluded.display_name,
+             category     = excluded.category,
+             words        = words + excluded.words,
+             dictations   = dictations + 1,
+             spoken_ms    = spoken_ms + excluded.spoken_ms,
+             last_used_at = MAX(last_used_at, excluded.last_used_at)`,
+        )
+        .run(
+          record.appBundleId,
+          record.appName ?? record.appBundleId,
+          record.appCategory,
+          words,
+          record.durationMs,
+          record.ts,
+        )
     })()
 
     return record
@@ -204,14 +294,35 @@ export class DictationsRepository {
   clear(): number {
     return this.#db.transaction(() => {
       const changes = this.#db.prepare(`DELETE FROM dictations`).run().changes
-      this.#db
-        .prepare(
-          `UPDATE lifetime_stats SET total_words = 0, timed_words = 0, spoken_ms = 0 WHERE id = 1`,
-        )
-        .run()
-      this.#db.prepare(`DELETE FROM dictation_days`).run()
+      this.#resetCounters()
       return changes
     })()
+  }
+
+  /**
+   * Zero every Insights counter without touching the transcripts.
+   *
+   * The mirror image of {@link clear}: that one is "erase what I said", this is
+   * "forget the tally". Someone who wants the charts to start over should not
+   * have to delete their history to get it — and someone deleting their history
+   * should not be left with a word count and a streak still standing over it,
+   * which is why `clear` calls this too.
+   */
+  resetInsights(): void {
+    this.#db.transaction(() => this.#resetCounters())()
+  }
+
+  #resetCounters(): void {
+    this.#db
+      .prepare(
+        `UPDATE lifetime_stats
+            SET total_words = 0, timed_words = 0, spoken_ms = 0,
+                dictionary_fixes = 0, snippet_expansions = 0, words_cleaned = 0
+          WHERE id = 1`,
+      )
+      .run()
+    this.#db.prepare(`DELETE FROM dictation_days`).run()
+    this.#db.prepare(`DELETE FROM app_usage`).run()
   }
 
   /**
@@ -259,6 +370,112 @@ export class DictationsRepository {
 
   count(): number {
     return (this.#db.prepare(`SELECT COUNT(*) AS n FROM dictations`).get() as { n: number }).n
+  }
+
+  /**
+   * Everything the Insights section draws, in one read (PLAN §2.2.2).
+   *
+   * One call rather than five because the section renders as a unit and the
+   * numbers must agree with each other: five round trips could straddle a
+   * dictation and show a streak that includes a day the word count does not.
+   *
+   * Read entirely from the counter tables — `dictations` is not consulted, for
+   * the same reason `stats()` does not consult it.
+   */
+  insights(options: { collecting: boolean; now?: number }): Insights {
+    const now = options.now ?? Date.now()
+
+    const totals = this.#db
+      .prepare(
+        `SELECT total_words, timed_words, spoken_ms,
+                dictionary_fixes, snippet_expansions, words_cleaned
+           FROM lifetime_stats WHERE id = 1`,
+      )
+      .get() as
+      | {
+          total_words: number
+          timed_words: number
+          spoken_ms: number
+          dictionary_fixes: number
+          snippet_expansions: number
+          words_cleaned: number
+        }
+      | undefined
+
+    const dayRows = this.#db
+      .prepare(
+        `SELECT day, words, dictations FROM dictation_days
+          ORDER BY day DESC LIMIT ?`,
+      )
+      .all(INSIGHTS_MAX_DAYS) as { day: string; words: number; dictations: number }[]
+
+    // The streak walk needs every day ever recorded, not just the windowed
+    // page above: a 400-day streak would otherwise be truncated to 371 by the
+    // limit that exists only to bound the heatmap's payload.
+    const allDays = new Set(
+      (this.#db.prepare(`SELECT day FROM dictation_days`).all() as { day: string }[]).map(
+        (row) => row.day,
+      ),
+    )
+
+    const appRows = this.#db
+      .prepare(
+        `SELECT bundle_id, display_name, category, words, dictations, last_used_at
+           FROM app_usage ORDER BY words DESC, last_used_at DESC LIMIT ?`,
+      )
+      .all(INSIGHTS_MAX_APPS) as {
+      bundle_id: string
+      display_name: string
+      category: string
+      words: number
+      dictations: number
+      last_used_at: number
+    }[]
+
+    // Whatever the top-N cut off, reported rather than silently dropped: the
+    // percentages under the bars have to add up to the total above them.
+    const listedWords = appRows.reduce((sum, row) => sum + row.words, 0)
+    const allAppWords = (
+      this.#db.prepare(`SELECT COALESCE(SUM(words), 0) AS n FROM app_usage`).get() as { n: number }
+    ).n
+
+    return InsightsSchema.parse({
+      totals: {
+        words: totals?.total_words ?? 0,
+        dictations: (
+          this.#db
+            .prepare(`SELECT COALESCE(SUM(dictations), 0) AS n FROM dictation_days`)
+            .get() as {
+            n: number
+          }
+        ).n,
+        spokenMs: totals?.spoken_ms ?? 0,
+        avgWpm: averageWpm(totals?.timed_words ?? 0, totals?.spoken_ms ?? 0),
+      },
+      fixes: {
+        dictionaryFixes: totals?.dictionary_fixes ?? 0,
+        snippetExpansions: totals?.snippet_expansions ?? 0,
+        wordsCleaned: totals?.words_cleaned ?? 0,
+      },
+      streak: {
+        current: computeStreak(allDays, now),
+        longest: longestStreak(allDays),
+        endDay: streakEndDay(allDays, now),
+      },
+      // Ascending for the renderer, which lays the heatmap out left-to-right.
+      days: dayRows.reverse(),
+      today: dayKey(now),
+      apps: appRows.map((row) => ({
+        bundleId: row.bundle_id,
+        name: row.display_name,
+        category: AppCategorySchema.catch('other').parse(row.category),
+        words: row.words,
+        dictations: row.dictations,
+        lastUsedAt: row.last_used_at,
+      })),
+      otherAppWords: Math.max(0, allAppWords - listedWords),
+      collecting: options.collecting,
+    })
   }
 }
 
@@ -360,6 +577,148 @@ export class DictionaryRepository {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Notes (the Scratchpad)
+// ---------------------------------------------------------------------------
+
+interface NoteRow {
+  id: string
+  title: string
+  body: string
+  created_at: number
+  updated_at: number
+  pinned: number
+}
+
+function toNote(row: NoteRow): Note {
+  return NoteSchema.parse({
+    id: row.id,
+    title: row.title,
+    body: row.body,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    pinned: row.pinned !== 0,
+  })
+}
+
+/**
+ * The Scratchpad's store (PLAN §2.2.7).
+ *
+ * Two things separate it from every other text this app keeps:
+ *
+ *  - **Nothing prunes it.** There is no `pruneOlderThan` here and there must
+ *    never be one. A note is a document the user wrote, not a record of
+ *    something that happened, and `historyRetention` governs the latter.
+ *  - **Ordering is pinned-then-recent**, not purely chronological, because a
+ *    scratchpad is a working surface: the note you keep coming back to should
+ *    not sink as you jot others.
+ *
+ * The FTS path is the same shape as `DictationsRepository.query` and reuses its
+ * {@link toFtsQuery} — an unescaped search box is a crash in FTS5, and one
+ * escaping rule is easier to keep right than two.
+ */
+export class NotesRepository {
+  readonly #db: Database
+  readonly #now: () => number
+
+  constructor(db: Database, now: () => number = Date.now) {
+    this.#db = db
+    this.#now = now
+  }
+
+  list(request: NoteQuery): NoteList {
+    const search = request.search.trim()
+
+    if (!search) {
+      const rows = this.#db
+        .prepare(`SELECT * FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT ?`)
+        .all(request.limit) as NoteRow[]
+      const total = this.#db.prepare(`SELECT COUNT(*) AS n FROM notes`).get() as { n: number }
+      return { notes: rows.map(toNote), total: total.n }
+    }
+
+    const match = toFtsQuery(search)
+    if (!match) return { notes: [], total: 0 }
+
+    const rows = this.#db
+      .prepare(
+        `SELECT n.* FROM notes n
+           JOIN notes_fts f ON f.rowid = n.rowid
+          WHERE notes_fts MATCH ?
+          ORDER BY n.pinned DESC, n.updated_at DESC
+          LIMIT ?`,
+      )
+      .all(match, request.limit) as NoteRow[]
+
+    const total = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM notes n
+           JOIN notes_fts f ON f.rowid = n.rowid
+          WHERE notes_fts MATCH ?`,
+      )
+      .get(match) as { n: number }
+
+    return { notes: rows.map(toNote), total: total.n }
+  }
+
+  get(id: string): Note | null {
+    const row = this.#db.prepare(`SELECT * FROM notes WHERE id = ?`).get(id) as NoteRow | undefined
+    return row ? toNote(row) : null
+  }
+
+  create(draft: NoteDraft): Note {
+    const now = this.#now()
+    const note = NoteSchema.parse({
+      id: randomUUID(),
+      title: draft.title,
+      body: draft.body,
+      createdAt: now,
+      updatedAt: now,
+      pinned: false,
+    })
+    this.#db
+      .prepare(
+        `INSERT INTO notes (id, title, body, created_at, updated_at, pinned)
+         VALUES (?, ?, ?, ?, ?, 0)`,
+      )
+      .run(note.id, note.title, note.body, note.createdAt, note.updatedAt)
+    return note
+  }
+
+  update(id: string, patch: NotePatch): Note {
+    const existing = this.#db.prepare(`SELECT * FROM notes WHERE id = ?`).get(id) as
+      NoteRow | undefined
+    if (!existing) throw new Error(`No note with id "${id}"`)
+
+    // `updated_at` moves only when the content does. Pinning is a filing
+    // action, not an edit, and letting it re-sort the list to the top would
+    // make the pin look like it had rewritten the note.
+    const touched = patch.title !== undefined || patch.body !== undefined
+
+    const next = NoteSchema.parse({
+      id,
+      title: patch.title ?? existing.title,
+      body: patch.body ?? existing.body,
+      createdAt: existing.created_at,
+      updatedAt: touched ? this.#now() : existing.updated_at,
+      pinned: patch.pinned ?? existing.pinned !== 0,
+    })
+
+    this.#db
+      .prepare(`UPDATE notes SET title = ?, body = ?, updated_at = ?, pinned = ? WHERE id = ?`)
+      .run(next.title, next.body, next.updatedAt, next.pinned ? 1 : 0, id)
+    return next
+  }
+
+  delete(id: string): boolean {
+    return this.#db.prepare(`DELETE FROM notes WHERE id = ?`).run(id).changes > 0
+  }
+
+  count(): number {
+    return (this.#db.prepare(`SELECT COUNT(*) AS n FROM notes`).get() as { n: number }).n
+  }
+}
+
 interface SnippetRow {
   id: string
   trigger: string
@@ -453,13 +812,33 @@ export class SnippetsRepository {
  * makes "eta → ETA" behave at the start of a sentence without a second rule.
  */
 export function applyReplacements(text: string, entries: readonly DictionaryEntry[]): string {
+  return applyReplacementsWithCount(text, entries).text
+}
+
+/**
+ * The same transform, reporting how many replacements actually fired.
+ *
+ * The count is of *substitutions performed*, not of rules that matched: a rule
+ * hitting three times in one utterance is three fixes, because that is three
+ * words the user did not have to correct. Rules that matched nothing contribute
+ * nothing, which is what makes the Insights number a measurement rather than an
+ * estimate of effort.
+ */
+export function applyReplacementsWithCount(
+  text: string,
+  entries: readonly DictionaryEntry[],
+): { text: string; replacements: number } {
   let out = text
+  let replacements = 0
   for (const entry of entries) {
     if (!entry.enabled || !entry.replacement) continue
     const pattern = new RegExp(`\\b${escapeRegExp(entry.term)}\\b`, 'gi')
-    out = out.replace(pattern, (match) => matchCase(match, entry.replacement ?? match))
+    out = out.replace(pattern, (match) => {
+      replacements += 1
+      return matchCase(match, entry.replacement ?? match)
+    })
   }
-  return out
+  return { text: out, replacements }
 }
 
 function escapeRegExp(value: string): string {

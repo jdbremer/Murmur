@@ -50,22 +50,16 @@ are not listed as NVIDIA. See **[scripts/models/export-parakeet.md](./scripts/mo
   recommendation on capable machines once validated.
 - Until then, keep Whisper family as the honest recommended STT defaults.
 
-### 3. Dedicated History tab for transcriptions
+### 3. ~~Dedicated History tab for transcriptions~~ — **done**
 
-**Ask:** History tab for what was recorded when (transcription), with manual
-delete.
+Home is now **History**, a first-class sidebar entry, and each row names the app
+it landed in rather than only its tone category. The three headline numbers that
+used to sit on top of it moved to the new **Insights** section, where they have
+room to be more than three numbers.
 
-**Status:** Home already has FTS history (search, per-row copy/delete, clear
-all). That is easy to miss as “history.”
-
-**Ship:**
-
-- Promote to a first-class Hub section: **History** (sidebar entry), not buried
-  as “Home.”
-- Each row: timestamp, app/category if known, raw vs polished text, STT/polish
-  model ids, duration; expand for full transcript.
-- Keep search, single-row delete, clear-all, retention settings linkage.
-- Optional: re-copy / re-insert / re-polish from a row (PLAN M4+).
+Still open from the original ask: expand-a-row for the full raw-vs-polished
+transcript and the model ids, and re-copy / re-insert / re-polish from a row
+(PLAN M4+).
 
 ### 4. Transient “clipboard insurance” UI after dictation
 
@@ -96,12 +90,15 @@ insert into the focused app fails.
 
 ## Other shared follow-ups
 
-| Item                      | Notes                                                                     |
-| ------------------------- | ------------------------------------------------------------------------- |
-| Onboarding polish         | Mac path more complete; Windows still needs platform-true permission copy |
-| Streaming partials in Bar | PLAN M5                                                                   |
-| CI matrix                 | macOS exists; add Windows leg (`typecheck` / `test` / `native:build`)     |
-| Packaging                 | DMG (Mac) / NSIS (Windows) still release-track                            |
+| Item                      | Notes                                                                                                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vibe coding on Windows    | `readFocusedEditorText` is macOS-only; needs the UI Automation `TextPattern` equivalent. The setting and UI already exist and say so plainly (PLAN §18.3)             |
+| Insights: WPM percentile  | Compared against a static published typing-speed table. Worth revisiting if a better offline reference exists — it must never become a comparison against other users |
+| Scratchpad polish         | Markdown preview, drag-to-reorder, "send last dictation to a note"                                                                                                    |
+| Onboarding polish         | Mac path more complete; Windows still needs platform-true permission copy                                                                                             |
+| Streaming partials in Bar | PLAN M5                                                                                                                                                               |
+| CI matrix                 | macOS exists; add Windows leg (`typecheck` / `test` / `native:build`)                                                                                                 |
+| Packaging                 | DMG (Mac) / NSIS (Windows) still release-track                                                                                                                        |
 
 ---
 

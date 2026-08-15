@@ -50,6 +50,13 @@ export interface InsertTextResult {
 export interface FrontmostApp {
   bundleId: string
   name: string
+  /**
+   * Process id, so a caller already holding this can ask {@link
+   * MurmurNative.getWindowTitle} about the same process rather than racing an
+   * app switch with a second lookup. Optional: the Windows and Linux backends
+   * do not report it yet.
+   */
+  pid?: number
 }
 
 export interface NativePermissions {
@@ -128,6 +135,25 @@ export interface MurmurNative {
    */
   getWindowTitle?(pid: number): { ok: boolean; title?: string; error?: string }
   getFrontmostApp(): FrontmostApp | null
+  /**
+   * The focused editor's text, for vibe coding's variable recognition
+   * (PLAN §18.3). **macOS only, and the only call in this interface that reads
+   * screen content.**
+   *
+   * Optional, and absent rather than stubbed on Windows and Linux, so a caller
+   * has to decide what to do about "this platform cannot" instead of receiving
+   * a plausible empty string. `code-context.ts` is the only caller, and it
+   * refuses to make the call at all unless the user has switched Variable
+   * recognition on *and* the frontmost app is one of the three allowlisted
+   * IDEs. Nothing in the native layer can enforce that, which is exactly why it
+   * must never be called speculatively.
+   *
+   * `ok: false` is the ordinary answer, not an exception: VS Code and its forks
+   * draw the editor on a canvas and expose no text until the user turns on the
+   * IDE's own Screen Reader Accessibility Mode. Secure fields are refused
+   * outright.
+   */
+  readFocusedEditorText?(maxChars?: number): { ok: boolean; text?: string; error?: string }
   /** True when a password field owns input; Murmur must refuse to type. */
   isSecureInputActive(): boolean
   /**
@@ -179,6 +205,9 @@ export function createNativeStub(reason = 'native module unavailable'): MurmurNa
     },
     getFrontmostApp() {
       return null
+    },
+    readFocusedEditorText() {
+      return { ok: false, error: reason }
     },
     isSecureInputActive() {
       return false

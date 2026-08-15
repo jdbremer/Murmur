@@ -12,6 +12,7 @@ import {
   applyReplacements,
   DictationsRepository,
   DictionaryRepository,
+  NotesRepository,
   SnippetsRepository,
   StyleRepository,
   toFtsQuery,
@@ -115,6 +116,10 @@ describe('openDatabase', () => {
       DROP TABLE dictation_days;
       DROP TABLE meetings;
       DROP TABLE snippets;
+      DROP TABLE app_usage;
+      DROP TABLE notes;
+      DROP TABLE notes_fts;
+      ALTER TABLE dictations DROP COLUMN app_name;
     `)
     const ts = Date.parse('2026-08-01T12:00:00')
     db.prepare(
@@ -124,14 +129,34 @@ describe('openDatabase', () => {
     ).run('a', ts, 'um so we should uh ship it wednesday', 'We should ship it on Wednesday.', 6_000)
     db.pragma('user_version = 1')
 
-    expect(migrate(db).applied).toEqual(['2:lifetime-stats', '3:meetings', '4:snippets'])
+    expect(migrate(db).applied).toEqual([
+      '2:lifetime-stats',
+      '3:meetings',
+      '4:snippets',
+      '5:insights',
+      '6:notes',
+    ])
 
     // The polished text's 6 words, at 6 words / 6 s = 60 wpm, on one day.
-    expect(new DictationsRepository(db).stats(ts)).toEqual({
+    const repository = new DictationsRepository(db)
+    expect(repository.stats(ts)).toEqual({
       totalWords: 6,
       avgWpm: 60,
       streakDays: 1,
     })
+
+    // Migration 5 backfills the per-day magnitude the heatmap needs from the
+    // same surviving rows — and nothing more. The fix counters stay at zero
+    // because they have never been measured, and the app breakdown stays empty
+    // because this row predates the column that would have named an app.
+    const insights = repository.insights({ collecting: true, now: ts })
+    expect(insights.days).toEqual([{ day: '2026-08-01', words: 6, dictations: 1 }])
+    expect(insights.fixes).toEqual({
+      dictionaryFixes: 0,
+      snippetExpansions: 0,
+      wordsCleaned: 0,
+    })
+    expect(insights.apps).toEqual([])
   })
 })
 
@@ -143,6 +168,7 @@ describe('DictationsRepository', () => {
     rawText: 'um so we should ship it on wednesday',
     polishedText: 'We should ship it on Wednesday.',
     appBundleId: 'com.tinyspeck.slackmacgap',
+    appName: 'Slack' as string | null,
     appCategory: 'work' as const,
     durationMs: 4200,
     sttModelId: 'whisper-small-en',
@@ -382,6 +408,121 @@ describe('DictationsRepository', () => {
 
     expect(repository.get(record.id)?.appCategory).toBe('other')
   })
+
+  describe('insights (PLAN §2.2.2)', () => {
+    const at = (iso: string): number => Date.parse(`${iso}T12:00:00`)
+    const insights = (now?: number) =>
+      repository.insights({ collecting: true, ...(now && { now }) })
+
+    it('is empty before anything has been dictated', () => {
+      const empty = insights()
+      expect(empty.totals).toEqual({ words: 0, dictations: 0, spokenMs: 0, avgWpm: 0 })
+      expect(empty.fixes).toEqual({
+        dictionaryFixes: 0,
+        snippetExpansions: 0,
+        wordsCleaned: 0,
+      })
+      expect(empty.days).toEqual([])
+      expect(empty.apps).toEqual([])
+      expect(empty.streak).toEqual({ current: 0, longest: 0, endDay: null })
+    })
+
+    it('accumulates the fix counters across dictations', () => {
+      repository.insert(draft(), {
+        fixes: { dictionaryFixes: 2, snippetExpansions: 1, wordsCleaned: 3 },
+      })
+      repository.insert(draft(), {
+        fixes: { dictionaryFixes: 1, snippetExpansions: 0, wordsCleaned: 4 },
+      })
+
+      expect(insights().fixes).toEqual({
+        dictionaryFixes: 3,
+        snippetExpansions: 1,
+        wordsCleaned: 7,
+      })
+    })
+
+    it('tallies per-day words for the heatmap', () => {
+      // Two dictations on the 1st (6 polished words each) and one on the 2nd.
+      repository.insert(draft({ ts: at('2026-08-01') }))
+      repository.insert(draft({ ts: at('2026-08-01') }))
+      repository.insert(draft({ ts: at('2026-08-02') }))
+
+      // Ascending, because the heatmap lays days out left to right.
+      expect(insights(at('2026-08-02')).days).toEqual([
+        { day: '2026-08-01', words: 12, dictations: 2 },
+        { day: '2026-08-02', words: 6, dictations: 1 },
+      ])
+    })
+
+    it('breaks usage down by app, newest name winning', () => {
+      repository.insert(draft({ appBundleId: 'com.apple.mail', appName: 'Mail' }))
+      repository.insert(draft({ appBundleId: 'com.tinyspeck.slackmacgap', appName: 'Slack' }))
+      repository.insert(draft({ appBundleId: 'com.tinyspeck.slackmacgap', appName: 'Slack' }))
+
+      const apps = insights().apps
+      // Descending by words, so the bar chart needs no further sorting.
+      expect(apps.map((app) => [app.name, app.words, app.dictations])).toEqual([
+        ['Slack', 12, 2],
+        ['Mail', 6, 1],
+      ])
+    })
+
+    it('skips the per-app tally when collection is switched off', () => {
+      repository.insert(draft(), { collectAppUsage: false })
+
+      const off = repository.insights({ collecting: false })
+      expect(off.apps).toEqual([])
+      expect(off.collecting).toBe(false)
+      // The lifetime totals are not the new collection and keep counting.
+      expect(off.totals.words).toBe(6)
+      expect(off.days).toHaveLength(1)
+    })
+
+    it('survives the retention sweep — the whole reason the counters exist', () => {
+      const now = at('2026-08-01')
+      repository.insert(draft({ ts: now - 120 * 86_400_000 }), {
+        fixes: { dictionaryFixes: 1, snippetExpansions: 0, wordsCleaned: 2 },
+      })
+      repository.insert(draft({ ts: now }))
+      const before = insights(now)
+
+      expect(repository.pruneOlderThan(now - 90 * 86_400_000)).toBe(1)
+
+      // The transcript is gone; every number about it stays.
+      expect(repository.count()).toBe(1)
+      expect(insights(now)).toEqual(before)
+    })
+
+    it('reports the streak and the record separately', () => {
+      // A 3-day run in July, then a 2-day run ending today.
+      for (const iso of ['2026-07-10', '2026-07-11', '2026-07-12', '2026-07-31', '2026-08-01']) {
+        repository.insert(draft({ ts: at(iso) }))
+      }
+
+      expect(insights(at('2026-08-01')).streak).toEqual({
+        current: 2,
+        longest: 3,
+        endDay: '2026-08-01',
+      })
+    })
+
+    it('resets every counter without deleting a single transcript', () => {
+      repository.insert(draft(), {
+        fixes: { dictionaryFixes: 2, snippetExpansions: 1, wordsCleaned: 3 },
+      })
+
+      repository.resetInsights()
+
+      const after = insights()
+      expect(after.totals.words).toBe(0)
+      expect(after.fixes.dictionaryFixes).toBe(0)
+      expect(after.apps).toEqual([])
+      expect(after.days).toEqual([])
+      // The text the user dictated is untouched — that is `history.clear`'s job.
+      expect(repository.count()).toBe(1)
+    })
+  })
 })
 
 describe('toFtsQuery', () => {
@@ -611,5 +752,104 @@ describe('StyleRepository', () => {
     db.prepare('DELETE FROM style_profiles WHERE category = ?').run('personal')
     expect(repository.get()).toHaveLength(4)
     expect(repository.forCategory('personal').category).toBe('personal')
+  })
+})
+
+describe('NotesRepository', () => {
+  let notes: NotesRepository
+  /** Injected so "was this touched?" is decidable rather than timing-dependent. */
+  let clock = Date.parse('2026-08-01T10:00:00Z')
+
+  beforeEach(() => {
+    clock = Date.parse('2026-08-01T10:00:00Z')
+    notes = new NotesRepository(db, () => clock)
+  })
+
+  it('creates, reads back and deletes a note', () => {
+    const note = notes.create({ title: '', body: 'ship the thing on wednesday' })
+
+    expect(note.id).toMatch(/[0-9a-f-]{36}/)
+    expect(note.createdAt).toBe(clock)
+    expect(note.updatedAt).toBe(clock)
+    expect(note.pinned).toBe(false)
+    expect(notes.get(note.id)?.body).toBe('ship the thing on wednesday')
+
+    expect(notes.delete(note.id)).toBe(true)
+    expect(notes.get(note.id)).toBeNull()
+  })
+
+  it('sorts pinned notes first, then most recently edited', () => {
+    const first = notes.create({ title: '', body: 'first' })
+    clock += 1_000
+    const second = notes.create({ title: '', body: 'second' })
+    clock += 1_000
+    notes.update(first.id, { pinned: true })
+
+    expect(notes.list({ search: '', limit: 50 }).notes.map((note) => note.id)).toEqual([
+      first.id,
+      second.id,
+    ])
+  })
+
+  it('does not touch updatedAt when only pinning — filing is not editing', () => {
+    // Otherwise a pin re-sorts the note to the top of "recently edited", which
+    // makes the pin look like it rewrote the note.
+    const note = notes.create({ title: '', body: 'unchanged' })
+    clock += 60_000
+
+    expect(notes.update(note.id, { pinned: true }).updatedAt).toBe(note.updatedAt)
+    expect(notes.update(note.id, { body: 'changed' }).updatedAt).toBe(clock)
+  })
+
+  it('searches title and body through FTS', () => {
+    notes.create({ title: 'Standup', body: 'kubernetes rollout notes' })
+    notes.create({ title: 'Groceries', body: 'oat milk' })
+
+    expect(notes.list({ search: 'kubernetes', limit: 50 }).notes).toHaveLength(1)
+    expect(notes.list({ search: 'Standup', limit: 50 }).notes).toHaveLength(1)
+    expect(notes.list({ search: 'oat', limit: 50 }).notes[0]?.title).toBe('Groceries')
+    // Prefix matching, as the search box implies.
+    expect(notes.list({ search: 'kuber', limit: 50 }).notes).toHaveLength(1)
+  })
+
+  it('survives a search string full of FTS syntax', () => {
+    notes.create({ title: '', body: 'plain text' })
+    expect(() => notes.list({ search: 'NEAR("*', limit: 50 })).not.toThrow()
+  })
+
+  it('keeps the FTS index in step with edits and deletions', () => {
+    const note = notes.create({ title: '', body: 'kubernetes' })
+    notes.update(note.id, { body: 'terraform' })
+
+    expect(notes.list({ search: 'kubernetes', limit: 50 }).notes).toHaveLength(0)
+    expect(notes.list({ search: 'terraform', limit: 50 }).notes).toHaveLength(1)
+
+    notes.delete(note.id)
+    expect(notes.list({ search: 'terraform', limit: 50 }).notes).toHaveLength(0)
+  })
+
+  it('is untouched by the history retention sweep', () => {
+    // The rule this table exists under: a note is a document the user wrote,
+    // not a record of something that happened. Nothing but the user deletes one.
+    const dictations = new DictationsRepository(db)
+    const old = Date.parse('2020-01-01T00:00:00Z')
+    dictations.insert({
+      ts: old,
+      rawText: 'ancient',
+      polishedText: null,
+      appBundleId: null,
+      appName: null,
+      appCategory: 'other',
+      durationMs: 1_000,
+      sttModelId: 'whisper-small-en',
+      polishModelId: null,
+      timings: { sttMs: 1, polishMs: 0, totalMs: 1 },
+    })
+    clock = old
+    const note = notes.create({ title: '', body: 'just as ancient' })
+
+    expect(dictations.pruneOlderThan(Date.parse('2026-01-01T00:00:00Z'))).toBe(1)
+    expect(notes.get(note.id)).not.toBeNull()
+    expect(notes.count()).toBe(1)
   })
 })

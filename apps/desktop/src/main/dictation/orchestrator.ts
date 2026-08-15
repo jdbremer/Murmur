@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
 
 import {
-  expandSnippets,
+  expandSnippetsWithCount,
   type AppCategory,
   type DictationErrorCode,
   type DictationRecord,
   type DictionaryEntry,
+  type InsightsFixes,
   type PolishingLevel,
   type Snippet,
   type StyleProfile,
@@ -26,7 +27,9 @@ import {
   shouldSkipPolish,
 } from '../engines/polish/prompt'
 import type { PolishEngine, SttEngine } from '../engines/types'
+import { wordsRemovedByPolish } from '../store/stats'
 import { categoryForBundleId, isMessagingApp } from './app-category'
+import { applyFileTags } from './code-context'
 import { applySentenceCase } from './sentence-case'
 import { stripTrailingPeriod } from './trailing-period'
 import type { InjectionResult, TextInjector } from './injector'
@@ -82,7 +85,7 @@ export interface OrchestratorDeps {
    * Post-STT replacement rules (PLAN §6.4). Runs on the raw transcript before
    * polishing, so the polish prompt sees the corrected spelling.
    */
-  applyDictionary(text: string): string
+  applyDictionary(text: string): { text: string; replacements: number }
   /**
    * Enabled voice shortcuts. Expanded *after* polishing (domain/snippet.ts), so
    * unlike the dictionary this is a list rather than a transform — the
@@ -93,6 +96,17 @@ export interface OrchestratorDeps {
   styleFor(category: AppCategory): StyleProfile
   /** Frontmost app at hotkey-down. `null` on non-macOS or when unknown. */
   frontmostApp(): { bundleId: string; name: string } | null
+  /**
+   * Identifiers and filenames from the editor in front, for vibe coding
+   * (PLAN §18.3). Empty unless the user opted in *and* the frontmost app is one
+   * of three allowlisted IDEs — `code-context.ts` owns every one of those gates.
+   *
+   * Optional so tests, and any build without the feature wired, simply get
+   * nothing rather than having to stub it.
+   */
+  codeContext?(bundleId: string | null): { terms: readonly string[]; files: readonly string[] }
+  /** Whether spoken filenames should be rewritten, and whether to `@`-tag them. */
+  fileTagging?(bundleId: string | null): { enabled: boolean; at: boolean }
   /**
    * The focused element's selected text at hotkey-down, or `null` when there
    * is none (or command mode is disabled). A non-empty selection flips the
@@ -106,8 +120,16 @@ export interface OrchestratorDeps {
    * continuing an existing sentence and should not arrive capitalised.
    */
   textBeforeCursor?(): string | null
-  /** Persists a finished dictation. Failures here must not break the loop. */
-  persist(record: Omit<DictationRecord, 'id'>): void
+  /**
+   * Persists a finished dictation. Failures here must not break the loop.
+   *
+   * `fixes` is what the pipeline corrected on the way to this row, counted at
+   * the two places it happens plus the raw-vs-polished word delta. It is passed
+   * rather than derived by the store, because by the time a row exists the
+   * evidence is gone: the dictionary ran before the text was stored, and the
+   * store cannot tell a snippet expansion from something the user said.
+   */
+  persist(record: Omit<DictationRecord, 'id'>, fixes: InsightsFixes): void
   /** High-rate mic level for the Bar's waveform. */
   onLevel?(level: number): void
   /**
@@ -252,6 +274,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     this.#context = {
       startedAt: this.#now(),
       frontmostBundleId: frontmost?.bundleId ?? null,
+      frontmostAppName: frontmost?.name ?? null,
       category,
       settings,
       sttModelId: settings.sttModelId ?? status.modelId ?? 'unknown',
@@ -261,6 +284,9 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       // time text is ready the cursor may have moved, and the capitalisation
       // should match where the user was speaking into.
       textBefore: this.#deps.textBeforeCursor?.() ?? null,
+      // Read here, not at insert time, and cached for a few seconds inside the
+      // reader: this is a synchronous accessibility round trip on the JS thread.
+      code: this.#deps.codeContext?.(frontmost?.bundleId ?? null) ?? { terms: [], files: [] },
     }
 
     this.#buffer.clear()
@@ -456,7 +482,14 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
           if (!stt) throw new Error('The speech-to-text engine went away mid-utterance.')
           return stt.transcribe(trimmed.pcm, {
             language: context.settings.language,
-            vocabulary: this.#deps.dictionary().map((entry) => entry.term),
+            // The dictionary first: it is a standing instruction from the
+            // user, while code context is a guess about whichever file happens
+            // to be open. `buildInitialPrompt` caps by characters, so order is
+            // what decides which survives.
+            vocabulary: [
+              ...this.#deps.dictionary().map((entry) => entry.term),
+              ...context.code.terms,
+            ],
             signal,
           })
         })(),
@@ -473,8 +506,11 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     if (this.#runId !== runId) return
 
     // Dictionary replacements run here, before polishing (PLAN §6.4), so the
-    // history row and the polish prompt both see the corrected spelling.
-    const rawText = this.#deps.applyDictionary(transcript.text.trim()).trim()
+    // history row and the polish prompt both see the corrected spelling. The
+    // count rides along to Insights: it is the only place that knows how many
+    // rules actually fired, as opposed to how many exist.
+    const replaced = this.#deps.applyDictionary(transcript.text.trim())
+    const rawText = replaced.text.trim()
     if (rawText.length === 0) {
       this.#fail('no-speech', 'Didn’t catch that')
       return
@@ -507,6 +543,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
             level,
             profile: this.#deps.styleFor(context.category),
             dictionary: this.#deps.dictionary(),
+            extraSpellings: context.code.terms,
             language: context.settings.language,
           })
           const result = await this.#withTimeout(
@@ -548,11 +585,22 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     // a URL or an address has a right answer and must arrive verbatim. Before
     // the trailing-period rule, so a snippet ending in a full stop is judged on
     // what actually lands in the message.
-    const expanded = expandSnippets(polishedText ?? rawText, this.#deps.snippets())
+    const expansion = expandSnippetsWithCount(polishedText ?? rawText, this.#deps.snippets())
+
+    // File tagging runs beside snippet expansion, and after polishing for the
+    // same reason: a filename has a right answer, and a model asked to tidy
+    // `useNotes.ts` will eventually decide it meant "use notes".
+    const tagging = this.#deps.fileTagging?.(context.frontmostBundleId) ?? {
+      enabled: false,
+      at: false,
+    }
+    const tagged = tagging.enabled
+      ? applyFileTags(expansion.text, context.code.files, { at: tagging.at })
+      : { text: expansion.text, tagged: 0 }
 
     // Last, so it judges the text that actually lands — after a snippet may
     // have replaced the opening words entirely.
-    const cased = applySentenceCase(expanded, context.textBefore)
+    const cased = applySentenceCase(tagged.text, context.textBefore)
 
     const finalText = stripTrailingPeriod(cased, {
       messaging: isMessagingApp(context.frontmostBundleId),
@@ -594,6 +642,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       rawText,
       polishedText,
       appBundleId: context.frontmostBundleId,
+      appName: context.frontmostAppName,
       appCategory: context.category,
       durationMs,
       sttModelId: context.sttModelId,
@@ -602,7 +651,11 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     }
 
     try {
-      this.#deps.persist(record)
+      this.#deps.persist(record, {
+        dictionaryFixes: replaced.replacements,
+        snippetExpansions: expansion.expansions,
+        wordsCleaned: wordsRemovedByPolish(rawText, polishedText),
+      })
     } catch (error) {
       // A history write must never cost the user their insertion, which has
       // already happened by this point.
@@ -739,6 +792,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       rawText: instruction,
       polishedText: edited,
       appBundleId: context.frontmostBundleId,
+      appName: context.frontmostAppName,
       appCategory: context.category,
       durationMs,
       sttModelId: context.sttModelId,
@@ -746,7 +800,10 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       timings: { sttMs, polishMs, totalMs: this.#now() - context.startedAt },
     }
     try {
-      this.#deps.persist(record)
+      // No fixes: command mode runs neither the dictionary nor snippets, and
+      // its raw-vs-polished delta is instruction-vs-rewritten-selection, which
+      // is not a measure of anything. Zero is the honest number.
+      this.#deps.persist(record, { dictionaryFixes: 0, snippetExpansions: 0, wordsCleaned: 0 })
     } catch (error) {
       this.#log.error('could not persist the history row:', error)
     }
@@ -865,6 +922,8 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 interface UtteranceContext {
   startedAt: number
   frontmostBundleId: string | null
+  /** The app's display name at hotkey-down; `null` when it could not be read. */
+  frontmostAppName: string | null
   category: AppCategory
   settings: OrchestratorSettings
   sttModelId: string
@@ -873,6 +932,12 @@ interface UtteranceContext {
   selection: string | null
   /** Text before the cursor at hotkey-down; `null` when it could not be read. */
   textBefore: string | null
+  /**
+   * Identifiers and filenames from the open editor (PLAN §18.3), read once at
+   * hotkey-down for the same reason as everything else here: by the time text
+   * is ready the user may have switched files.
+   */
+  code: { terms: readonly string[]; files: readonly string[] }
 }
 
 export class StageTimeoutError extends Error {

@@ -138,6 +138,30 @@ export interface MurmurApi {
     subscribe(listener: (stats: Evt<'history.changed'>) => void): Unsubscribe
   }
 
+  readonly insights: {
+    /**
+     * One read for the whole section. Re-fetch on `history.changed` rather than
+     * on a channel of its own — that event already fires after every dictation
+     * and is the only thing that can move these numbers.
+     */
+    get(): Promise<Res<'insights.get'>>
+    /** Zero every counter; returns the (now empty) insights. */
+    reset(): Promise<Res<'insights.reset'>>
+  }
+
+  readonly notes: {
+    list(request: Req<'notes.list'>): Promise<Res<'notes.list'>>
+    get(request: Req<'notes.get'>): Promise<Res<'notes.get'>>
+    create(draft: Req<'notes.create'>): Promise<Res<'notes.create'>>
+    update(request: Req<'notes.update'>): Promise<Res<'notes.update'>>
+    remove(request: Req<'notes.delete'>): Promise<void>
+    /** Open or focus the floating Scratchpad; `noteId: null` starts a new note. */
+    openWindow(request: Req<'notes.openWindow'>): Promise<Res<'notes.openWindow'>>
+    subscribe(listener: (event: Evt<'notes.changed'>) => void): Unsubscribe
+    /** Scratchpad window only: main asking it to show a particular note. */
+    onSelect(listener: (event: Evt<'notes.select'>) => void): Unsubscribe
+  }
+
   readonly dictionary: {
     list(): Promise<Res<'dictionary.list'>>
     create(entry: Req<'dictionary.create'>): Promise<Res<'dictionary.create'>>
@@ -155,6 +179,11 @@ export interface MurmurApi {
   readonly style: {
     get(): Promise<Res<'style.get'>>
     set(patch: Req<'style.set'>): Promise<Res<'style.set'>>
+  }
+
+  readonly vibeCoding: {
+    /** Whether the frontmost IDE's editor can be read. Never returns the text. */
+    probe(): Promise<Res<'coding.probe'>>
   }
 
   readonly permissions: {

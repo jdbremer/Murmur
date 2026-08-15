@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 const rendererRoot = resolve(__dirname, 'src/renderer')
 
 /**
- * Five build targets: `main`, `preload` and three renderer pages (PLAN §3).
+ * Six build targets: `main`, `preload` and four renderer pages (PLAN §3).
  *
  * Dependency handling worth knowing about before you add one:
  *
@@ -71,6 +71,7 @@ export default defineConfig({
           hub: resolve(rendererRoot, 'hub/index.html'),
           bar: resolve(rendererRoot, 'bar/index.html'),
           audio: resolve(rendererRoot, 'audio/index.html'),
+          notes: resolve(rendererRoot, 'notes/index.html'),
         },
       },
     },

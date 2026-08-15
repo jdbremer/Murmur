@@ -32,7 +32,7 @@ import { BAR, type BarShape } from './visual'
  */
 
 export const CANVAS_WIDTH = 120
-export const CANVAS_HEIGHT = BAR.height
+export const CANVAS_HEIGHT = BAR.activeHeight
 
 /** Idle: a few dim dots hinting at the mic (PLAN §2.1). */
 const IDLE_DOTS = 5
@@ -250,7 +250,9 @@ export function CheckPulse({ reducedMotion }: { reducedMotion: boolean }): React
         filter: 'drop-shadow(0 0 5px rgba(110,231,168,0.55))',
       }}
     >
-      <path d="m5 12.5 4.5 4.5L19 7" />
+      {/* pathLength=1 normalises the dash space so the draw-on keyframes in
+          bar.css can speak in fractions instead of measured pixels. */}
+      <path d="m5 12.5 4.5 4.5L19 7" pathLength={1} className="bar-check-draw" />
     </svg>
   )
 }

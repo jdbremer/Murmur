@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { averageWpm, computeStreak, countedText, countWords, dayKey } from '../src/main/store/stats'
+import {
+  averageWpm,
+  computeStreak,
+  countedText,
+  countWords,
+  dayKey,
+  longestStreak,
+  streakEndDay,
+  wordsRemovedByPolish,
+} from '../src/main/store/stats'
 
 /**
  * History stats (PLAN §2.2.1, §13 M4: "stats match hand-computed fixtures").
@@ -13,6 +22,7 @@ import { averageWpm, computeStreak, countedText, countWords, dayKey } from '../s
 
 /** UTC, so the fixtures do not depend on the runner's timezone. */
 const UTC = 0
+const days = (...isoDays: string[]): Set<string> => new Set(isoDays)
 const day = (iso: string): number => Date.parse(`${iso}T12:00:00Z`)
 
 describe('countWords', () => {
@@ -76,8 +86,6 @@ describe('averageWpm — hand-computed fixtures', () => {
 })
 
 describe('computeStreak', () => {
-  const days = (...isoDays: string[]): Set<string> => new Set(isoDays)
-
   it('is 0 with no dictations', () => {
     expect(computeStreak(new Set(), day('2026-08-05'), UTC)).toBe(0)
   })
@@ -121,5 +129,71 @@ describe('computeStreak', () => {
     expect(
       computeStreak(days('2028-02-28', '2028-02-29', '2028-03-01'), day('2028-03-01'), UTC),
     ).toBe(3)
+  })
+})
+
+describe('streakEndDay', () => {
+  it('is the day the streak actually reaches, not today', () => {
+    // The streak runs to the 4th and today is the 5th. The heatmap's glow has
+    // to stop on the 4th: lighting today's empty square the moment the clock
+    // passes midnight shows a streak the user has not earned yet.
+    expect(streakEndDay(days('2026-08-03', '2026-08-04'), day('2026-08-05'), UTC)).toBe(
+      '2026-08-04',
+    )
+  })
+
+  it('is today once today has been dictated on', () => {
+    expect(
+      streakEndDay(days('2026-08-03', '2026-08-04', '2026-08-05'), day('2026-08-05'), UTC),
+    ).toBe('2026-08-05')
+  })
+
+  it('is null when the streak is over', () => {
+    expect(streakEndDay(days('2026-08-01'), day('2026-08-05'), UTC)).toBeNull()
+    expect(streakEndDay(days(), day('2026-08-05'), UTC)).toBeNull()
+  })
+})
+
+describe('longestStreak', () => {
+  it('finds the longest run anywhere in the history, not the live one', () => {
+    // A 4-day run in July, a 2-day run ending today. The record is 4.
+    expect(
+      longestStreak(
+        days('2026-07-10', '2026-07-11', '2026-07-12', '2026-07-13', '2026-08-04', '2026-08-05'),
+      ),
+    ).toBe(4)
+  })
+
+  it('is 0 for an empty history and 1 for a single day', () => {
+    expect(longestStreak(days())).toBe(0)
+    expect(longestStreak(days('2026-08-05'))).toBe(1)
+  })
+
+  it('walks across month and leap-day boundaries', () => {
+    expect(longestStreak(days('2028-02-28', '2028-02-29', '2028-03-01'))).toBe(3)
+  })
+})
+
+describe('wordsRemovedByPolish', () => {
+  it('counts the drop from raw to polished', () => {
+    // 8 raw words → 6 polished. Two fillers came out.
+    expect(
+      wordsRemovedByPolish(
+        'um so we should uh ship it wednesday',
+        'We should ship it on Wednesday.',
+      ),
+    ).toBe(2)
+  })
+
+  it('is 0 when polishing did not run', () => {
+    expect(wordsRemovedByPolish('um so we should ship it', null)).toBe(0)
+    expect(wordsRemovedByPolish('um so we should ship it', '  ')).toBe(0)
+  })
+
+  it('floors at zero when a rewrite added words', () => {
+    // A Rewrite-level pass that expands has not un-cleaned anything, and a
+    // negative here would let one verbose rewrite erase real filler removals
+    // from the lifetime counter.
+    expect(wordsRemovedByPolish('ship it', 'Could you please ship it on Wednesday?')).toBe(0)
   })
 })

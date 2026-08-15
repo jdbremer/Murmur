@@ -44,7 +44,7 @@ The signature element: a small dark capsule floating at the bottom-center of the
 **Geometry & look**
 
 - Anchored bottom-center of the display containing the focused window, ~10 px above the screen edge; floats above the Dock and full-screen apps (`screen-saver` window level, all Spaces, `visibleOnFullScreen`).
-- Idle: a ~64 × 22 px capsule; near-black background (≈ `rgba(20,20,24,0.92)`) with subtle backdrop blur, 1 px hairline border `rgba(255,255,255,0.08)`, soft drop shadow; a few dim static waveform dots hint at the mic.
+- Idle: a ~44 × 8 px sliver with a clearly visible outline (`rgba(255,255,255,0.32)`) over a near-black fill — at rest the ring *is* the pill, as in the reference product. It is an indicator, not a control; active states grow to ~18 px, which is enough for the waveform. No backdrop-filter anywhere on this window: in a transparent Electron window it can only sample the window's own (empty) content, so it costs GPU per frame and shows nothing — the glass look comes from gradient sheen layers and a five-layer shadow stack instead.
 - Visibility modes matching Flow: **Show while dictating** (default) · Always show · Hidden (hotkey still works).
 - Every state change animates width/opacity with a ~150 ms ease-out spring — the pill morphs, never jumps or reflows.
 
@@ -68,7 +68,9 @@ The signature element: a small dark capsule floating at the bottom-center of the
 **Interaction**
 
 - Non-activating panel: never steals focus from the app being dictated into.
-- Click-through everywhere except the pill itself; hovering expands it slightly to reveal cancel (×), mic picker, and "open Hub"; Esc cancels while listening.
+- Click-through everywhere except the pill itself. **Hovering replaces the pill rather than growing it**, with the reference product's exact arrangement: one row of ~34 px round buttons in the pill's own glass where the pill was — **Dictate · note · mic · Hub** at rest — and a floating capsule *tooltip* above whichever button the pointer is on, naming it ("Dictate `fn`", with the user's real hotkey read from settings). The label is not a control: it takes no clicks and follows the hover. Hands-free swaps the row to **Stop · Discard · mic**; anything else in flight offers **Cancel · mic** only, because there is no "stop and keep" for a physically-held key and a Stop button that quietly meant Cancel would misdescribe what the click does. The row cascades in (~18 ms per button), animates *out* on leave rather than unmounting, and animates transform + opacity only — never `filter` — because animated blur re-rasterises per frame and visibly hitched. Esc still cancels while listening.
+  - Clicking **Dictate** starts a hands-free session — a click has no key to hold. It is the first way to start a dictation without the hotkey.
+  - Hover is hit-tested against the pill (plus slack) on the way *in* and against a fixed, larger zone on the way *out*: a 10 px target that collapses under the pointer would otherwise flicker between the two states at 60 Hz.
 - Follows the active display; optional pin-to-one-display setting.
 
 **Implementation** — one frameless transparent window sized to the largest state; the pill is drawn by the Bar renderer (React + a canvas waveform fed ~30 Hz amplitude frames over IPC, interpolated to 60 fps). No transcript preview in v1; streaming partial text lands in the pill in M5, as in Flow.
@@ -77,9 +79,12 @@ The signature element: a small dark capsule floating at the bottom-center of the
 
 Left sidebar navigation, content pane right — Wispr Flow's layout, tracked closely in visual language too: system font (SF Pro), warm neutral light theme + near-black dark theme, large-radius cards, generous whitespace, icon-labeled sidebar items, stats as friendly headline numbers. Sections:
 
-1. **Home / History** — reverse-chronological feed of dictations: polished text (primary), expandable raw transcript, target app icon, duration, copy button, delete. Header stats like Flow's: total words dictated, average WPM, daily streak. Full-text search.
+1. **History** — reverse-chronological feed of dictations: polished text (primary), expandable raw transcript, target app name, duration, copy button, delete. Full-text search. (Was "Home"; the headline numbers that used to sit on top of it moved to Insights, where they have room to be more than three numbers.)
+1. **Insights** — what the app has actually been used for: average WPM on a dial with a percentile against *published typing speeds* (never against other users — there is no server and therefore no cohort), lifetime words with a month-over-month badge, the three fixes Murmur made that the user did not have to (words cleaned by polishing, dictionary replacements that fired, snippets expanded), a per-app breakdown, and a year-long streak heatmap whose glow ends on the last day actually dictated. Every counter lives outside the retention window — deleting a transcript for privacy does not un-speak it — and only an explicit reset moves them. The per-app tally has its own switch in Settings.
 2. **Dictionary** — user-managed vocabulary: proper nouns, jargon, acronyms + optional "replace X with Y" rules (e.g., "murmer → Murmur", "eta → ETA"). Fed to both STT biasing and the polish prompt (§7.4). "Add from correction" flow later (M4).
 3. **Style** — tone controls per app category (Personal / Work / Email / Other), mapped from the frontmost app's bundle ID. Options per category: capitalization/punctuation strictness, formality, emoji allowance, filler-word handling. Plus a global "polishing level": Off (raw transcript) / Clean (punctuation, fillers, self-corrections) / Rewrite (tone + structure).
+4. **Notes** — the Scratchpad's list: full-text search, pin, rename, delete, "open in window". The floating Scratchpad window itself is opened from the Bar's hover cluster and is where capture happens; this is where a note is found again three weeks later. Notes are *documents*, not history: the retention sweep never touches them.
+4. **Vibe coding** — variable recognition and file tagging, with the setup flow for the IDE's own Screen Reader Accessibility Mode and a live "can we read the editor in front right now" check. See §18.3; the section leads with what the feature reads, because it is the one exception to the promise the rest of the app makes.
 4. **Models** — the model manager (§8): pick STT model, pick polish model, download/delete, disk usage, origin & license badges (US-only catalog, policy visibly enforced), custom model import, advanced: external OpenAI-compatible endpoint (e.g., company-approved LM Studio/Ollama).
 5. **Settings** — hotkey config (default: hold `fn`, like Flow; alternatives Right-⌘/Right-⌥ for external keyboards), double-tap for hands-free, mic selection, language(s), dictation sounds, launch at login, audio retention toggle (default **off** — audio deleted after transcription), history retention window, appearance (system/dark/light).
 6. **Help** — permissions status panel (re-check/fix buttons), troubleshooting, logs export (local only).
@@ -92,7 +97,7 @@ Template icon (mic glyph; subtle state change while listening). Menu: Open Hub �
 
 1. Welcome → 2. **Microphone** permission → 3. **Accessibility** permission (for text insertion) → 4. **Input Monitoring** permission (for the global hotkey) → 5. Pick + download a starter model pair with disk-size shown (offer a "smallest" and "recommended" bundle) → 6. Interactive tutorial: "hold `fn` and say *testing one two three*" into a practice text field → 7. Done; note about macOS's built-in double-fn dictation conflict with a one-click "open Keyboard settings" to disable it.
 
-Each permission screen shows exactly why it's needed and what is *not* done (no keylogging — the tap listens only for the configured hotkey; no screen reading).
+Each permission screen shows exactly why it's needed and what is *not* done (no keylogging — the tap listens only for the configured hotkey; no screen reading). The last of those is now conditional and must be stated as such: **Murmur reads no screen content unless the user switches on Vibe coding's variable recognition**, which is off by default, is scoped to three IDE bundle ids, stores nothing, and is described in full in §18.3. Help carries a live row saying which of the two states the app is currently in.
 
 ---
 
@@ -153,7 +158,8 @@ Cancel paths: Esc during listening; empty/silent audio → "No speech detected";
 |---|---|---|
 | Global hold-to-talk hotkey, incl. `fn` | `CGEventTap` (listen-only) for `keyDown/keyUp/flagsChanged`; `fn` arrives as `flagsChanged` with `.maskSecondaryFn`. Debounce; double-tap detection for hands-free. Electron's `globalShortcut` cannot do key-up or `fn`, hence native. | Input Monitoring |
 | Text insertion | Clipboard-swap + synthetic ⌘V (`CGEventPost`), the same technique Flow-class apps use; AX insertion fallback; never type into secure input (`IsSecureEventInputEnabled` check). | Accessibility |
-| Frontmost app (for tone category + history) | `NSWorkspace.frontmostApplication` bundle ID. No window titles, no screen content. | none |
+| Frontmost app (for tone category + history) | `NSWorkspace.frontmostApplication` bundle ID, display name and pid. No window titles, no screen content. | none |
+| Code context (Vibe coding, §18.3) | **Opt-in, off by default.** `kAXValueAttribute` of the focused element, capped at 20k chars, **only** when the frontmost bundle id is VS Code, Cursor or Windsurf. Secure fields refused. Identifiers extracted in memory, cached for seconds, never stored or logged. This is the one place Murmur reads screen content, and every gate on it lives in `code-context.ts`. | Accessibility |
 | Mic capture | `getUserMedia` in hidden renderer; `com.apple.security.device.audio-input` entitlement + `NSMicrophoneUsageDescription`. | Microphone |
 | Permission UX | `AXIsProcessTrustedWithOptions`, `CGPreflightListenEventAccess`/`CGRequestListenEventAccess`, `AVCaptureDevice.authorizationStatus` — surfaced in onboarding + Help panel with deep links into System Settings panes. | — |
 | Conflict: macOS built-in dictation on double-`fn` | Detect setting, warn during onboarding, link to Keyboard settings. | — |
@@ -305,7 +311,10 @@ Guardrail: if polish output diverges wildly in length from input (hallucination 
 
 ## 9. Data model (SQLite via better-sqlite3, WAL mode)
 
-- `dictations(id, ts, raw_text, polished_text, app_bundle_id, app_category, duration_ms, stt_model, polish_model, timings_json)` + FTS5 index on both text columns.
+- `dictations(id, ts, raw_text, polished_text, app_bundle_id, app_name, app_category, duration_ms, stt_model, polish_model, timings_json)` + FTS5 index on both text columns.
+- `lifetime_stats(id=1, total_words, timed_words, spoken_ms, dictionary_fixes, snippet_expansions, words_cleaned)` and `dictation_days(day, words, dictations, spoken_ms)` — the counters behind Home's numbers and the Insights section. **Deliberately outside the retention sweep**: derived from the rows, they would fall every time the sweep ran, which is a picture of the retention window rather than of the user.
+- `app_usage(bundle_id, display_name, category, words, dictations, spoken_ms, last_used_at)` — the Insights breakdown. Gated by `settings.insightsEnabled`; zeroed with the rest by "Reset insights".
+- `notes(id, title, body, created_at, updated_at, pinned)` + FTS5 on title and body — the Scratchpad. The one text table with **no retention policy at all**: a note is a document the user wrote, not a record of something that happened.
 - `dictionary(id, term, replacement NULL, enabled)` — NULL replacement = vocabulary-boost-only term.
 - `style_profiles(category, formality, fillers, emoji, level, custom_instructions)`.
 - `settings(key, value)` — hotkey, models, mic, language, retention, etc.
@@ -521,10 +530,59 @@ Ranked by value-for-effort; none block v1.0. The first two are the strongest dif
 6. **Auto-benchmark on first run** — a ~10 s on-device micro-bench picks default models per machine instead of static RAM tiers.
 7. **Mic priority list** — ordered preferred devices (AirPods → built-in) with auto-switch and per-device input-gain memory.
 8. **Menu-bar quick controls** — switch polishing level and language without opening the Hub.
-9. **Voice snippets** — "insert my standup template" expands saved snippets; the Dictionary's bigger sibling.
+9. ~~**Voice snippets**~~ — **shipped.** "insert my standup template" expands saved snippets; the Dictionary's bigger sibling.
 10. **Local translation mode** (experimental) — dictate in language A, insert in language B via the polish LLM.
 11. **Shared team dictionaries** — import/export dictionary packs as files (no server, keeps the zero-network posture).
 12. **Shallow-fusion hotword biasing** for the ONNX Runtime STT path — restores strong dictionary boosting for Parakeet during decoding (today it's post-STT replacement + polish-prompt correction).
+
+### 18.3 Vibe coding — shipped
+
+Dictation that knows the code in front of it. Two features, two switches, **both off by default**:
+
+- **Variable recognition.** The identifiers in the focused editor become recognition
+  context, so `useCallback` and `barBounds` come back spelled that way instead of as
+  "use callback" and "bar bounds". Extraction is language-agnostic — camelCase /
+  PascalCase / snake_case splitting, a keyword stoplist, frequency ranking, capped at 96
+  terms — because the output is a *hint* to a decoder, and a grammar per language would
+  be far more machinery than that is worth. Terms join the dictionary in Whisper's
+  `initial_prompt` and in the polish prompt's "spell these exactly" line, **after** the
+  dictionary in both: the user's dictionary is a standing instruction, code context is a
+  guess about whichever file happens to be open, and when the budget runs out the guess
+  is what goes.
+- **File tagging.** A spoken filename becomes the real one — "index dot ts" → `index.ts`
+  — matched only against files actually seen in the editor, never a guess, because
+  rewriting into a file that does not exist puts a broken reference in the user's
+  message. In Cursor and Windsurf it gains an `@` so their chat attaches the file; VS
+  Code gets the corrected name with no prefix. Runs beside snippet expansion, after
+  polishing, for the same reason snippets do: a filename has a right answer, and a model
+  asked to tidy `useNotes.ts` will eventually decide it meant "use notes".
+
+**What it reads, and why that needed its own section.** Everything else Murmur learns
+about the app you are dictating into is a bundle id. This reads the text of the focused
+editor, which is a real expansion of scope, so it is gated four ways and every gate lives
+in `dictation/code-context.ts` where a test can assert it:
+
+1. off until the user turns it on;
+2. an allowlist of exactly three bundle ids — VS Code, Cursor, Windsurf; not "editors",
+   not "apps whose window title ends in .ts". VS Code Insiders is explicitly denied,
+   because its id contains the release channel's as a prefix and its screen-reader mode
+   does not expose the editor the same way;
+3. nothing is stored — extraction lives in a one-entry in-memory cache for a few seconds
+   and is never written to the database or passed to the logger at any level;
+4. secure fields are refused inside the native call, before anything crosses into JS.
+
+The user must also turn on their IDE's own **Screen Reader Accessibility Mode** (command
+palette → *Toggle Screen Reader Accessibility Mode*): VS Code and its forks draw the
+editor on a canvas, and until that is on there is no text to read. Murmur does not turn it
+on for them and does not try — the Vibe coding section walks through it and offers a live
+check that reports whether the editor in front is readable, as a *count of names*, never
+the names themselves.
+
+**macOS only today.** The Windows backend does not export `readFocusedEditorText`; the UI
+Automation `TextPattern` equivalent is outstanding work (see WINDOWS-HANDOFF). The
+property is optional on the native interface and *absent* rather than stubbed on the other
+platforms, so a caller has to handle "this platform cannot" instead of receiving a
+plausible empty string.
 
 ## 19. References
 

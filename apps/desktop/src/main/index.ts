@@ -17,6 +17,7 @@ import { AUDIO } from './config'
 import { EscapeCancel } from './dictation/escape'
 import { HotkeyBridge } from './dictation/hotkey'
 import { TextInjector } from './dictation/injector'
+import { CodeContextReader, ideForBundleId, supportsFileTagging } from './dictation/code-context'
 import { DictationOrchestrator } from './dictation/orchestrator'
 import { DictationStateMachine } from './dictation/state-machine'
 import { EngineCoordinator } from './engines/coordinator'
@@ -30,10 +31,11 @@ import { databasePath, openDatabase } from './store/db'
 import {
   DictationsRepository,
   DictionaryRepository,
+  NotesRepository,
   SnippetsRepository,
   MeetingsRepository,
   StyleRepository,
-  applyReplacements,
+  applyReplacementsWithCount,
 } from './store/repositories'
 import { FrameBus } from './audio/frame-bus'
 import {
@@ -177,9 +179,23 @@ async function bootstrap(): Promise<void> {
   if (database.recoveredFrom) {
     log.warn(`history database was unusable; the old file is at ${database.recoveredFrom}`)
   }
+  /**
+   * Vibe coding's editor read (PLAN §18.3).
+   *
+   * Constructed unconditionally, like the meeting recorder, and for the same
+   * reason: building it starts nothing. Every gate — the setting, the IDE
+   * allowlist, the native call's own refusals — lives inside `read()`, which
+   * returns nothing at all until the user has opted in.
+   */
+  const codeContext = new CodeContextReader({
+    native,
+    settings: () => settings.get().vibeCoding,
+  })
+
   const dictations = new DictationsRepository(database.db)
   const dictionary = new DictionaryRepository(database.db)
   const snippets = new SnippetsRepository(database.db)
+  const notes = new NotesRepository(database.db)
   const style = new StyleRepository(database.db)
   const meetingStore = new MeetingsRepository(database.db)
 
@@ -243,12 +259,27 @@ async function bootstrap(): Promise<void> {
     dictionary: () => dictionary.enabled(),
     // Post-STT replacement rules run before polishing, so the polish prompt
     // sees — and preserves — the corrected spelling (PLAN §6.4).
-    applyDictionary: (text) => applyReplacements(text, dictionary.enabled()),
+    applyDictionary: (text) => applyReplacementsWithCount(text, dictionary.enabled()),
     // Read per utterance, not captured once: a snippet added in the Hub should
     // work on the next dictation without a restart.
     snippets: () => snippets.enabled(),
     styleFor: (category) => style.forCategory(category),
     frontmostApp: () => native().getFrontmostApp(),
+    codeContext: (bundleId) => codeContext.read(bundleId),
+    fileTagging: (bundleId) => {
+      const vibe = settings.get().vibeCoding
+      const ide = ideForBundleId(bundleId)
+      return {
+        // Tagging needs the editor read to supply the real filenames, so it
+        // cannot run on its own — a rewrite against a guessed file list would
+        // put broken references in the user's message.
+        enabled: ide !== null && vibe.fileTagging && vibe.variableRecognition,
+        // Only Cursor and Windsurf understand `@file`; VS Code gets the real
+        // filename with no prefix, which is still an improvement on "index dot
+        // ts" but is not a chat attachment.
+        at: ide !== null && supportsFileTagging(ide),
+      }
+    },
     // Command mode (PLAN §18.1): a non-empty selection at hotkey-down flips
     // the utterance into an edit instruction. Gated on the setting and read
     // through AX, which is already granted for insertion.
@@ -273,8 +304,15 @@ async function bootstrap(): Promise<void> {
       const result = native().getTextBeforeCursor(8)
       return result.ok ? (result.text ?? '') : null
     },
-    persist: (record) => {
-      dictations.insert(record)
+    persist: (record, fixes) => {
+      dictations.insert(record, {
+        fixes,
+        // Read per dictation, not captured at boot: turning the switch off in
+        // Settings must stop the next dictation being tallied, not the next
+        // launch. Only the per-app breakdown is gated — the word, streak and
+        // fix counters are the lifetime totals Murmur has always kept.
+        collectAppUsage: settings.get().insightsEnabled,
+      })
     },
     // No `onLevel` from PCM frames: the Bar is fed by the capture renderer's
     // ~30 Hz `audio.meter` → `audio.level` relay (PLAN §2.1).
@@ -377,8 +415,10 @@ async function bootstrap(): Promise<void> {
     hotkeys,
     audio,
     injector,
+    codeContext,
     dictations,
     dictionary,
+    notes,
     snippets,
     style,
     frames,
@@ -454,6 +494,9 @@ async function bootstrap(): Promise<void> {
     // Turning detection off has to actually tear the timer down, not just make
     // its result unused — "off" means inert.
     watcher.sync()
+    // Same discipline for the editor read: switching vibe coding off must drop
+    // what was already extracted, not merely stop extracting more.
+    codeContext.forget()
   })
 
   // A detected meeting has to reach someone who may not have the Hub open —

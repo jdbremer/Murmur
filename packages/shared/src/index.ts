@@ -9,8 +9,10 @@
 // Domain -------------------------------------------------------------------
 export * from './domain/settings'
 export * from './domain/dictation'
+export * from './domain/insights'
 export * from './domain/meeting'
 export * from './domain/dictionary'
+export * from './domain/note'
 export * from './domain/snippet'
 export * from './domain/style'
 export * from './domain/permissions'

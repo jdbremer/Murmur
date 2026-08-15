@@ -94,6 +94,70 @@ export function computeStreak(
 }
 
 /**
+ * How many words polishing took out — the "words cleaned up" figure.
+ *
+ * Measured as the drop from raw to polished, and deliberately floored at zero:
+ * a Rewrite-level pass that *adds* words has not un-cleaned anything, and a
+ * negative contribution to a lifetime counter would let one verbose rewrite
+ * erase a hundred genuine filler removals.
+ *
+ * It is an estimate and the UI must say so. At Clean level it is very nearly
+ * exactly the fillers and false starts; at Rewrite level a shortened sentence
+ * counts here too. What it is *not* is a count of errors corrected — nothing in
+ * this pipeline knows what the user meant to say.
+ */
+export function wordsRemovedByPolish(rawText: string, polishedText: string | null): number {
+  if (!polishedText || !polishedText.trim()) return 0
+  return Math.max(0, countWords(rawText) - countWords(polishedText))
+}
+
+/**
+ * The last day the current streak actually covers — today or yesterday.
+ *
+ * Returns `null` when there is no live streak. The Insights heatmap needs this
+ * separately from the streak's *length* because the glow has to stop on a day
+ * the user really dictated: drawing it from "today minus `streakDays`" lights
+ * today's empty square the moment the clock passes midnight, which reads as a
+ * streak the user has not earned yet. (Flow shipped exactly that bug.)
+ */
+export function streakEndDay(
+  days: ReadonlySet<string>,
+  now: number,
+  timeZoneOffsetMinutes?: number,
+): string | null {
+  const today = dayKey(now, timeZoneOffsetMinutes)
+  if (days.has(today)) return today
+  const yesterday = dayKey(now - 86_400_000, timeZoneOffsetMinutes)
+  return days.has(yesterday) ? yesterday : null
+}
+
+/**
+ * The longest run of consecutive days in the whole set, live or not.
+ *
+ * Unlike {@link computeStreak} this is anchored to nothing — it is a fact about
+ * the history rather than about today, so it never falls when the user takes a
+ * day off. That is the whole reason it is worth showing beside the current one.
+ */
+export function longestStreak(days: ReadonlySet<string>): number {
+  let longest = 0
+  for (const day of days) {
+    // Only start counting from a day that begins a run, so each run is walked
+    // once rather than once per member.
+    const previous = dayKeyFromUtcMidnight(Date.parse(`${day}T00:00:00Z`) - 86_400_000)
+    if (days.has(previous)) continue
+
+    let run = 0
+    let cursor = Date.parse(`${day}T00:00:00Z`)
+    while (days.has(dayKeyFromUtcMidnight(cursor))) {
+      run += 1
+      cursor += 86_400_000
+    }
+    if (run > longest) longest = run
+  }
+  return longest
+}
+
+/**
  * Day key for a timestamp already normalised to UTC midnight.
  *
  * Kept separate from {@link dayKey} on purpose: walking the streak backwards

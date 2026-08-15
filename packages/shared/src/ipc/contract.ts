@@ -14,6 +14,13 @@ import {
   DictionaryEntryPatchSchema,
   DictionaryEntrySchema,
 } from '../domain/dictionary'
+import {
+  NoteDraftSchema,
+  NoteListSchema,
+  NotePatchSchema,
+  NoteQuerySchema,
+  NoteSchema,
+} from '../domain/note'
 import { SnippetDraftSchema, SnippetPatchSchema, SnippetSchema } from '../domain/snippet'
 import { EnginesStatusSchema } from '../domain/engine'
 import {
@@ -25,6 +32,7 @@ import {
   SystemAudioAccessSchema,
 } from '../domain/meeting'
 import { HardwareReportSchema } from '../domain/hardware'
+import { InsightsSchema } from '../domain/insights'
 import { PermissionKindSchema, PermissionsStatusSchema } from '../domain/permissions'
 import { SettingsPatchSchema, SettingsSchema } from '../domain/settings'
 import { UpdateStateSchema } from '../domain/updates'
@@ -275,6 +283,23 @@ export const invokeContract = {
   'history.clear': { request: z.void(), response: z.void() },
   'history.stats': { request: z.void(), response: HistoryStatsSchema },
 
+  // --- insights (PLAN §2.2.2) --------------------------------------------
+  /**
+   * Everything the Insights section draws, in one read.
+   *
+   * One channel rather than one per tile because the numbers have to agree with
+   * each other: separate calls could straddle a dictation and render a streak
+   * that includes a day the word count does not.
+   */
+  'insights.get': { request: z.void(), response: InsightsSchema },
+  /**
+   * Zero every counter — words, streak days, per-app tally, fixes — without
+   * deleting a single transcript. The inverse of `history.clear`, which erases
+   * the text; someone who only wants the charts to start over should not have
+   * to throw away what they said to get it.
+   */
+  'insights.reset': { request: z.void(), response: InsightsSchema },
+
   // --- dictionary (PLAN §2.2.2) ------------------------------------------
   'dictionary.list': { request: z.void(), response: z.array(DictionaryEntrySchema) },
   'dictionary.create': { request: DictionaryEntryDraftSchema, response: DictionaryEntrySchema },
@@ -293,9 +318,56 @@ export const invokeContract = {
   },
   'snippets.delete': { request: IdRequestSchema, response: z.void() },
 
+  // --- notes / scratchpad (PLAN §2.2.7) ----------------------------------
+  'notes.list': { request: NoteQuerySchema, response: NoteListSchema },
+  'notes.get': { request: IdRequestSchema, response: NoteSchema.nullable() },
+  'notes.create': { request: NoteDraftSchema, response: NoteSchema },
+  'notes.update': {
+    request: z.object({ id: z.string().min(1), patch: NotePatchSchema }),
+    response: NoteSchema,
+  },
+  'notes.delete': { request: IdRequestSchema, response: z.void() },
+  /**
+   * Open (or focus) the floating Scratchpad window.
+   *
+   * `noteId: null` means "start a new one" — the Bar's cluster button, whose
+   * whole value is that a thought goes somewhere before it is gone. Main owns
+   * creating the note so the window opens onto something that already exists,
+   * rather than racing its own first autosave.
+   */
+  'notes.openWindow': {
+    request: z.object({ noteId: z.string().min(1).nullable().default(null) }),
+    response: NoteSchema,
+  },
+
   // --- style (PLAN §2.2.3) -----------------------------------------------
   'style.get': { request: z.void(), response: StyleProfileSetSchema },
   'style.set': { request: StyleProfilePatchSchema, response: StyleProfileSetSchema },
+
+  // --- vibe coding (PLAN §18.3) ------------------------------------------
+  /**
+   * Can we read the editor that is in front right now?
+   *
+   * Answers the one question the setup card exists to answer — is the IDE's
+   * Screen Reader Accessibility Mode on — and deliberately answers nothing
+   * else. It returns a count of names found, **never the names and never the
+   * text**: showing the user their own source back would be a strange way to
+   * confirm a setting, and would put code into a renderer that has no reason to
+   * hold any.
+   */
+  'coding.probe': {
+    request: z.void(),
+    response: z.object({
+      /** Which allowlisted IDE is in front, or `null` for anything else. */
+      ide: z.enum(['vscode', 'cursor', 'windsurf']).nullable(),
+      readable: z.boolean(),
+      symbolCount: z.number().int().nonnegative(),
+      /** One sentence naming the next thing the user should do. */
+      detail: z.string(),
+      /** The frontmost app's display name, so the card can name it. */
+      frontmostApp: z.string().nullable(),
+    }),
+  },
 
   // --- permissions (PLAN §4) ---------------------------------------------
   'permissions.status': { request: z.void(), response: PermissionsStatusSchema },
@@ -478,6 +550,23 @@ export const eventContract = {
    * shared channel would make the Bar's state switch ambiguous.
    */
   'meeting.changed': MeetingEventSchema,
+  /**
+   * A note was created, edited or deleted.
+   *
+   * Broadcast because the Scratchpad window and the Hub's Notes section can be
+   * open at once over the same rows — an edit in one that the other does not
+   * see is how two views of one document start disagreeing.
+   */
+  'notes.changed': z.object({ id: z.string().nullable() }),
+  /**
+   * Main → the Scratchpad: show this note.
+   *
+   * Separate from focusing the window, because the two are genuinely different
+   * asks and only one of them has an answer the window can work out for itself.
+   * Without this, opening a specific note from the Hub raised the Scratchpad on
+   * whatever sorted first — which is the *newest* note, never the one clicked.
+   */
+  'notes.select': z.object({ id: z.string().min(1) }),
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract

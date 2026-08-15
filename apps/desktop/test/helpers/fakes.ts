@@ -130,6 +130,8 @@ export interface OrchestratorHarness {
     current: { ok: true } | { ok: false; reason: 'secure-input'; message: string }
   }
   persisted: Parameters<OrchestratorDeps['persist']>[0][]
+  /** The fix counts handed to `persist`, index-aligned with `persisted`. */
+  persistedFixes: Parameters<OrchestratorDeps['persist']>[1][]
   events: { state: string; code?: string }[]
   insertedText: string[]
   /** Mutable: push a Snippet and the next utterance expands it. */
@@ -156,6 +158,7 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
   const insertResult = { current: { ok: true, method: 'paste' } as InjectionResult }
   const precheckResult: OrchestratorHarness['precheckResult'] = { current: { ok: true } }
   const persisted: Parameters<OrchestratorDeps['persist']>[0][] = []
+  const persistedFixes: Parameters<OrchestratorDeps['persist']>[1][] = []
   const insertedText: string[] = []
   const events: { state: string; code?: string }[] = []
   const persistThrows = { current: false }
@@ -184,14 +187,15 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
     audio,
     settings: () => settings,
     dictionary: () => dictionary,
-    applyDictionary: (text) => text,
+    applyDictionary: (text) => ({ text, replacements: 0 }),
     // Mutable so a test can push a snippet and re-run an utterance.
     snippets: () => snippets,
     styleFor: () => profile,
     frontmostApp: () => ({ bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' }),
-    persist: (record) => {
+    persist: (record, fixes) => {
       if (persistThrows.current) throw new Error('disk full')
       persisted.push(record)
+      persistedFixes.push(fixes)
     },
     log: createNullLogger(),
   }
@@ -206,6 +210,7 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
     insertResult,
     precheckResult,
     persisted,
+    persistedFixes,
     events,
     insertedText,
     snippets,

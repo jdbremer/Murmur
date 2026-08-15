@@ -17,13 +17,13 @@ import { loadRenderer, PRELOAD_PATH } from './renderer'
 export const BAR_WIDTH = 360
 /**
  * Taller than the capsule on purpose. The pill sits flush with the bottom of
- * the page; the empty space above it is where the hover controls' mic picker
- * opens, so the window never has to resize mid-interaction (which on macOS
- * would fight the ~150 ms morph the pill is already animating). Everything
- * above the pill is transparent *and* click-through, so it costs the user
- * nothing.
+ * the page; the space above it is where the hover cluster's two rows stand
+ * (~86 px) and where the mic picker opens above them, so the window never has
+ * to resize mid-interaction (which on macOS would fight the ~150 ms morph the
+ * pill is already animating). Everything above the pill is transparent *and*
+ * click-through, so it costs the user nothing.
  */
-export const BAR_HEIGHT = 200
+export const BAR_HEIGHT = 250
 /** Gap between the pill and whatever is below it (PLAN §2.1). */
 export const BAR_MARGIN_BOTTOM = 10
 

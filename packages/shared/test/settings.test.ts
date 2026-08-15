@@ -39,6 +39,8 @@ describe('SettingsSchema', () => {
         keepAudio: false,
         autoRecord: {},
       },
+      insightsEnabled: true,
+      vibeCoding: { variableRecognition: false, fileTagging: false },
     } satisfies Settings)
   })
 

@@ -18,7 +18,7 @@ const HUB_MIN_HEIGHT = 560
  * from the stylesheet because the main process cannot read CSS variables; the
  * pair is small, and getting them out of step is a cosmetic bug at worst.
  */
-const CANVAS = { light: '#faf8f5', dark: '#0d0d10' } as const
+const CANVAS = { light: '#f7f4ef', dark: '#0d0d10' } as const
 
 const isMac = process.platform === 'darwin'
 

@@ -244,6 +244,34 @@ export const MeetingSettingsSchema = z.object({
 export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>
 
 // ---------------------------------------------------------------------------
+// Vibe coding
+// ---------------------------------------------------------------------------
+
+/**
+ * Reading the editor you are dictating into (PLAN §18.3).
+ *
+ * **Both switches are off by default, and off means nothing is read.** This is
+ * the one feature in Murmur that looks at screen content, so it is opt-in twice
+ * over: the user turns it on, *and* has to turn on their IDE's own Screen
+ * Reader Accessibility Mode before the editor exposes any text at all.
+ *
+ * Scoped to three bundle ids (VS Code, Cursor, Windsurf) in `code-context.ts`.
+ * Nothing extracted is stored, logged, or sent anywhere — see that file for the
+ * full set of gates and why each one is where it is.
+ */
+export const VibeCodingSettingsSchema = z.object({
+  /** Feed identifiers from the open file to recognition. */
+  variableRecognition: z.boolean().default(false),
+  /**
+   * Rewrite spoken filenames to the real ones, and prefix `@` in Cursor and
+   * Windsurf so their chat attaches the file. Requires `variableRecognition`,
+   * because it is the editor read that supplies the list of real filenames.
+   */
+  fileTagging: z.boolean().default(false),
+})
+export type VibeCodingSettings = z.infer<typeof VibeCodingSettingsSchema>
+
+// ---------------------------------------------------------------------------
 // Settings
 // ---------------------------------------------------------------------------
 
@@ -294,6 +322,19 @@ const settingsFields = {
   soundCuesEnabled: z.boolean(),
   /** Long-form meeting capture. Off by default — see {@link MeetingSettingsSchema}. */
   meetings: MeetingSettingsSchema,
+  /**
+   * Keep the per-app tally behind the Insights section's breakdown.
+   *
+   * On by default, because an Insights tab that is empty until you find a
+   * switch is not a feature. Narrower than it sounds: the counters live in the
+   * same local database as everything else, never leave the machine, and the
+   * word/streak totals Murmur has always kept are unaffected by this flag —
+   * only "which apps, how often" is. Settings offers a reset that zeroes the
+   * lot without deleting a single transcript.
+   */
+  insightsEnabled: z.boolean(),
+  /** Code-aware dictation. Off by default — see {@link VibeCodingSettingsSchema}. */
+  vibeCoding: VibeCodingSettingsSchema,
 } as const
 
 /** Full settings: unknown/missing keys fall back to the shipped defaults. */
@@ -317,6 +358,8 @@ export const SettingsSchema = z.object({
   commandModeEnabled: settingsFields.commandModeEnabled.default(true),
   soundCuesEnabled: settingsFields.soundCuesEnabled.default(true),
   meetings: settingsFields.meetings.default(() => MeetingSettingsSchema.parse({})),
+  insightsEnabled: settingsFields.insightsEnabled.default(true),
+  vibeCoding: settingsFields.vibeCoding.default(() => VibeCodingSettingsSchema.parse({})),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 

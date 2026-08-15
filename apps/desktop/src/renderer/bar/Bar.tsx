@@ -1,11 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { AudioDevice, BarVisibility, DictationEvent } from '@murmur/shared'
+import type { AudioDevice, BarVisibility, DictationEvent, HotkeyKey } from '@murmur/shared'
 
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { BarCanvas, CheckPulse } from './BarCanvas'
 import { barHeights } from './level'
-import { BAR, BAR_SHADOW, BarPresenter, describeBar, isBarVisible, type BarVisual } from './visual'
+import {
+  BAR,
+  BAR_HALO,
+  BAR_IDLE_BACKGROUND,
+  BAR_IDLE_BORDER,
+  BAR_SHADOW,
+  BarPresenter,
+  CLUSTER,
+  describeBar,
+  describeCluster,
+  HOVER_ZONE,
+  isBarVisible,
+  type BarVisual,
+  type ClusterAction,
+  type ClusterButton,
+  type ClusterSpec,
+} from './visual'
 
 /**
  * How long the exit animation gets before the pill unmounts. Must stay inside
@@ -35,6 +51,12 @@ const EXIT_MS = 170
  *  3. **Momentary states are held here.** Main emits `inserted` and `error` and
  *     immediately settles to `idle`; {@link BarPresenter} keeps them on screen
  *     for the durations PLAN §2.1 gives them.
+ *
+ * Hovering swaps the pill for a row of floating buttons rather than growing it
+ * (see {@link describeCluster}). That swap is the one thing here that can go
+ * badly wrong: the resting pill is a 10 px sliver, and hit-testing a target
+ * that vanishes under the pointer flickers. {@link HOVER_ZONE} is the fix — a
+ * fixed rectangle, larger than either state, that owns the hover once it starts.
  */
 export function Bar(): React.JSX.Element | null {
   const presenter = useRef(new BarPresenter())
@@ -46,6 +68,8 @@ export function Bar(): React.JSX.Element | null {
   const [hovered, setHovered] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [devices, setDevices] = useState<AudioDevice[]>([])
+  /** The configured hotkey, shown inside the Dictate button ("Dictate fn"). */
+  const [hotkeyKey, setHotkeyKey] = useState<HotkeyKey>('fn')
   /** A meeting is recording — shown alongside whatever dictation is doing. */
   const [recording, setRecording] = useState(false)
   const [micDeviceId, setMicDeviceId] = useState<string | null>(null)
@@ -106,10 +130,12 @@ export function Bar(): React.JSX.Element | null {
     const apply = (settings: {
       barVisibility: BarVisibility
       micDeviceId: string | null
+      hotkey: { key: HotkeyKey }
     }): void => {
       visibilityRef.current = settings.barVisibility
       setVisibility(settings.barVisibility)
       setMicDeviceId(settings.micDeviceId)
+      setHotkeyKey(settings.hotkey.key)
     }
     void window.murmur.settings.get().then(apply).catch(noop)
     const unsubscribeSettings = window.murmur.settings.subscribe(apply)
@@ -142,11 +168,17 @@ export function Bar(): React.JSX.Element | null {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [menuOpen])
 
-  const visual = useMemo(
-    () => describeBar(event, hovered || menuOpen, recording),
-    [event, hovered, menuOpen, recording],
-  )
+  const showCluster = hovered || menuOpen
+  const visual = useMemo(() => describeBar(event, recording), [event, recording])
+  const cluster = useMemo(() => describeCluster(event), [event])
   const visible = isBarVisible(visibility, event, recording)
+  // The states that cast light on the desktop behind the pill. `event` is the
+  // presenter's *held* event, so `inserted` persists long enough for the
+  // halo's flash to complete inside it.
+  const haloState =
+    event.state === 'listening' || event.state === 'inserted' || event.state === 'error'
+      ? event.state
+      : null
 
   // -- entrance / exit -------------------------------------------------------
   // `visible` flips instantly; `present` lingers for EXIT_MS so the capsule can
@@ -161,10 +193,36 @@ export function Bar(): React.JSX.Element | null {
     return () => clearTimeout(timer)
   }, [visible, reducedMotion])
 
+  // The cluster gets the same treatment on a shorter clock: hover ending
+  // starts its exit animation rather than unmounting it on that frame, which
+  // was the cheapest-looking moment on the whole surface — controls that
+  // vanish between two pointer samples read as a glitch, not a dismissal.
+  const [clusterPresent, setClusterPresent] = useState(false)
+  if (showCluster && !clusterPresent) setClusterPresent(true)
+  useEffect(() => {
+    if (showCluster) return
+    const timer = setTimeout(() => setClusterPresent(false), reducedMotion ? 100 : CLUSTER.leaveMs)
+    return () => clearTimeout(timer)
+  }, [showCluster, reducedMotion])
+
   // -- click-through hit-testing --------------------------------------------
   const pillRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const zoneRef = useRef<HTMLDivElement | null>(null)
   const interactiveRef = useRef(false)
+  /**
+   * Whether the cluster is up, as the *mouse handler* sees it.
+   *
+   * Maintained by the handler itself rather than mirrored from state, and that
+   * is the whole point: writing it from an effect leaves it a paint behind, and
+   * moves arrive at 60–125 Hz. One stale read sends the next move down the
+   * narrow "entering" branch, which tests the collapsed 44 px sliver — so a
+   * pointer already travelling along the cluster reads as outside and the two
+   * states start fighting. Kept in a ref rather than in state so the listener
+   * below is subscribed once; resubscribing mid-gesture drops the move that
+   * would have ended it.
+   */
+  const hoveredRef = useRef(false)
 
   const setInteractive = useCallback((next: boolean) => {
     if (interactiveRef.current === next) return
@@ -172,25 +230,67 @@ export function Bar(): React.JSX.Element | null {
     window.murmur.bar.setPointerRegion({ interactive: next })
   }, [])
 
+  /**
+   * Hover intent. The pointer arms an open timer by resting on the pill and a
+   * close timer by stepping out of the zone; either is cancelled by movement
+   * the other way. This is what separates deliberate hovers from pass-throughs
+   * — with the immediate version, every pointer that crossed the bottom of the
+   * screen played the whole swap, which is what "touchy" was.
+   */
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
+    const clearTimer = (timer: typeof openTimer): void => {
+      if (timer.current !== null) {
+        clearTimeout(timer.current)
+        timer.current = null
+      }
+    }
+
     const onMove = (moveEvent: MouseEvent): void => {
-      const inside =
-        visible &&
-        (hits(pillRef.current, moveEvent.clientX, moveEvent.clientY) ||
-          hits(panelRef.current, moveEvent.clientX, moveEvent.clientY))
-      setHovered(inside)
-      // Moving off the pill+menu closes the menu — there is no other way out:
-      // this window is focusable:false, so it never gets a blur or an outside
-      // click, and holding the whole 360×200 window interactive while a menu
-      // sits open would swallow clicks meant for the app underneath.
-      if (menuOpen && !inside) setMenuOpen(false)
-      setInteractive(inside)
+      const { clientX, clientY } = moveEvent
+      // Asymmetric on purpose. *Entering* is judged against the pill itself
+      // (plus a little slack), so the buttons never arm from a stray pass
+      // near the bottom of the screen. *Staying* is judged against the fixed
+      // zone, which is larger than the row — otherwise collapsing the pill
+      // out from under the pointer would immediately un-hover it, and the two
+      // states would fight each other at ~60 Hz.
+      const inside = hoveredRef.current
+        ? hits(zoneRef.current, clientX, clientY) || hits(panelRef.current, clientX, clientY)
+        : hits(pillRef.current, clientX, clientY, 8)
+
+      if (inside && visible) {
+        clearTimer(closeTimer)
+        if (!hoveredRef.current && openTimer.current === null) {
+          openTimer.current = setTimeout(() => {
+            openTimer.current = null
+            hoveredRef.current = true
+            setHovered(true)
+            setInteractive(true)
+          }, CLUSTER.openDelayMs)
+        }
+      } else {
+        clearTimer(openTimer)
+        if (hoveredRef.current && closeTimer.current === null) {
+          closeTimer.current = setTimeout(() => {
+            closeTimer.current = null
+            hoveredRef.current = false
+            setHovered(false)
+            // The menu dies with the hover — there is no other way out: this
+            // window is focusable:false, so it never gets a blur or an
+            // outside click.
+            setMenuOpen(false)
+            setInteractive(false)
+          }, CLUSTER.closeGraceMs)
+        }
+      }
     }
 
     const onLeave = (): void => {
-      setHovered(false)
-      setMenuOpen(false)
-      setInteractive(false)
+      // The pointer left the whole window; the same grace applies — it may be
+      // arcing over the transparent edge on its way back to a button.
+      onMove(new MouseEvent('mousemove', { clientX: -1000, clientY: -1000 }))
     }
 
     window.addEventListener('mousemove', onMove)
@@ -198,21 +298,73 @@ export function Bar(): React.JSX.Element | null {
     return () => {
       window.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseleave', onLeave)
+      clearTimer(openTimer)
+      clearTimer(closeTimer)
     }
-  }, [menuOpen, setInteractive, visible])
+  }, [setInteractive, visible])
 
-  // A pill that goes away must not leave the window swallowing clicks.
+  // A pill that goes away must not leave the window swallowing clicks — and
+  // must not leave the handler believing the cluster is still up, or a timer
+  // about to open it over nothing.
   useEffect(() => {
-    if (!visible) setInteractive(false)
+    if (visible) return
+    if (openTimer.current !== null) clearTimeout(openTimer.current)
+    hoveredRef.current = false
+    setInteractive(false)
+    // Through the close timer at zero rather than a bare setState: it is the
+    // same "the hover is over" transition the pointer path takes, and it keeps
+    // this effect from setting state synchronously mid-commit.
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current)
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null
+      setHovered(false)
+      setMenuOpen(false)
+    }, 0)
+    return () => {
+      if (closeTimer.current !== null) {
+        clearTimeout(closeTimer.current)
+        closeTimer.current = null
+      }
+    }
   }, [setInteractive, visible])
 
   if (!visible && !present) return null
 
-  const showControls = hovered || menuOpen
+  const onClusterAction = (action: ClusterAction): void => {
+    switch (action) {
+      case 'dictate':
+        // Hands-free, because a click has no key to hold. The Bar window is
+        // focusable:false and, on macOS, a non-activating panel — so clicking
+        // here does not change the frontmost app, and the utterance still lands
+        // in whatever the user was working in.
+        setMenuOpen(false)
+        void window.murmur.dictation.startHandsFree().catch(noop)
+        return
+      case 'stop':
+        setMenuOpen(false)
+        void window.murmur.dictation.stopHandsFree().catch(noop)
+        return
+      case 'cancel':
+        setMenuOpen(false)
+        void window.murmur.dictation.cancel().catch(noop)
+        return
+      case 'scratchpad':
+        setMenuOpen(false)
+        void window.murmur.notes.openWindow({ noteId: null }).catch(noop)
+        return
+      case 'mic':
+        setMenuOpen((open) => !open)
+        return
+      case 'hub':
+        setMenuOpen(false)
+        void window.murmur.app.openHub().catch(noop)
+        return
+    }
+  }
 
   return (
     <div
-      className="bar-stage flex h-full w-full flex-col items-center justify-end"
+      className="bar-stage relative flex h-full w-full flex-col items-center justify-end"
       data-leaving={visible ? undefined : 'true'}
     >
       {menuOpen ? (
@@ -227,80 +379,364 @@ export function Bar(): React.JSX.Element | null {
         />
       ) : null}
 
+      {/*
+        The hover zone. Invisible, click-through, and centred on the pill: it
+        exists only so the pointer has a stable rectangle to be "inside" while
+        the pill collapses and the cluster grows in its place. Sized in
+        `visual.ts` so the test can pin it.
+
+        Positioned explicitly rather than by flex static position. Every "stay
+        hovered" hit-test measures this element's rect, so where it lands is
+        load-bearing — leaving it to an abspos flex child's default placement
+        would make the anti-flicker mechanism depend on a layout detail nothing
+        states. Hence `relative` on the stage above and the centring here.
+      */}
       <div
-        ref={pillRef}
-        data-testid="bar-pill"
-        data-state={event.state}
-        data-shape={visual.shape}
-        role="status"
-        aria-live={visual.announce ? 'polite' : 'off'}
-        aria-label={visual.ariaLabel}
-        className="bar-pill relative flex items-center justify-center overflow-hidden rounded-full"
-        style={{
-          width: visual.width,
-          height: visual.height,
-          background: visual.background,
-          border: `1px solid ${visual.border}`,
-          boxShadow: visual.glow ? `${BAR_SHADOW}, ${visual.glow}` : BAR_SHADOW,
-          backdropFilter: 'blur(14px)',
-          color: 'rgba(255,255,255,0.94)',
-          transition: reducedMotion
-            ? 'opacity 120ms linear, background-color 120ms linear'
-            : [
-                `width ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
-                `height ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
-                `background-color ${BAR.morphMs}ms ease-out`,
-                `border-color ${BAR.morphMs}ms ease-out`,
-                // The glow blooms and fades slower than the morph, so a state
-                // change reads as a wash of colour rather than a switch.
-                `box-shadow ${BAR.morphMs * 2}ms ease-out`,
-                `opacity ${BAR.morphMs}ms ease-out`,
-              ].join(', '),
-        }}
-      >
-        {/* Glass: a top-lit sheen over the capsule, under everything else. */}
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-full"
-          style={{
-            background:
-              'linear-gradient(to bottom, rgba(255,255,255,0.085), rgba(255,255,255,0.015) 55%, rgba(0,0,0,0.06))',
-          }}
-        />
-        {/* The interior slides left to make room for the hover controls rather
-            than being overlapped by them. min-w-0 keeps a long error message
-            truncating inside the capsule instead of overflowing it.
-            Half the controls' footprint is exactly the shift that re-centres
-            the interior in what is left of the capsule. */}
+        ref={zoneRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2"
+        style={{ width: HOVER_ZONE.width, height: HOVER_ZONE.height }}
+      />
+
+      {/* Pill and cluster occupy the same spot and cross-fade. Stacked rather
+          than swapped so neither reflows the other on the way in or out. */}
+      <div className="relative flex items-end justify-center" style={{ height: cluster.height }}>
+        {haloState ? (
+          <Halo state={haloState} width={visual.width} reducedMotion={reducedMotion} />
+        ) : null}
+
         <div
-          className="relative flex min-w-0 max-w-full items-center justify-center"
+          ref={pillRef}
+          data-testid="bar-pill"
+          data-state={event.state}
+          data-shape={visual.shape}
+          role="status"
+          aria-live={visual.announce ? 'polite' : 'off'}
+          aria-label={visual.ariaLabel}
+          className="bar-pill relative flex items-center justify-center overflow-hidden rounded-full"
           style={{
-            transform: showControls ? `translateX(-${BAR.controlsWidth / 2}px)` : 'none',
-            transition: reducedMotion ? 'none' : `transform ${BAR.morphMs}ms ease-out`,
+            width: visual.width,
+            height: visual.height,
+            background: visual.background,
+            border: `1px solid ${visual.border}`,
+            boxShadow: visual.glow ? `${BAR_SHADOW}, ${visual.glow}` : BAR_SHADOW,
+            // Deliberately NO backdrop-filter, here or on the cluster chips.
+            // In a transparent Electron window it can only sample the window's
+            // *own* content — behind this capsule that is empty transparency,
+            // so it blurs nothing and shows nothing, yet still drags the
+            // compositor through the full backdrop chain on every animated
+            // frame. Five of these ran during the hover swap and the swap
+            // visibly hitched. Real desktop vibrancy needs the native
+            // NSVisualEffectView; until then the sheen layers below are the
+            // glass, and they are free.
+            color: 'rgba(255,255,255,0.94)',
+            // Out of the way while the cluster is up — but still laid out, so
+            // the row keeps its position and the fade has something to fade.
+            opacity: showCluster ? 0 : 1,
+            pointerEvents: showCluster ? 'none' : 'auto',
+            transition: reducedMotion
+              ? `opacity ${CLUSTER.fadeMs}ms linear`
+              : [
+                  `width ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
+                  `height ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
+                  `background-color ${BAR.morphMs}ms ease-out`,
+                  `border-color ${BAR.morphMs}ms ease-out`,
+                  // The glow blooms and fades slower than the morph, so a state
+                  // change reads as a wash of colour rather than a switch.
+                  `box-shadow ${BAR.morphMs * 2}ms ease-out`,
+                  `opacity ${CLUSTER.fadeMs}ms ease-out`,
+                ].join(', '),
           }}
         >
-          <BarInterior visual={visual} levelRef={levelRef} reducedMotion={reducedMotion} />
+          {/* Glass, in two coats: a vertical sheen that lights the top edge
+              and seats the bottom, then a soft key light falling from above.
+              Together they read as curvature; either alone reads as a flat
+              fill with a stripe on it. */}
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              background:
+                'linear-gradient(to bottom, rgba(255,255,255,0.11), rgba(255,255,255,0.02) 46%, rgba(0,0,0,0.10))',
+            }}
+          />
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              background:
+                'radial-gradient(120% 140% at 50% -30%, rgba(255,255,255,0.13), transparent 55%)',
+            }}
+          />
+          <div className="relative flex min-w-0 max-w-full items-center justify-center">
+            <BarInterior visual={visual} levelRef={levelRef} reducedMotion={reducedMotion} />
+          </div>
+          {visual.recording ? <RecordingDot /> : null}
+          {visual.handsFree ? <HandsFreeDot /> : null}
+          {visual.command ? <CommandDot /> : null}
         </div>
-        {visual.recording ? <RecordingDot /> : null}
-        {visual.handsFree ? <HandsFreeDot /> : null}
-        {visual.command ? <CommandDot /> : null}
-        {showControls ? (
-          <Controls
+
+        {clusterPresent ? (
+          <Cluster
+            spec={cluster}
+            hotkeyHint={HOTKEY_HINT[hotkeyKey] ?? null}
             menuOpen={menuOpen}
-            onCancel={() => {
-              setMenuOpen(false)
-              void window.murmur.dictation.cancel().catch(noop)
-            }}
-            onMic={() => setMenuOpen((open) => !open)}
-            onHub={() => {
-              setMenuOpen(false)
-              void window.murmur.app.openHub().catch(noop)
-            }}
+            leaving={!showCluster}
+            onAction={onClusterAction}
           />
         ) : null}
       </div>
     </div>
   )
+}
+
+/**
+ * The ambient wash behind the capsule (see {@link BAR_HALO}).
+ *
+ * A blurred radial span, wider than the pill, sitting on the transparent
+ * window — so the light lands on the user's actual desktop. Breathing is CSS
+ * (`bar-halo`), gated per state: listening breathes, the ✓ is a single flash
+ * timed inside the inserted hold, an error smoulders without animating.
+ * Under Reduce Motion it is a faint static glow.
+ */
+function Halo({
+  state,
+  width,
+  reducedMotion,
+}: {
+  state: keyof typeof BAR_HALO
+  width: number
+  reducedMotion: boolean
+}): React.JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className="bar-halo"
+      data-live={!reducedMotion && state === 'listening' ? 'true' : undefined}
+      data-flash={!reducedMotion && state === 'inserted' ? 'true' : undefined}
+      style={{
+        width: width + 72,
+        height: 40,
+        // Fully transparent well inside the box — see .bar-halo for why the
+        // edge of this gradient is load-bearing and not just taste.
+        background: `radial-gradient(closest-side, ${BAR_HALO[state]}, transparent 66%)`,
+        ...(reducedMotion ? { opacity: 0.3 } : null),
+      }}
+    />
+  )
+}
+
+/**
+ * The controls that stand in for the pill on hover — the reference product's
+ * exact arrangement: one row of round near-black buttons where the pill was,
+ * and a floating capsule above the hovered one naming it ("Dictate fn", with
+ * the user's real hotkey). The label is a tooltip, not a control.
+ *
+ * The motion rules here exist because the swap used to read as clunky, twice:
+ *
+ *  - The row enters and leaves as **one animated unit**. A per-button cascade
+ *    meant five layers animating independently against the pill's fade, and
+ *    the sum read as commotion.
+ *  - The tooltip is **one persistent element that glides** between buttons.
+ *    Conditional mounting meant it unmounted in every 8 px gap and replayed
+ *    its entrance on the far side — a blink per button while scrubbing the
+ *    row. It now keeps its last label while fading, and slides on transform.
+ */
+function Cluster({
+  spec,
+  hotkeyHint,
+  menuOpen,
+  leaving,
+  onAction,
+}: {
+  spec: ClusterSpec
+  /** Short label for the configured hotkey ("fn", "⌘"), or null to omit. */
+  hotkeyHint: string | null
+  menuOpen: boolean
+  /** Hover has ended; play the exit and swallow no clicks while doing it. */
+  leaving: boolean
+  onAction: (action: ClusterAction) => void
+}): React.JSX.Element {
+  /**
+   * `hover` is the button under the pointer right now; `last` is the one the
+   * tooltip is (still) showing. Kept together in one state so the label can
+   * fade out in place over the button the pointer just left, rather than
+   * vanishing the instant `hover` goes null in a gap.
+   */
+  const [tip, setTip] = useState<{ hover: ClusterAction | null; last: ClusterAction | null }>({
+    hover: null,
+    last: null,
+  })
+
+  const shown = spec.chips.find((chip) => chip.action === tip.last) ?? null
+  const shownIndex = shown ? spec.chips.findIndex((chip) => chip.action === shown.action) : 0
+  const tipCentre = shownIndex * (CLUSTER.chipSize + CLUSTER.gap) + CLUSTER.chipSize / 2
+  const tipOn = tip.hover !== null && shown !== null && !menuOpen && !leaving
+
+  return (
+    <div
+      data-testid="bar-cluster"
+      data-leaving={leaving ? 'true' : undefined}
+      className="bar-cluster absolute bottom-0 flex items-center"
+      style={{ gap: CLUSTER.gap, height: spec.height }}
+      onMouseLeave={() => setTip((current) => ({ hover: null, last: current.last }))}
+    >
+      {/* One element for the label, always mounted once something has been
+          hovered — it slides and fades, it never re-mounts. */}
+      {shown ? (
+        <div
+          aria-hidden="true"
+          className="bar-tooltip pointer-events-none absolute left-0 flex items-baseline gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium text-white"
+          style={{
+            bottom: CLUSTER.chipSize + CLUSTER.tooltipGap,
+            height: CLUSTER.tooltipHeight,
+            lineHeight: `${CLUSTER.tooltipHeight}px`,
+            transform: `translateX(calc(${tipCentre}px - 50%))`,
+            opacity: tipOn ? 1 : 0,
+            background: CLUSTER_BUTTON_BG,
+            border: `1px solid ${CLUSTER_BUTTON_BORDER}`,
+            boxShadow: BAR_SHADOW,
+          }}
+        >
+          {shown.label}
+          {shown.action === 'dictate' && hotkeyHint ? (
+            <span className="font-bold">{hotkeyHint}</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {spec.chips.map((chip) => (
+        <ClusterButtonView
+          key={chip.action}
+          button={chip}
+          pressed={chip.action === 'mic' ? menuOpen : undefined}
+          onHover={(over) =>
+            setTip((current) => ({
+              hover: over ? chip.action : current.hover === chip.action ? null : current.hover,
+              last: over ? chip.action : current.last,
+            }))
+          }
+          onClick={() => onAction(chip.action)}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The buttons are dressed in the resting pill's EXACT recipe — its translucent
+ * fill, its bright ring, its shadow stack. Not "similar": the same constants.
+ * Anything darker or dimmer-edged read as the pill being replaced by
+ * strangers; identical material is half of what makes the swap read as the
+ * pill becoming the buttons (the silhouette morph in bar.css is the other
+ * half).
+ */
+const CLUSTER_BUTTON_BG = BAR_IDLE_BACKGROUND
+const CLUSTER_BUTTON_BORDER = BAR_IDLE_BORDER
+
+/** Foreground colour per tone; backgrounds come from the wash overlay below. */
+const CLUSTER_TONE: Record<ClusterButton['tone'], string> = {
+  default: 'text-white/90 hover:text-white',
+  accent: 'text-white',
+  destructive: 'text-red-200 hover:text-red-100',
+}
+
+/** The hover wash per tone — an overlay span, so it wins over the inline base. */
+const CLUSTER_WASH: Record<ClusterButton['tone'], string> = {
+  default: 'bg-white/10',
+  accent: 'bg-white/10',
+  destructive: 'bg-red-500/25',
+}
+
+function ClusterButtonView({
+  button,
+  pressed,
+  onHover,
+  onClick,
+}: {
+  button: ClusterButton
+  pressed?: boolean | undefined
+  onHover: (over: boolean) => void
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-label={button.label}
+      aria-pressed={pressed}
+      onClick={onClick}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      className={[
+        'bar-pill bar-chip group relative flex shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full',
+        CLUSTER_TONE[button.tone],
+      ].join(' ')}
+      style={{
+        width: CLUSTER.chipSize,
+        height: CLUSTER.chipSize,
+        background: CLUSTER_BUTTON_BG,
+        border: `1px solid ${CLUSTER_BUTTON_BORDER}`,
+        boxShadow: BAR_SHADOW,
+      }}
+    >
+      {/* Hover / pressed wash. An overlay because the base colour is an inline
+          style, which outranks any hover class put on the button itself. */}
+      <span
+        aria-hidden="true"
+        className={[
+          'pointer-events-none absolute inset-0 rounded-full transition-opacity duration-150',
+          CLUSTER_WASH[button.tone],
+          pressed ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-active:opacity-70',
+        ].join(' ')}
+      />
+      {/* Same top light as the pill, so the row reads as the same material. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 rounded-full"
+        style={{
+          background:
+            'linear-gradient(to bottom, rgba(255,255,255,0.10), rgba(255,255,255,0.01) 50%, rgba(0,0,0,0.08))',
+        }}
+      />
+      <svg
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+        className="relative size-[16px] shrink-0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {CLUSTER_ICON[button.action]}
+      </svg>
+    </button>
+  )
+}
+
+/** How the hotkey reads inside the Dictate tooltip. Unmappable keys show none. */
+const HOTKEY_HINT: Partial<Record<HotkeyKey, string>> = {
+  fn: 'fn',
+  rightCmd: '⌘',
+  rightOpt: '⌥',
+  rightCtrl: 'ctrl',
+  capsLock: 'caps',
+}
+
+const CLUSTER_ICON: Record<ClusterAction, React.ReactNode> = {
+  // A microphone.
+  dictate: (
+    <path d="M12 4a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0v-5A2.5 2.5 0 0 1 12 4zM6 11a6 6 0 0 0 12 0M12 17v3" />
+  ),
+  // A filled square: the universal stop.
+  stop: <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" />,
+  cancel: <path d="M6 6l12 12M18 6L6 18" />,
+  // A page with a line on it.
+  scratchpad: <path d="M6 4h8l4 4v12H6zM14 4v4h4M9 13h6M9 16.5h4" />,
+  mic: (
+    <path d="M12 4a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0v-5A2.5 2.5 0 0 1 12 4zM6 11a6 6 0 0 0 12 0M12 17v3" />
+  ),
+  hub: <path d="M5 5h6M5 5v6M5 5l7 7M19 19h-6M19 19v-6M19 19l-7-7" />,
 }
 
 /** What is drawn inside the capsule for the current state. */
@@ -312,7 +748,11 @@ function BarInterior({
   visual: BarVisual
   levelRef: React.RefObject<number>
   reducedMotion: boolean
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  // The resting sliver is an empty outlined capsule, as in the reference —
+  // the ring itself is the whole idle statement. The dots it used to hold
+  // made it read as a tiny broken waveform.
+  if (visual.shape === 'dots') return null
   if (visual.shape === 'message') {
     return (
       <span className="flex min-w-0 items-center gap-1.5 px-3">
@@ -435,84 +875,6 @@ function HandsFreeDot(): React.JSX.Element {
   )
 }
 
-/** Hover controls: cancel · mic picker · open Hub (PLAN §2.1). */
-function Controls({
-  onCancel,
-  onMic,
-  onHub,
-  menuOpen,
-}: {
-  onCancel: () => void
-  onMic: () => void
-  onHub: () => void
-  menuOpen: boolean
-}): React.JSX.Element {
-  return (
-    <div className="bar-controls absolute right-[6px] top-1/2 flex -translate-y-1/2 items-center gap-[3px]">
-      <ControlButton label="Cancel dictation" onClick={onCancel} destructive>
-        <path d="M6 6l12 12M18 6L6 18" />
-      </ControlButton>
-      <ControlButton label="Choose microphone" onClick={onMic} pressed={menuOpen}>
-        <path d="M12 4a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0v-5A2.5 2.5 0 0 1 12 4zM6 11a6 6 0 0 0 12 0M12 17v3" />
-      </ControlButton>
-      <ControlButton label="Open the Murmur hub" onClick={onHub}>
-        <path d="M5 5h6M5 5v6M5 5l7 7M19 19h-6M19 19v-6M19 19l-7-7" />
-      </ControlButton>
-    </div>
-  )
-}
-
-function ControlButton({
-  label,
-  onClick,
-  pressed,
-  destructive = false,
-  children,
-}: {
-  label: string
-  onClick: () => void
-  pressed?: boolean
-  /**
-   * Throws the current utterance away. Warm on hover rather than always red:
-   * three identical grey glyphs give the eye no way to tell the one that
-   * discards your dictation from the two that do not — and it is the leftmost,
-   * where the pointer arrives first.
-   */
-  destructive?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={[
-        'grid size-[18px] cursor-pointer place-items-center rounded-full transition-all duration-150',
-        'active:scale-90',
-        destructive
-          ? 'hover:bg-red-500/25 hover:text-red-200 active:bg-red-500/35'
-          : 'hover:bg-white/15 hover:text-white active:bg-white/20',
-        pressed ? 'bg-white/15 text-white' : 'text-white/70',
-      ].join(' ')}
-    >
-      <svg
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        className="size-[11px]"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {children}
-      </svg>
-    </button>
-  )
-}
-
 /**
  * The mic picker, opening upward into the transparent space above the pill —
  * which is why the Bar window is taller than the capsule (see windows/bar.ts).
@@ -535,10 +897,9 @@ function MicMenu({
       aria-label="Microphone"
       className="bar-pill bar-menu mb-2 max-h-[150px] w-[240px] overflow-y-auto rounded-xl p-1 text-[11px] text-white/90"
       style={{
-        background: 'rgba(19,19,24,0.96)',
+        background: 'rgba(18,18,25,0.95)',
         border: '1px solid rgba(255,255,255,0.10)',
         boxShadow: BAR_SHADOW,
-        backdropFilter: 'blur(14px)',
       }}
     >
       <p className="px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-white/40">
@@ -599,12 +960,12 @@ function MicOption({
   )
 }
 
-function hits(element: HTMLElement | null, x: number, y: number): boolean {
+function hits(element: HTMLElement | null, x: number, y: number, slack = 4): boolean {
   if (!element) return false
   const rect = element.getBoundingClientRect()
   // A few pixels of slack so the pointer cannot fall through the seam between
-  // the pill and the menu sitting above it.
-  const slack = 4
+  // the pill and the menu sitting above it — and, for the resting sliver, so a
+  // 10 px-tall target is not 10 px of aim.
   return (
     x >= rect.left - slack &&
     x <= rect.right + slack &&

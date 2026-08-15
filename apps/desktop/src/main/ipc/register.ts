@@ -13,6 +13,7 @@ import type { SettingsStore } from '../store/settings-store'
 import type {
   DictationsRepository,
   DictionaryRepository,
+  NotesRepository,
   SnippetsRepository,
   MeetingsRepository,
   StyleRepository,
@@ -21,6 +22,7 @@ import type { MeetingRecorder } from '../meeting/recorder'
 import type { SystemAudioSource } from '../audio/system-capture'
 import type { LoopbackSystemAudio } from '../audio/loopback-capture'
 import type { FrameBus } from '../audio/frame-bus'
+import type { CodeContextReader } from '../dictation/code-context'
 import type { TextInjector } from '../dictation/injector'
 import type { WindowManager } from '../windows/manager'
 import type { CaptureController } from '../audio/controller'
@@ -69,8 +71,11 @@ export interface IpcContext {
   audio: CaptureController
   /** Real paste path — exposed to Dev/agent for G5 insert proof. */
   injector: Pick<TextInjector, 'insert'>
+  /** Vibe coding's editor read (PLAN §18.3) — only the probe is exposed. */
+  codeContext: CodeContextReader
   dictations: DictationsRepository
   dictionary: DictionaryRepository
+  notes: NotesRepository
   snippets: SnippetsRepository
   style: StyleRepository
   /** Mic frame fan-out — dictation and a meeting can both be listening. */
@@ -222,6 +227,19 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     context.dictations.clear()
   })
 
+  // -- insights ------------------------------------------------------------
+  // `collecting` is read fresh on every call rather than cached: the toggle
+  // lives in Settings and the section has to reflect it the moment it flips,
+  // not the next time the app starts.
+  const readInsights = (): ReturnType<DictationsRepository['insights']> =>
+    context.dictations.insights({ collecting: settings.get().insightsEnabled })
+
+  ipc.handle('insights.get', () => readInsights())
+  ipc.handle('insights.reset', () => {
+    context.dictations.resetInsights()
+    return readInsights()
+  })
+
   // -- dictionary ----------------------------------------------------------
   ipc.handle('dictionary.list', () => context.dictionary.list())
   ipc.handle('dictionary.create', (draft) => context.dictionary.create(draft))
@@ -238,9 +256,73 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     context.snippets.delete(id)
   })
 
+  // -- notes / scratchpad (PLAN §2.2.7) ------------------------------------
+  // Every mutation broadcasts, because the Scratchpad window and the Hub's
+  // Notes section can be open over the same rows at the same time.
+  const notesChanged = (id: string | null): void => {
+    ipc.broadcast(windows.allWebContents(), 'notes.changed', { id })
+  }
+
+  ipc.handle('notes.list', (query) => context.notes.list(query))
+  ipc.handle('notes.get', ({ id }) => context.notes.get(id))
+  ipc.handle('notes.create', (draft) => {
+    const note = context.notes.create(draft)
+    notesChanged(note.id)
+    return note
+  })
+  ipc.handle('notes.update', ({ id, patch }) => {
+    const note = context.notes.update(id, patch)
+    notesChanged(note.id)
+    return note
+  })
+  ipc.handle('notes.delete', ({ id }) => {
+    context.notes.delete(id)
+    notesChanged(null)
+  })
+  ipc.handle('notes.openWindow', ({ noteId }) => {
+    // Main creates the note rather than the renderer, so the window opens onto
+    // a row that already exists. Letting the new window create its own would
+    // race its first autosave against its own mount.
+    const note = noteId ? context.notes.get(noteId) : null
+    const target = note ?? context.notes.create({ title: '', body: '' })
+    if (!note) notesChanged(target.id)
+
+    const window = windows.showNotes()
+    // Told explicitly which note to show. The window cannot work it out: its
+    // own fallback is "whichever sorts first", which is the newest note and
+    // therefore never the older one the user just clicked in the Hub.
+    //
+    // Sent after `did-finish-load` when the window is still loading — a message
+    // to a renderer that has not run its preload yet reaches nobody, and this
+    // is the exact path that creates the window in the first place.
+    const select = (): void => {
+      if (!window.isDestroyed()) ipc.emit(window.webContents, 'notes.select', { id: target.id })
+    }
+    if (window.webContents.isLoading()) window.webContents.once('did-finish-load', select)
+    else select()
+
+    return target
+  })
+
   // -- style ---------------------------------------------------------------
   ipc.handle('style.get', () => context.style.get())
   ipc.handle('style.set', (patch) => context.style.set(patch))
+
+  // -- vibe coding (PLAN §18.3) --------------------------------------------
+  ipc.handle('coding.probe', () => {
+    const frontmost = native().getFrontmostApp()
+    const result = context.codeContext.probe(frontmost?.bundleId ?? null)
+    // Deliberately not `...result`: the probe's own shape is internal, and
+    // spreading it would let a future field carrying anything read from the
+    // editor reach the renderer by accident. Named fields only.
+    return {
+      ide: result.ide,
+      readable: result.readable,
+      symbolCount: result.symbolCount,
+      detail: result.detail,
+      frontmostApp: frontmost?.name ?? null,
+    }
+  })
 
   // -- permissions ---------------------------------------------------------
   ipc.handle('permissions.status', () => checkPermissions())

@@ -918,8 +918,10 @@ Napi::Value GetWindowTitle(const Napi::CallbackInfo& info) {
   return out;
 }
 
-// Bundle id + name of the frontmost app. No window titles, no screen content
-// (PLAN §4) — this is the whole of what Murmur learns about the target app.
+// Bundle id, name and pid of the frontmost app. No window titles and no screen
+// content: this is the whole of what Murmur learns about the target app on the
+// dictation path. (Vibe coding's opt-in editor read is a separate, gated call —
+// see ReadFocusedEditorText.)
 Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   @autoreleasepool {
@@ -933,8 +935,132 @@ Napi::Value GetFrontmostApp(const Napi::CallbackInfo& info) {
     Napi::Object result = Napi::Object::New(env);
     result.Set("bundleId", Napi::String::New(env, [bundleId UTF8String]));
     result.Set("name", Napi::String::New(env, name != nil ? [name UTF8String] : ""));
+    // The pid, so a caller that already has this can ask GetWindowTitle about
+    // the same process without a second NSWorkspace lookup racing an app switch.
+    result.Set("pid", Napi::Number::New(env, static_cast<double>([app processIdentifier])));
     return result;
   }
+}
+
+/**
+ * The focused editor's text, for vibe coding's variable recognition
+ * (PLAN §18.3).
+ *
+ * **This is the one call in the module that reads screen content**, and every
+ * gate on it lives on the JavaScript side (`code-context.ts`): it runs only
+ * when the user has switched Variable recognition on, and only when the
+ * frontmost app is one of the three IDEs on the allowlist. Nothing here can
+ * enforce that, so nothing here should be called speculatively.
+ *
+ * Deliberately different from GetTextBeforeCursor, which reads a *range* of a
+ * handful of characters precisely so it never copies a document. This one does
+ * copy the document — that is what it is for — which is why it is capped, why
+ * it is not on the dictation path unless the user opted in, and why its result
+ * never reaches disk or a log.
+ *
+ * VS Code and its forks draw their editor on a canvas, so this returns nothing
+ * useful until the user turns on the IDE's own Screen Reader Accessibility Mode
+ * — which is what makes the editor expose its text through the accessibility
+ * API at all. Murmur cannot turn that on for them, and does not try.
+ */
+Napi::Value ReadFocusedEditorText(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object out = Napi::Object::New(env);
+
+  int maxChars = 20000;
+  if (info.Length() > 0 && info[0].IsNumber()) {
+    maxChars = info[0].As<Napi::Number>().Int32Value();
+  }
+  if (maxChars <= 0) maxChars = 1;
+
+  if (!AXIsProcessTrusted()) {
+    out.Set("ok", Napi::Boolean::New(env, false));
+    out.Set("error", Napi::String::New(env, "Accessibility permission is not granted"));
+    return out;
+  }
+
+  @autoreleasepool {
+    AXUIElementRef system = AXUIElementCreateSystemWide();
+    if (system == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "no system-wide accessibility element"));
+      return out;
+    }
+    // Same 100 ms budget as the other AX reads: this runs at hotkey-down on the
+    // JS thread, and an unresponsive editor must cost latency, not seconds.
+    AXUIElementSetMessagingTimeout(system, 0.1f);
+
+    CFTypeRef focusedApp = nullptr;
+    AXError error =
+        AXUIElementCopyAttributeValue(system, kAXFocusedApplicationAttribute, &focusedApp);
+    if (error != kAXErrorSuccess || focusedApp == nullptr) {
+      CFRelease(system);
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "could not find the focused application"));
+      return out;
+    }
+
+    CFTypeRef focusedElement = nullptr;
+    error = AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(focusedApp),
+                                          kAXFocusedUIElementAttribute, &focusedElement);
+    CFRelease(focusedApp);
+    CFRelease(system);
+
+    if (error != kAXErrorSuccess || focusedElement == nullptr) {
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "no focused element"));
+      return out;
+    }
+
+    // Refuse outright if this is a password field. The dictation path already
+    // refuses to *type* into secure input; reading one would be worse.
+    CFTypeRef role = nullptr;
+    if (AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(focusedElement),
+                                      kAXRoleAttribute, &role) == kAXErrorSuccess &&
+        role != nullptr) {
+      // `AXSecureTextField` spelled out: the SDK declares the constant for
+      // this role in the AX *client* headers only, not the ones this addon
+      // links, and the role string itself is stable API.
+      bool secure = CFGetTypeID(role) == CFStringGetTypeID() &&
+                    CFStringCompare(static_cast<CFStringRef>(role),
+                                    CFSTR("AXSecureTextField"), 0) == kCFCompareEqualTo;
+      CFRelease(role);
+      if (secure) {
+        CFRelease(focusedElement);
+        out.Set("ok", Napi::Boolean::New(env, false));
+        out.Set("error", Napi::String::New(env, "focused element is a secure field"));
+        return out;
+      }
+    }
+
+    CFTypeRef value = nullptr;
+    error = AXUIElementCopyAttributeValue(static_cast<AXUIElementRef>(focusedElement),
+                                          kAXValueAttribute, &value);
+    CFRelease(focusedElement);
+
+    if (error != kAXErrorSuccess || value == nullptr ||
+        CFGetTypeID(value) != CFStringGetTypeID()) {
+      if (value != nullptr) CFRelease(value);
+      // "Nothing readable here" — the ordinary answer when Screen Reader Mode
+      // is off. Reported as ok:false so the setup card can say so plainly.
+      out.Set("ok", Napi::Boolean::New(env, false));
+      out.Set("error", Napi::String::New(env, "the focused element exposes no text"));
+      return out;
+    }
+
+    NSString* text = (__bridge NSString*)value;
+    // Cap before crossing into JS: an open 4 MB file must not become a 4 MB
+    // string on the heap for the sake of a few dozen identifiers.
+    if ((int)text.length > maxChars) {
+      text = [text substringToIndex:(NSUInteger)maxChars];
+    }
+    const char* utf8 = text.UTF8String;
+    out.Set("ok", Napi::Boolean::New(env, true));
+    out.Set("text", Napi::String::New(env, utf8 != nullptr ? utf8 : ""));
+    CFRelease(value);
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,6 +1195,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
 
   exports.Set("isSecureInputActive", Napi::Function::New(env, IsSecureInputActive));
   exports.Set("getFrontmostApp", Napi::Function::New(env, GetFrontmostApp));
+  exports.Set("readFocusedEditorText", Napi::Function::New(env, ReadFocusedEditorText));
 
   Napi::Object permissions = Napi::Object::New(env);
   permissions.Set("check", Napi::Function::New(env, PermissionsCheck));

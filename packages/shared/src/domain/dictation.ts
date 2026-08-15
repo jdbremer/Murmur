@@ -26,6 +26,13 @@ export const DictationRecordSchema = z.object({
   /** `null` when polishing level is `off` or the hallucination guard fired. */
   polishedText: z.string().nullable(),
   appBundleId: z.string().min(1).nullable(),
+  /**
+   * The app's display name at hotkey-down ("Slack", not
+   * "com.tinyspeck.slackmacgap"). Nullable and defaulted because every row
+   * written before schema v5 has none, and because a bundle id with no running
+   * app behind it has no name to look up afterwards.
+   */
+  appName: z.string().min(1).nullable().default(null),
   appCategory: AppCategorySchema,
   durationMs: z.number().int().nonnegative(),
   sttModelId: z.string().min(1),

@@ -90,3 +90,46 @@ export function engineLabel(engine: string): string {
       return engine
   }
 }
+
+/** Wall-clock time for the history gutter: "4:05 pm". */
+export function formatClock(ts: number): string {
+  return new Date(ts)
+    .toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    .toLowerCase()
+}
+
+/**
+ * The history feed's date headers: Today, Yesterday, then real dates.
+ *
+ * Compared by local calendar day, not by elapsed hours — 11 pm yesterday is
+ * "Yesterday" even though it was two hours ago.
+ */
+export function formatDayLabel(ts: number, now: number = Date.now()): string {
+  const day = new Date(ts)
+  const today = new Date(now)
+  const sameDay = (a: Date, b: Date): boolean =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+
+  if (sameDay(day, today)) return 'Today'
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (sameDay(day, yesterday)) return 'Yesterday'
+  return day.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })
+}
+
+/** Group a reverse-chronological list under its date headers, order kept. */
+export function groupByDay<T extends { ts: number }>(
+  items: readonly T[],
+  now: number = Date.now(),
+): { label: string; items: T[] }[] {
+  const groups: { label: string; items: T[] }[] = []
+  for (const item of items) {
+    const label = formatDayLabel(item.ts, now)
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) last.items.push(item)
+    else groups.push({ label, items: [item] })
+  }
+  return groups
+}

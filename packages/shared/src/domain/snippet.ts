@@ -86,10 +86,25 @@ function triggerPattern(trigger: string): RegExp {
  * would otherwise expand forever.
  */
 export function expandSnippets(text: string, snippets: readonly Snippet[]): string {
+  return expandSnippetsWithCount(text, snippets).text
+}
+
+/**
+ * The same expansion, reporting how many triggers actually fired.
+ *
+ * Counted here rather than inferred by the caller because only this function
+ * can tell an expansion from a coincidence: comparing lengths before and after
+ * would miss a snippet that expands to something shorter than its trigger, and
+ * would count a polish-level rewrite as an expansion.
+ */
+export function expandSnippetsWithCount(
+  text: string,
+  snippets: readonly Snippet[],
+): { text: string; expansions: number } {
   const active = snippets
     .filter((snippet) => snippet.enabled)
     .sort((a, b) => b.trigger.length - a.trigger.length)
-  if (active.length === 0) return text
+  if (active.length === 0) return { text, expansions: 0 }
 
   // Expansions are held aside as placeholders while the remaining triggers are
   // matched, then restored at the end. Without this, snippet B's trigger could
@@ -109,6 +124,21 @@ export function expandSnippets(text: string, snippets: readonly Snippet[]): stri
     })
   }
 
-  // eslint-disable-next-line no-control-regex -- the NUL is deliberate: the placeholder must be a sequence no transcript can contain.
-  return out.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => held[Number(index)] ?? '')
+  const restored = out.replace(PLACEHOLDER, (_match, index: string) => held[Number(index)] ?? '')
+
+  // One entry was pushed per substitution, so `held.length` is the count of
+  // triggers that fired, by construction.
+  return { text: restored, expansions: held.length }
 }
+
+/**
+ * Matches the placeholders written above.
+ *
+ * A module constant rather than an inline literal only so the lint exemption
+ * has somewhere stable to live: prettier reflows a long `.replace(...)` call
+ * across lines, which moves the regex off the line the directive applies to.
+ * The control character itself is the whole point of the design, and is
+ * explained where the placeholders are written.
+ */
+// eslint-disable-next-line no-control-regex -- the NUL is deliberate: the placeholder must be a sequence no transcript can contain.
+const PLACEHOLDER = /\u0000(\d+)\u0000/g

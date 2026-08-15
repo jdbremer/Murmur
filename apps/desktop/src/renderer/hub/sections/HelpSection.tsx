@@ -21,6 +21,7 @@ import {
 import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDevMode } from '../../hooks/useDevMode'
 import { useEngines } from '../../hooks/useEngines'
+import { useSettings } from '../../hooks/useSettings'
 import { engineLabel } from '../../format'
 import { dataLocation, isMacPlatform } from '../../lib/platform'
 import { PERMISSIONS } from '../permissions'
@@ -44,6 +45,9 @@ export function HelpSection(): React.JSX.Element {
   const capture = useCaptureStatus()
   const dev = useDevMode()
   const mac = isMacPlatform()
+  // Read live, so the "what Murmur reads" answer below is the current one
+  // rather than a claim about the shipped defaults.
+  const { settings } = useSettings()
 
   const refresh = useCallback(() => {
     void window.murmur.permissions
@@ -158,6 +162,20 @@ export function HelpSection(): React.JSX.Element {
           hint="Model downloads from Hugging Face and from Murmur\u2019s own GitHub releases, and updates from GitHub when you press the button. Nothing else \u2014 no telemetry, no accounts, nothing on a timer."
         >
           <Badge tone="positive">Only when you ask</Badge>
+        </Row>
+        <Row
+          label="Screen content"
+          hint={
+            settings?.vibeCoding.variableRecognition
+              ? 'On: while you dictate into VS Code, Cursor or Windsurf, Murmur reads the open editor to recognise the names in it. Nothing is stored or logged, and no other app is ever read. Turn it off under Vibe coding.'
+              : 'Murmur never reads your screen. The only thing it learns about the app you are dictating into is its name — unless you switch Variable recognition on under Vibe coding, which is off by default.'
+          }
+        >
+          {settings?.vibeCoding.variableRecognition ? (
+            <Badge tone="warning">Editors only</Badge>
+          ) : (
+            <Badge tone="positive">Never</Badge>
+          )}
         </Row>
         {dev ? (
           <Row

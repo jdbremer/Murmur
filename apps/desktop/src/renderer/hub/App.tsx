@@ -4,19 +4,22 @@ import { useSettings } from '../hooks/useSettings'
 import { DictationToast } from './components/Toast'
 import { Onboarding } from './onboarding/Onboarding'
 import { Sidebar, type SectionId } from './Sidebar'
-import { HomeSection } from './sections/HomeSection'
+import { HistorySection } from './sections/HistorySection'
+import { InsightsSection } from './sections/InsightsSection'
+import { NotesSection } from './sections/NotesSection'
 import { DictionarySection } from './sections/DictionarySection'
 import { SnippetsSection } from './sections/SnippetsSection'
 import { StyleSection } from './sections/StyleSection'
 import { MeetingsSection } from './sections/MeetingsSection'
 import { ModelsSection } from './sections/ModelsSection'
+import { VibeCodingSection } from './sections/VibeCodingSection'
 import { SettingsSection } from './sections/SettingsSection'
 import { HelpSection } from './sections/HelpSection'
 
 /**
  * The Hub shell (PLAN §2.2): left sidebar, content pane on the right.
  *
- * Navigation is plain React state — six sections, no deep links, no history to
+ * Navigation is plain React state — eleven sections, no deep links, no history to
  * preserve. A router would be all cost and no benefit here.
  *
  * Two things happen at this level because they are whole-window concerns: the
@@ -24,7 +27,7 @@ import { HelpSection } from './sections/HelpSection'
  * handed to onboarding instead of the sections (PLAN §2.4).
  */
 export function App(): React.JSX.Element {
-  const [section, setSection] = useState<SectionId>('home')
+  const [section, setSection] = useState<SectionId>('history')
   const { settings } = useSettings()
 
   useAppearance(settings?.appearance ?? 'system')
@@ -39,7 +42,7 @@ export function App(): React.JSX.Element {
     // gave the outer box nothing to scroll and clipped the inner content.
     return (
       <div className="h-full overflow-hidden bg-canvas text-ink">
-        <Onboarding settings={settings} onFinish={() => setSection('home')} />
+        <Onboarding settings={settings} onFinish={() => setSection('history')} />
       </div>
     )
   }
@@ -47,10 +50,15 @@ export function App(): React.JSX.Element {
   return (
     <div className="relative flex h-full bg-canvas text-ink">
       <Sidebar active={section} onSelect={setSection} />
-      <main className="flex-1 overflow-y-auto">
-        {/* Keyed on the section so switching drifts the new content in. */}
-        <div key={section} className="hub-section mx-auto max-w-3xl px-10 py-9">
-          {renderSection(section)}
+      {/* The content pane is a raised card floating on the canvas — the
+          reference product's defining layout move. The sidebar shares the
+          canvas with no dividing line; the card's edge IS the division. */}
+      <main className="min-w-0 flex-1 p-2 pl-0">
+        <div className="h-full overflow-y-auto rounded-2xl border border-line bg-surface shadow-sm">
+          {/* Keyed on the section so switching drifts the new content in. */}
+          <div key={section} className="hub-section mx-auto max-w-4xl px-10 py-9">
+            {renderSection(section)}
+          </div>
         </div>
       </main>
       <DictationToast />
@@ -76,8 +84,12 @@ function useAppearance(appearance: 'system' | 'light' | 'dark'): void {
 
 function renderSection(section: SectionId): React.JSX.Element {
   switch (section) {
-    case 'home':
-      return <HomeSection />
+    case 'history':
+      return <HistorySection />
+    case 'insights':
+      return <InsightsSection />
+    case 'notes':
+      return <NotesSection />
     case 'dictionary':
       return <DictionarySection />
     case 'snippets':
@@ -88,6 +100,8 @@ function renderSection(section: SectionId): React.JSX.Element {
       return <MeetingsSection />
     case 'models':
       return <ModelsSection />
+    case 'vibeCoding':
+      return <VibeCodingSection />
     case 'settings':
       return <SettingsSection />
     case 'help':

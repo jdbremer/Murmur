@@ -20,32 +20,27 @@ import {
 // ---------------------------------------------------------------------------
 
 export const BAR = {
-  /** Idle capsule. */
-  idleWidth: 64,
-  height: 22,
-  /** Height while the hover controls are showing — "expands it slightly". */
-  hoverHeight: 30,
   /**
-   * How much wider the capsule grows on hover. Deliberately more than
-   * {@link BAR.controlsWidth}: the extra is breathing room so the controls do
-   * not crowd whatever the pill is showing.
-   */
-  hoverWidth: 84,
-  /**
-   * What the controls actually occupy on the right, derived from their own
-   * geometry: three 18px buttons, two 3px gaps, and the 6px inset they sit at.
+   * The resting sliver.
    *
-   * Kept separate from `hoverWidth` because they answer different questions —
-   * how much the capsule grows, versus how much room is no longer available to
-   * the interior. Centring the interior against the growth rather than the
-   * footprint is what left it sitting 9px off-centre.
+   * Much smaller than the 64 x 22 the pill shipped with, and deliberately so:
+   * at rest this is an *indicator*, not a control. It sits over whatever the
+   * user is working in all day, and the less of their screen it occupies the
+   * better. Everything it used to offer is now one hover away, at a size worth
+   * clicking (see {@link CLUSTER}).
    */
-  controlsWidth: 3 * 18 + 2 * 3 + 6,
+  idleWidth: 44,
+  idleHeight: 8,
+  /**
+   * Height once there is something to show — a waveform, a shimmer, a ✓, a
+   * message. Still thinner than the old resting pill.
+   */
+  activeHeight: 18,
   /** Listening. */
-  listeningWidth: 160,
-  processingWidth: 132,
-  insertingWidth: 112,
-  insertedWidth: 96,
+  listeningWidth: 148,
+  processingWidth: 120,
+  insertingWidth: 104,
+  insertedWidth: 88,
   /** Error pills size to their message, within these bounds. */
   errorMinWidth: 180,
   errorMaxWidth: 300,
@@ -63,36 +58,77 @@ export const BAR = {
   waveformBarGap: 2,
   /** Bar heights inside the capsule. */
   waveformMinHeight: 2,
-  waveformMaxHeight: 14,
+  waveformMaxHeight: 10,
   /** One shimmer sweep across the pill while processing. */
   shimmerPeriodMs: 1100,
 } as const
 
 /** Near-black, per PLAN §2.1. */
-export const BAR_BACKGROUND = 'rgba(17,17,22,0.92)'
+export const BAR_BACKGROUND = 'rgba(17,17,23,0.94)'
 /** Warm red for the error state. */
-export const BAR_ERROR_BACKGROUND = 'rgba(70,22,22,0.94)'
-export const BAR_BORDER = 'rgba(255,255,255,0.09)'
-/** The capsule's edge brightens while it is actually hearing something. */
-export const BAR_LISTENING_BORDER = 'rgba(255,255,255,0.16)'
-export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.32)'
+export const BAR_ERROR_BACKGROUND = 'rgba(72,20,22,0.95)'
+export const BAR_BORDER = 'rgba(255,255,255,0.10)'
 /**
- * Two layers: a tight contact shadow that seats the capsule on the screen, and
- * a wide ambient one that lifts it off whatever is behind it. The inset line
- * is the glass highlight along the top edge.
+ * The resting sliver's outline — much brighter than the active border. At rest
+ * the capsule is empty and tiny; the outline *is* the pill, exactly as in the
+ * reference product, where the idle state reads as a drawn ring rather than a
+ * filled blob.
+ */
+export const BAR_IDLE_BORDER = 'rgba(255,255,255,0.32)'
+/**
+ * The resting sliver's fill — noticeably more translucent than the active
+ * capsule. In the reference the idle pill is a drawn ring with the wallpaper
+ * dimly visible through it; a solid black blob reads as a hole in the screen.
+ */
+export const BAR_IDLE_BACKGROUND = 'rgba(18,18,23,0.60)'
+/**
+ * The capsule's edge while it is actually hearing something — brighter, and
+ * *cooled* towards the listening glow's indigo rather than plain white, so the
+ * rim and the halo read as one light source instead of two coincidences.
+ */
+export const BAR_LISTENING_BORDER = 'rgba(186,196,255,0.30)'
+export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.35)'
+/**
+ * The capsule's shadow stack — the half of the material that sells it.
+ *
+ * Five layers, each with one job: a 1 px contact shadow that seats the capsule
+ * on the screen, a mid-distance shadow that gives it body, a wide soft ambient
+ * that lifts it off whatever is behind it, an inset top light (the glass
+ * highlight), and a half-pixel inner ring that reads as the polished edge of
+ * the glass. Collapsing these into two layers is what made the old pill look
+ * like a screenshot of a pill.
  */
 export const BAR_SHADOW =
-  '0 2px 6px rgba(0,0,0,0.30), 0 12px 32px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.07)'
+  '0 1px 2px rgba(0,0,0,0.34), 0 6px 16px rgba(0,0,0,0.35), 0 18px 44px rgba(0,0,0,0.42), ' +
+  'inset 0 1px 0 rgba(255,255,255,0.09), inset 0 0 0 0.5px rgba(255,255,255,0.05)'
+
+/** The cluster buttons' lighter stack — a 30 px chip does not cast a 44 px shadow. */
+export const CLUSTER_SHADOW =
+  '0 1px 2px rgba(0,0,0,0.30), 0 4px 12px rgba(0,0,0,0.30), 0 12px 28px rgba(0,0,0,0.34), ' +
+  'inset 0 1px 0 rgba(255,255,255,0.10)'
 
 /**
- * A soft state-coloured halo layered onto {@link BAR_SHADOW}: cool while
+ * A soft state-coloured rim glow layered onto {@link BAR_SHADOW}: cool while
  * listening, green for the ✓, warm for an error. Transitioned by the renderer,
  * so states bleed into each other instead of snapping.
  */
 export const BAR_GLOW = {
-  listening: '0 0 24px rgba(129,140,248,0.30)',
-  inserted: '0 0 22px rgba(110,231,168,0.26)',
-  error: '0 0 24px rgba(248,113,113,0.24)',
+  listening: '0 0 30px rgba(129,140,248,0.36)',
+  inserted: '0 0 26px rgba(110,231,168,0.30)',
+  error: '0 0 26px rgba(248,113,113,0.28)',
+} as const
+
+/**
+ * The ambient halo *behind* the capsule — a blurred radial wash on the desktop
+ * itself. {@link BAR_GLOW} hugs the rim; this one falls on the wallpaper
+ * around the pill, which is what makes a state change read as light coming on
+ * rather than as a div being recoloured. It breathes while listening, flashes
+ * once for the ✓, and smoulders steadily for an error.
+ */
+export const BAR_HALO = {
+  listening: 'rgba(105,110,245,0.55)',
+  inserted: 'rgba(74,222,128,0.50)',
+  error: 'rgba(248,113,113,0.45)',
 } as const
 
 // ---------------------------------------------------------------------------
@@ -146,13 +182,14 @@ export interface BarVisual {
 /**
  * Map one dictation event to the pill's appearance.
  *
- * `hovered` is the only renderer-local input: hovering widens the capsule to
- * fit the cancel / mic / Hub controls without changing what it is showing.
+ * Hover is deliberately *not* an input here any more. The pill used to widen on
+ * hover to fit three glyphs inside itself, which meant the thing you were
+ * pointing at moved and then had controls crammed into it. It now gets out of
+ * the way instead: the renderer collapses this pill and puts {@link
+ * describeCluster}'s buttons in its place, at a size worth clicking.
  */
-export function describeBar(event: DictationEvent, hovered = false, recording = false): BarVisual {
-  const base = describeBase(event)
-  const width = clampWidth(base.width + (hovered ? BAR.hoverWidth : 0))
-  return { ...base, width, height: hovered ? BAR.hoverHeight : BAR.height, recording }
+export function describeBar(event: DictationEvent, recording = false): BarVisual {
+  return { ...describeBase(event), recording }
 }
 
 function describeBase(event: DictationEvent): BarVisual {
@@ -161,9 +198,9 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'dots',
         width: BAR.idleWidth,
-        height: BAR.height,
-        background: BAR_BACKGROUND,
-        border: BAR_BORDER,
+        height: BAR.idleHeight,
+        background: BAR_IDLE_BACKGROUND,
+        border: BAR_IDLE_BORDER,
         label: '',
         glow: null,
         handsFree: false,
@@ -176,7 +213,7 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'waveform',
         width: BAR.listeningWidth,
-        height: BAR.height,
+        height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_LISTENING_BORDER,
         label: '',
@@ -195,7 +232,7 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'shimmer',
         width: BAR.processingWidth,
-        height: BAR.height,
+        height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
@@ -214,7 +251,7 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'shimmer',
         width: BAR.insertingWidth,
-        height: BAR.height,
+        height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
@@ -229,7 +266,7 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'check',
         width: BAR.insertedWidth,
-        height: BAR.height,
+        height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
         label: '',
@@ -250,7 +287,7 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'message',
         width: errorWidth(DICTATION_ERROR_LABEL[event.code]),
-        height: BAR.height,
+        height: BAR.activeHeight,
         background: BAR_ERROR_BACKGROUND,
         border: BAR_ERROR_BORDER,
         label: DICTATION_ERROR_LABEL[event.code],
@@ -273,6 +310,145 @@ export function errorWidth(message: string): number {
 function clampWidth(width: number): number {
   return Math.min(BAR.maxWidth, Math.round(width))
 }
+
+// ---------------------------------------------------------------------------
+// The hover cluster
+// ---------------------------------------------------------------------------
+
+/**
+ * Geometry of the floating buttons that replace the pill on hover.
+ *
+ * A labelled primary button at a real click target size, plus round chips for
+ * the rest. The old design put three 18 px glyphs *inside* a 22 px capsule,
+ * which is smaller than any platform's minimum touch target and gave the most
+ * common action — start dictating — no button at all.
+ */
+export const CLUSTER = {
+  /** The round buttons. */
+  chipSize: 34,
+  gap: 8,
+  /** The floating label above the hovered button ("Dictate fn"). */
+  tooltipHeight: 28,
+  tooltipGap: 8,
+  /**
+   * How long the pointer must rest on the pill before the buttons open.
+   *
+   * Hover *intent*, and it is what separates "responsive" from "touchy": with
+   * zero delay the row fired for every pointer that merely crossed the bottom
+   * of the screen, and the swap played dozens of times an hour uninvited.
+   * ~100 ms is imperceptible when you meant it and still filters most
+   * pass-throughs when you did not.
+   */
+  openDelayMs: 100,
+  /**
+   * How long the row survives the pointer stepping outside before it closes.
+   *
+   * The forgiveness window: slipping 2 px past the edge mid-reach no longer
+   * yanks the buttons away. Deliberately longer than the open delay — losing
+   * UI you were using is worse than briefly seeing UI you are done with.
+   */
+  closeGraceMs: 300,
+  /** The pill's cross-fade under the morphing row. */
+  fadeMs: 160,
+  /**
+   * How long the row lingers after the close fires, animating out. Before
+   * this existed the cluster unmounted on the frame the hover ended, which
+   * was the single cheapest-looking moment on the whole surface.
+   *
+   * There is deliberately no per-button stagger. The row morphs in as ONE
+   * unit, scaling up out of the pill's silhouette and shrinking back into it
+   * on the way out — continuity of shape is what makes it read as the pill
+   * *becoming* the buttons rather than being replaced by them.
+   */
+  leaveMs: 140,
+} as const
+
+export type ClusterAction = 'dictate' | 'stop' | 'cancel' | 'scratchpad' | 'mic' | 'hub'
+
+export interface ClusterButton {
+  action: ClusterAction
+  /** The tooltip text and the accessible name. */
+  label: string
+  tone: 'default' | 'accent' | 'destructive'
+}
+
+export interface ClusterSpec {
+  /** The round buttons, left to right. */
+  chips: ClusterButton[]
+  width: number
+  height: number
+}
+
+/**
+ * Which buttons the cluster shows for the current state.
+ *
+ * One row of round buttons, exactly as the reference product draws it; the
+ * label is not printed on the button but floats above the hovered one as a
+ * tooltip ("Dictate fn"). Three layouts, and the reasoning behind the split is
+ * about what the mouse can honestly do:
+ *
+ *  - **At rest** the cluster is a launcher: dictate, jot a note, pick a mic,
+ *    open the Hub.
+ *  - **Hands-free** was started by a click (or a double-tap), so it can be
+ *    ended by one: Stop finishes the utterance and inserts it. Discard sits
+ *    beside it for throwing the utterance away instead.
+ *  - **Anything else in flight** — a physically-held key, transcription,
+ *    insertion — offers Cancel only. There is no "stop and keep" for a held
+ *    key: the way to end that is to let go, and a Stop button that silently
+ *    meant Cancel would be a lie about what the click does.
+ *
+ * The momentary `inserted` and `error` states fall through to the resting
+ * layout: they are already over, and a Cancel button for a finished dictation
+ * cancels nothing.
+ */
+export function describeCluster(event: DictationEvent): ClusterSpec {
+  const chips = clusterButtons(event)
+  return {
+    chips,
+    width: clampWidth(chips.length * CLUSTER.chipSize + (chips.length - 1) * CLUSTER.gap),
+    height: CLUSTER.chipSize,
+  }
+}
+
+function clusterButtons(event: DictationEvent): ClusterButton[] {
+  if (event.state === 'listening' && event.handsFree) {
+    return [
+      { action: 'stop', label: 'Stop', tone: 'accent' },
+      { action: 'cancel', label: 'Discard', tone: 'destructive' },
+      { action: 'mic', label: 'Microphone', tone: 'default' },
+    ]
+  }
+
+  if (event.state === 'listening' || event.state === 'processing' || event.state === 'inserting') {
+    return [
+      { action: 'cancel', label: 'Cancel', tone: 'destructive' },
+      { action: 'mic', label: 'Microphone', tone: 'default' },
+    ]
+  }
+
+  return [
+    { action: 'dictate', label: 'Dictate', tone: 'accent' },
+    { action: 'scratchpad', label: 'New note', tone: 'default' },
+    { action: 'mic', label: 'Microphone', tone: 'default' },
+    { action: 'hub', label: 'Open Murmur', tone: 'default' },
+  ]
+}
+
+/**
+ * The pointer region the Bar window claims while the cluster is up.
+ *
+ * Fixed, and larger than any cluster, on purpose. The pill is a 10 px sliver;
+ * hovering it collapses it to nothing and replaces it with a 30 px row, so
+ * hit-testing against the *live* geometry moves the boundary out from under the
+ * pointer and the two states flicker against each other. Testing against a
+ * stable rectangle instead means the hover you started can only be ended by
+ * actually leaving it.
+ */
+export const HOVER_ZONE = {
+  width: BAR.maxWidth,
+  // Buttons + the tooltip floating above them, plus slack.
+  height: 100,
+} as const
 
 // ---------------------------------------------------------------------------
 // Momentary states

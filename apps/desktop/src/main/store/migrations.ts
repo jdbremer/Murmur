@@ -234,6 +234,204 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       `)
     },
   },
+  {
+    version: 5,
+    name: 'insights',
+    up(db) {
+      // Everything the Insights section draws, kept where the retention sweep
+      // cannot reach it — the same argument migration 2 makes for the lifetime
+      // counters, extended to the three things that section actually shows.
+      //
+      // Deriving any of this from `dictations` would make the charts a picture
+      // of the *retention window* rather than of the user: a 90-day policy
+      // would silently erase a year of streak history every boot, and the app
+      // breakdown would forget which apps you used it in most.
+
+      // The frontmost app's display name. The orchestrator already receives it
+      // from `getFrontmostApp()` and throws it away, so the History row has
+      // only ever been able to show a raw bundle id.
+      db.exec(`ALTER TABLE dictations ADD COLUMN app_name TEXT`)
+
+      // The heatmap needs magnitude, not just presence: a day with 4,000 words
+      // and a day with six should not be the same square.
+      db.exec(`
+        ALTER TABLE dictation_days ADD COLUMN words INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE dictation_days ADD COLUMN dictations INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE dictation_days ADD COLUMN spoken_ms INTEGER NOT NULL DEFAULT 0;
+      `)
+
+      // The three fixes the pipeline already performs but has never counted.
+      // On `lifetime_stats` rather than a table of their own: they are lifetime
+      // counters on the same single row, updated in the same transaction, and a
+      // second one-row table would only ever be joined back to this one.
+      db.exec(`
+        ALTER TABLE lifetime_stats ADD COLUMN dictionary_fixes INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE lifetime_stats ADD COLUMN snippet_expansions INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE lifetime_stats ADD COLUMN words_cleaned INTEGER NOT NULL DEFAULT 0;
+      `)
+
+      // One row per app ever dictated into. `display_name` is stored rather
+      // than resolved at read time because the app may not be installed — let
+      // alone running — when the Hub asks, and "com.tinyspeck.slackmacgap" is
+      // not an answer to "where do you use this".
+      db.exec(`
+        CREATE TABLE app_usage (
+          bundle_id    TEXT PRIMARY KEY,
+          display_name TEXT NOT NULL,
+          category     TEXT NOT NULL DEFAULT 'other',
+          words        INTEGER NOT NULL DEFAULT 0,
+          dictations   INTEGER NOT NULL DEFAULT 0,
+          spoken_ms    INTEGER NOT NULL DEFAULT 0,
+          last_used_at INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_app_usage_words ON app_usage (words DESC);
+      `)
+
+      // Backfill from whatever history survives, through the same functions the
+      // live path uses — and no further. This is **partial by construction**:
+      // rows the retention sweep already deleted are gone, so a user upgrading
+      // with a 90-day window gets 90 days of per-day and per-app history, not a
+      // reconstructed lifetime. Inventing the rest would be worse than a chart
+      // that starts where the evidence does.
+      //
+      // The fix counters stay at zero: they have never been measured, and a
+      // guess ("assume one dictionary fix per row") would be a fabrication
+      // sitting in a column the UI presents as a count.
+      const rows = db
+        .prepare(
+          `SELECT ts, raw_text, polished_text, duration_ms, app_bundle_id, app_category
+             FROM dictations`,
+        )
+        .iterate() as Iterable<{
+        ts: number
+        raw_text: string
+        polished_text: string | null
+        duration_ms: number
+        app_bundle_id: string | null
+        app_category: string
+      }>
+
+      const days = new Map<string, { words: number; dictations: number; spokenMs: number }>()
+      const apps = new Map<
+        string,
+        {
+          category: string
+          words: number
+          dictations: number
+          spokenMs: number
+          lastUsedAt: number
+        }
+      >()
+
+      // Collected first and written after the loop: better-sqlite3 refuses to
+      // execute a statement while an iterator is open on the same connection.
+      for (const row of rows) {
+        const words = countWords(countedText(row.polished_text, row.raw_text))
+        const key = dayKey(row.ts)
+        const day = days.get(key) ?? { words: 0, dictations: 0, spokenMs: 0 }
+        day.words += words
+        day.dictations += 1
+        day.spokenMs += row.duration_ms
+        days.set(key, day)
+
+        if (!row.app_bundle_id) continue
+        const app = apps.get(row.app_bundle_id) ?? {
+          category: row.app_category,
+          words: 0,
+          dictations: 0,
+          spokenMs: 0,
+          lastUsedAt: 0,
+        }
+        app.words += words
+        app.dictations += 1
+        app.spokenMs += row.duration_ms
+        app.lastUsedAt = Math.max(app.lastUsedAt, row.ts)
+        apps.set(row.app_bundle_id, app)
+      }
+
+      // `INSERT OR IGNORE` first so a day predating migration 2's backfill
+      // still gets a row; the UPDATE then fills the new columns for every day.
+      const addDay = db.prepare(`INSERT OR IGNORE INTO dictation_days (day) VALUES (?)`)
+      const fillDay = db.prepare(
+        `UPDATE dictation_days SET words = ?, dictations = ?, spoken_ms = ? WHERE day = ?`,
+      )
+      for (const [day, totals] of days) {
+        addDay.run(day)
+        fillDay.run(totals.words, totals.dictations, totals.spokenMs, day)
+      }
+
+      // The display name is unknown here — it was never stored — so the bundle
+      // id stands in until the next dictation into that app supplies the real
+      // one. A readable-ish placeholder beats an empty cell.
+      const addApp = db.prepare(
+        `INSERT INTO app_usage
+           (bundle_id, display_name, category, words, dictations, spoken_ms, last_used_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const [bundleId, totals] of apps) {
+        addApp.run(
+          bundleId,
+          bundleId,
+          totals.category,
+          totals.words,
+          totals.dictations,
+          totals.spokenMs,
+          totals.lastUsedAt,
+        )
+      }
+    },
+  },
+  {
+    version: 6,
+    name: 'notes',
+    up(db) {
+      // The Scratchpad's storage (PLAN §2.2.7).
+      //
+      // Note the absence of anything retention-shaped. Every other text table
+      // here is a *record* — of a dictation, of a meeting — and is pruned on a
+      // schedule for that reason. A note is something the user wrote and
+      // expects to find again; the retention sweep must never touch it, and the
+      // only thing that deletes one is the user deleting it.
+      db.exec(`
+        CREATE TABLE notes (
+          id         TEXT PRIMARY KEY,
+          title      TEXT NOT NULL DEFAULT '',
+          body       TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          pinned     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_notes_updated ON notes (pinned DESC, updated_at DESC);
+      `)
+
+      // Same external-content FTS5 arrangement as `dictations`: the text lives
+      // once, in `notes`, and the triggers keep the index in step.
+      db.exec(`
+        CREATE VIRTUAL TABLE notes_fts USING fts5(
+          title,
+          body,
+          content='notes',
+          content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER notes_ai AFTER INSERT ON notes BEGIN
+          INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+        END;
+
+        CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
+          INSERT INTO notes_fts(notes_fts, rowid, title, body)
+          VALUES ('delete', old.rowid, old.title, old.body);
+        END;
+
+        CREATE TRIGGER notes_au AFTER UPDATE ON notes BEGIN
+          INSERT INTO notes_fts(notes_fts, rowid, title, body)
+          VALUES ('delete', old.rowid, old.title, old.body);
+          INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+        END;
+      `)
+    },
+  },
 ])
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

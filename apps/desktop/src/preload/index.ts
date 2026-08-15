@@ -99,6 +99,22 @@ const api: MurmurApi = {
     subscribe: (listener) => ipc.on('history.changed', listener),
   },
 
+  insights: {
+    get: () => ipc.invoke('insights.get'),
+    reset: () => ipc.invoke('insights.reset'),
+  },
+
+  notes: {
+    list: (request) => ipc.invoke('notes.list', request),
+    get: (request) => ipc.invoke('notes.get', request),
+    create: (draft) => ipc.invoke('notes.create', draft),
+    update: (request) => ipc.invoke('notes.update', request),
+    remove: (request) => ipc.invoke('notes.delete', request),
+    openWindow: (request) => ipc.invoke('notes.openWindow', request),
+    subscribe: (listener) => ipc.on('notes.changed', listener),
+    onSelect: (listener) => ipc.on('notes.select', listener),
+  },
+
   dictionary: {
     list: () => ipc.invoke('dictionary.list'),
     create: (entry) => ipc.invoke('dictionary.create', entry),
@@ -116,6 +132,10 @@ const api: MurmurApi = {
   style: {
     get: () => ipc.invoke('style.get'),
     set: (patch) => ipc.invoke('style.set', patch),
+  },
+
+  vibeCoding: {
+    probe: () => ipc.invoke('coding.probe'),
   },
 
   permissions: {

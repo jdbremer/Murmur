@@ -43,13 +43,19 @@ body {
 
 /*
  * Entrance and exit. The stage (the whole window's content) rises out of the
- * bottom edge with a small overshoot, and sinks back when dictation ends. The
- * exit must finish inside the ~250 ms grace main leaves before hiding the
- * window (EXIT_MS in Bar.tsx).
+ * bottom edge with a small overshoot. The exit must finish inside the ~250 ms
+ * grace main leaves before hiding the window (EXIT_MS in Bar.tsx), and stays
+ * quicker than the entrance — disappearing should always feel faster than
+ * appearing.
+ *
+ * NOTHING in this file animates `filter`. An animated blur re-rasterises its
+ * layer on every frame, and with several elements doing it at once the hover
+ * swap visibly hitched. Every entrance here is transform + opacity only —
+ * the two properties the compositor can play without repainting.
  */
 .bar-stage {
   transform-origin: 50% 100%;
-  animation: bar-rise 260ms cubic-bezier(0.34, 1.45, 0.6, 1) both;
+  animation: bar-rise 300ms cubic-bezier(0.32, 1.46, 0.46, 1) both;
 }
 
 .bar-stage[data-leaving='true'] {
@@ -60,7 +66,7 @@ body {
 @keyframes bar-rise {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.86);
+    transform: translateY(16px) scale(0.84);
   }
 }
 
@@ -71,38 +77,112 @@ body {
   }
 }
 
-/* The hover controls and the mic menu pop in rather than blinking on. */
-.bar-controls {
-  animation: bar-fade-scale 140ms ease-out both;
+/*
+ * The pill ↔ cluster exchange — ONE layer in, ONE layer out.
+ *
+ * The row enters and leaves as a single animated unit. It used to cascade in
+ * per button, which meant five elements animating independently against the
+ * pill's own fade; with real pointer traffic on top, the sum read as
+ * commotion. A single quick pop from the pill's spot is what the reference
+ * product does, and it is also the least work a compositor can be asked for.
+ */
+.bar-cluster {
+  transform-origin: 50% 100%;
+  animation: bar-cluster-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.bar-cluster[data-leaving='true'] {
+  animation: bar-cluster-leave 140ms cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+/*
+ * `pointer-events: none` on the container is NOT enough: the buttons carry
+ * `.bar-pill { pointer-events: auto }`, and an explicit `auto` on a child
+ * re-enables hit-testing under a parent's `none`. Without this line the
+ * departing buttons kept swallowing the clicks aimed at the pill fading back
+ * in beneath them.
+ */
+.bar-cluster[data-leaving='true'] .bar-chip {
+  pointer-events: none;
+}
+
+/*
+ * The morph. The row starts at roughly the pill's silhouette — a quarter of
+ * its width, a third of its height, anchored to the same bottom-centre — and
+ * inflates into place; leaving shrinks it most of the way back. Paired with
+ * the buttons wearing the pill's material (Bar.tsx), this is what turns "the
+ * pill got replaced" into "the pill became the buttons". Ease-out with no
+ * bounce: 220 ms of settling, not popping.
+ */
+@keyframes bar-cluster-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.3, 0.25);
+  }
+}
+
+@keyframes bar-cluster-leave {
+  to {
+    opacity: 0;
+    transform: translateY(2px) scale(0.55, 0.45);
+  }
+}
+
+/* Buttons: hover feedback only — their entrance is the row's. */
+.bar-chip {
+  transition: transform 130ms cubic-bezier(0.34, 1.3, 0.5, 1);
+}
+
+.bar-chip:hover {
+  transform: translateY(-1px) scale(1.04);
+}
+
+.bar-chip:active {
+  transform: translateY(0) scale(0.95);
+  transition-duration: 80ms;
+}
+
+/*
+ * The floating name above the hovered button — one persistent element that
+ * slides between buttons and fades in place. No entrance animation: it used
+ * to re-mount in every gap between buttons and replay its pop on the far
+ * side, which read as a blink per button while scrubbing the row.
+ */
+.bar-tooltip {
+  transition:
+    transform 120ms cubic-bezier(0.3, 0.9, 0.4, 1),
+    opacity 100ms linear;
 }
 
 .bar-menu {
   transform-origin: 50% 100%;
-  animation: bar-menu-rise 160ms cubic-bezier(0.3, 1.2, 0.5, 1) both;
-}
-
-/*
- * Scale only — no translate. The controls centre themselves vertically with
- * Tailwind's `-translate-y-1/2`, which compiles to the standalone CSS
- * `translate` property, not to `transform`. The two compose rather than
- * override, so repeating the -50% here applied it twice and left the controls
- * sitting half their own height (9px) above the centre of the capsule.
- */
-@keyframes bar-fade-scale {
-  from {
-    opacity: 0;
-    transform: scale(0.85);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  animation: bar-menu-rise 180ms cubic-bezier(0.3, 1.3, 0.5, 1) both;
 }
 
 @keyframes bar-menu-rise {
   from {
     opacity: 0;
-    transform: translateY(5px) scale(0.97);
+    transform: translateY(6px) scale(0.96);
+  }
+}
+
+/*
+ * The ✓ draws itself tip-to-tail as the pulse lands — the tick being *made*
+ * rather than switched on. Base dash offset is 0, so with the animation
+ * removed (Reduce Motion) the full check simply appears.
+ */
+.bar-check-draw {
+  stroke-dasharray: 1;
+  animation: bar-check-draw 260ms cubic-bezier(0.3, 0.9, 0.4, 1) both;
+}
+
+@keyframes bar-check-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
   }
 }
 
@@ -121,19 +201,55 @@ body {
   }
 }
 
-/* Reduce Motion: no travel, no scaling — a plain crossfade (PLAN §15.5). */
+/* Reduce Motion: no travel, no scaling, no blur, nothing breathing — every
+   choreographed entrance collapses to a plain crossfade (PLAN §15.5). */
 @media (prefers-reduced-motion: reduce) {
   .bar-stage,
   .bar-stage[data-leaving='true'],
-  .bar-controls,
+  .bar-cluster[data-leaving='true'],
   .bar-menu {
     animation-name: bar-fade;
     animation-duration: 120ms;
     animation-timing-function: linear;
   }
 
-  .bar-stage[data-leaving='true'] {
+  .bar-stage[data-leaving='true'],
+  .bar-cluster[data-leaving='true'] {
     animation-direction: reverse;
+  }
+
+  .bar-cluster {
+    animation-name: bar-fade;
+    animation-duration: 120ms;
+    animation-timing-function: linear;
+  }
+
+  .bar-chip {
+    transition: none;
+  }
+
+  .bar-chip:hover,
+  .bar-chip:active {
+    transform: none;
+  }
+
+  .bar-tooltip {
+    transition: opacity 100ms linear;
+  }
+
+  .bar-chip:hover,
+  .bar-chip:active {
+    transform: none;
+  }
+
+  .bar-halo,
+  .bar-halo[data-live='true'],
+  .bar-halo[data-flash='true'] {
+    animation: none;
+  }
+
+  .bar-check-draw {
+    animation: none;
   }
 
   .bar-dot-pulse {

@@ -1,8 +1,8 @@
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 
-/** The three renderer entry points declared in electron.vite.config.ts. */
-export type RendererName = 'hub' | 'bar' | 'audio'
+/** The four renderer entry points declared in electron.vite.config.ts. */
+export type RendererName = 'hub' | 'bar' | 'audio' | 'notes'
 
 /** Absolute path to the compiled preload bundle (CJS, sandbox-compatible). */
 export const PRELOAD_PATH = join(__dirname, '../preload/index.js')

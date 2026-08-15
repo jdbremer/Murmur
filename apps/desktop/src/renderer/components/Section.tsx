@@ -16,7 +16,7 @@ export function Section({
     <section>
       <header className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
+          <h1 className="text-[24px] font-semibold tracking-tight text-ink">{title}</h1>
           <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{description}</p>
         </div>
         {actions ? <div className="shrink-0 pt-1">{actions}</div> : null}
@@ -248,7 +248,8 @@ export function TextInput({
 export function Stat({ label, value }: { label: string; value: string }): React.JSX.Element {
   return (
     <div>
-      <p className="text-[26px] font-semibold tracking-tight text-ink tabular-nums">{value}</p>
+      {/* Serif numerals — the reference product's stats signature. */}
+      <p className="font-serif text-[26px] tracking-tight text-ink tabular-nums">{value}</p>
       <p className="mt-0.5 text-[12px] text-ink-muted">{label}</p>
     </div>
   )

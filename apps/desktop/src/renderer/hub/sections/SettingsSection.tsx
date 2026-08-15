@@ -328,8 +328,51 @@ export function SettingsSection(): React.JSX.Element {
             }
           />
         </Row>
+        <Row
+          label="Track which apps you dictate into"
+          hint="Powers the breakdown in Insights. Stored on this machine only, and unaffected by the retention window above — the totals are the point."
+        >
+          <Toggle
+            label="Track which apps you dictate into"
+            checked={settings.insightsEnabled}
+            onChange={(insightsEnabled) => void update({ insightsEnabled })}
+          />
+        </Row>
+        <Row
+          label="Reset insights"
+          hint="Zeroes every counter — words, streak, per-app tally, fixes. Your transcripts are not touched."
+        >
+          <ResetInsightsButton />
+        </Row>
       </Card>
     </Section>
+  )
+}
+
+/**
+ * Reset, with a confirm.
+ *
+ * The counters are the only numbers in Murmur that cannot be recomputed —
+ * history is pruned, so the words behind them are long gone. That makes this
+ * genuinely irreversible in a way "delete this dictation" is not, and worth one
+ * dialog.
+ */
+function ResetInsightsButton(): React.JSX.Element {
+  const [done, setDone] = useState(false)
+
+  return (
+    <Button
+      variant="danger"
+      onClick={() => {
+        if (!window.confirm('Reset every Insights counter? Your transcripts are kept.')) return
+        void window.murmur.insights.reset().then(() => {
+          setDone(true)
+          setTimeout(() => setDone(false), 1_600)
+        })
+      }}
+    >
+      {done ? 'Reset' : 'Reset…'}
+    </Button>
   )
 }
 

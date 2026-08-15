@@ -32,6 +32,26 @@ npm run agent -- stop
 
 ---
 
+## Vibe coding: `readFocusedEditorText` (PLAN §18.3)
+
+The macOS backend reads the focused editor's text through
+`kAXValueAttribute` so Murmur can bias recognition towards the identifiers in
+the file you are dictating into. Windows has no equivalent yet.
+
+**What is needed:** a `ReadFocusedEditorText` export in
+`packages/native/src/win/murmur_native_win.cpp` using UI Automation —
+`GetFocusedElement`, then `TextPattern` (`UIA_TextPatternId`) →
+`DocumentRange` → `GetText(maxChars)`. Cap at the same 20k characters, refuse
+when `UIA_IsPasswordAttributeId` is true, and keep the whole call inside the
+same latency budget as the other AX reads (it runs synchronously at
+hotkey-down).
+
+**What is already in place:** the setting, the IDE allowlist, extraction, file
+tagging, the probe channel and the whole Vibe coding section. They are all
+platform-independent. The interface member is _optional and absent_ on Windows
+rather than stubbed, so the UI already reports "Reading the editor is macOS-only
+for now" instead of silently doing nothing — adding the export is the only work.
+
 ## Where things stand (Windows)
 
 Verified on a Windows dev box (agent overnight loop — **commits only, never push**):

@@ -6,10 +6,14 @@ import {
   BAR,
   BAR_BACKGROUND,
   BAR_ERROR_BACKGROUND,
+  BAR_IDLE_BACKGROUND,
   BarPresenter,
+  CLUSTER,
   describeBar,
+  describeCluster,
   errorWidth,
   holdMsFor,
+  HOVER_ZONE,
   isBarVisible,
 } from '../src/renderer/bar/visual'
 
@@ -33,17 +37,35 @@ const inserted: DictationEvent = { state: 'inserted', charCount: 27, method: 'pa
 const failed: DictationEvent = { state: 'error', code: 'no-speech', message: "Didn't catch that" }
 
 describe('describeBar', () => {
-  it('renders the idle capsule at the spec size', () => {
+  it('rests as a thin, translucent, outlined sliver', () => {
     const visual = describeBar({ state: 'idle' })
-    expect(visual.width).toBe(64)
-    expect(visual.height).toBe(22)
+    expect(visual.width).toBe(BAR.idleWidth)
+    expect(visual.height).toBe(BAR.idleHeight)
     expect(visual.shape).toBe('dots')
-    expect(visual.background).toBe(BAR_BACKGROUND)
+    // The ring is the idle statement: translucent fill, bright outline —
+    // never the active capsule's near-solid black.
+    expect(visual.background).toBe(BAR_IDLE_BACKGROUND)
+    expect(visual.background).not.toBe(BAR_BACKGROUND)
   })
 
-  it('expands to ~160 px with a waveform while listening', () => {
+  it('grows only when it has something to show', () => {
+    // The sliver is an indicator; every other state is showing the user
+    // something and gets the taller capsule.
+    expect(describeBar({ state: 'idle' }).height).toBe(BAR.idleHeight)
+    for (const event of [
+      listening,
+      processing,
+      { state: 'inserting' } as const,
+      inserted,
+      failed,
+    ]) {
+      expect(describeBar(event).height).toBe(BAR.activeHeight)
+    }
+  })
+
+  it('expands with a waveform while listening', () => {
     const visual = describeBar(listening)
-    expect(visual.width).toBe(160)
+    expect(visual.width).toBe(BAR.listeningWidth)
     expect(visual.shape).toBe('waveform')
     expect(visual.handsFree).toBe(false)
   })
@@ -104,18 +126,10 @@ describe('describeBar', () => {
     }
   })
 
-  it('widens on hover to make room for the controls, and grows slightly', () => {
-    const resting = describeBar(listening)
-    const hovered = describeBar(listening, true)
-    expect(hovered.width).toBe(resting.width + BAR.hoverWidth)
-    expect(hovered.height).toBe(BAR.hoverHeight)
-    expect(hovered.shape).toBe(resting.shape)
-  })
-
-  it('never exceeds the Bar window width, even hovering a long error', () => {
+  it('never exceeds the Bar window width, even for a long error', () => {
     const long = { ...failed, message: 'x'.repeat(200) } satisfies DictationEvent
-    expect(describeBar(long, true).width).toBeLessThanOrEqual(BAR.maxWidth)
-    expect(describeBar(long, true).width).toBeLessThanOrEqual(360)
+    expect(describeBar(long).width).toBeLessThanOrEqual(BAR.maxWidth)
+    expect(describeBar(long).width).toBeLessThanOrEqual(360)
   })
 
   it('glows only in the states that earn it', () => {
@@ -242,25 +256,102 @@ describe('the spec numbers themselves', () => {
     expect(waveform).toBeLessThan(BAR.listeningWidth)
   })
 
-  /**
-   * The interior shifts left by half `controlsWidth` so it stays centred in
-   * what is left of the capsule. Shifting by half `hoverWidth` instead — the
-   * growth rather than the footprint — put it 9px off-centre, which is exactly
-   * the kind of thing that is easy to see and hard to name.
-   *
-   * Both numbers describe the controls, so a fourth button would move them
-   * together and nothing here would catch a drift. This asserts the geometry
-   * they are both derived from.
-   */
-  it('derives the controls footprint from the buttons that make it up', () => {
-    const buttons = 3
-    const buttonSize = 18
-    const gap = 3
-    const inset = 6
-    expect(BAR.controlsWidth).toBe(buttons * buttonSize + (buttons - 1) * gap + inset)
+  it('keeps the waveform inside the thinner capsule', () => {
+    expect(BAR.waveformMaxHeight).toBeLessThan(BAR.activeHeight)
   })
 
-  it('leaves the capsule wider than the controls need, so they do not crowd it', () => {
-    expect(BAR.hoverWidth).toBeGreaterThan(BAR.controlsWidth)
+  it('gives the cluster buttons a real click target', () => {
+    // The old design put 18px glyphs inside the capsule, under every platform's
+    // minimum target size. Nothing in the cluster may go back below ~32px —
+    // 34 is the tuned value, sized against the reference by eye.
+    expect(CLUSTER.chipSize).toBeGreaterThanOrEqual(32)
+  })
+
+  it('keeps the swap choreography inside a blink', () => {
+    // Hover UI that makes the pointer wait reads as broken, not premium — and
+    // the exit must never outlast the entrance: dismissals are always faster.
+    expect(CLUSTER.fadeMs).toBeLessThanOrEqual(200)
+    expect(CLUSTER.leaveMs).toBeLessThanOrEqual(CLUSTER.fadeMs)
+  })
+
+  it('waits for hover intent, and forgives more than it demands', () => {
+    // Instant-open reads as touchy: every pointer crossing the screen bottom
+    // played the swap. The open delay filters pass-throughs; the close grace
+    // must be at least as long, because losing UI you were using is worse
+    // than briefly keeping UI you are done with.
+    expect(CLUSTER.openDelayMs).toBeGreaterThanOrEqual(100)
+    expect(CLUSTER.openDelayMs).toBeLessThanOrEqual(200)
+    expect(CLUSTER.closeGraceMs).toBeGreaterThanOrEqual(CLUSTER.openDelayMs)
+  })
+
+  it('keeps the hover zone bigger than anything drawn inside it', () => {
+    // The zone is what stops the swap flickering; if the row or its tooltip
+    // could reach past it, moving along the buttons would drop the hover.
+    for (const event of [
+      { state: 'idle' } as const,
+      listening,
+      { ...listening, handsFree: true },
+    ]) {
+      const spec = describeCluster(event)
+      expect(spec.width).toBeLessThanOrEqual(HOVER_ZONE.width)
+      expect(spec.height + CLUSTER.tooltipGap + CLUSTER.tooltipHeight).toBeLessThan(
+        HOVER_ZONE.height,
+      )
+    }
+  })
+})
+
+describe('describeCluster', () => {
+  const actions = (spec: ReturnType<typeof describeCluster>): string[] =>
+    spec.chips.map((chip) => chip.action)
+
+  it('offers the launcher set at rest', () => {
+    expect(actions(describeCluster({ state: 'idle' }))).toEqual([
+      'dictate',
+      'scratchpad',
+      'mic',
+      'hub',
+    ])
+  })
+
+  it('offers Stop only for hands-free, where a click can honestly end it', () => {
+    const spec = describeCluster({ ...listening, handsFree: true })
+    expect(actions(spec)).toEqual(['stop', 'cancel', 'mic'])
+    expect(spec.chips[0]!.label).toBe('Stop')
+  })
+
+  it('offers Cancel — never Stop — while a held key is the thing listening', () => {
+    // There is no "stop and keep" for a key the user is physically holding:
+    // the way to end that is to let go. A Stop button that quietly meant
+    // Cancel would misdescribe what the click does.
+    const spec = describeCluster(listening)
+    expect(actions(spec)).toEqual(['cancel', 'mic'])
+    expect(spec.chips[0]!.tone).toBe('destructive')
+  })
+
+  it('offers Cancel while transcribing and inserting', () => {
+    for (const event of [processing, { state: 'inserting' } as const]) {
+      expect(actions(describeCluster(event))).toEqual(['cancel', 'mic'])
+    }
+  })
+
+  it('falls back to the launcher for the momentary states — they are already over', () => {
+    for (const event of [inserted, failed]) {
+      expect(describeCluster(event).chips[0]!.action).toBe('dictate')
+    }
+  })
+
+  it('measures itself from its own buttons', () => {
+    const spec = describeCluster({ state: 'idle' })
+    expect(spec.width).toBe(4 * CLUSTER.chipSize + 3 * CLUSTER.gap)
+    expect(spec.height).toBe(CLUSTER.chipSize)
+  })
+
+  it('names every button — the tooltip is the only place the words appear', () => {
+    for (const event of [{ state: 'idle' } as const, listening, processing]) {
+      for (const chip of describeCluster(event).chips) {
+        expect(chip.label.length).toBeGreaterThan(0)
+      }
+    }
   })
 })

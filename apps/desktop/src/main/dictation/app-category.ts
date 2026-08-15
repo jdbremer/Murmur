@@ -35,7 +35,15 @@ const CATEGORY_PATTERNS: readonly { pattern: string; category: AppCategory }[] =
   { pattern: 'net.whatsapp', category: 'personal' },
   { pattern: 'org.telegram', category: 'personal' },
   { pattern: 'com.apple.notes', category: 'personal' },
+  // Murmur's own Scratchpad (PLAN §2.2.7). Listed rather than left to fall
+  // through to `other`, because a note you dictate to yourself is the same
+  // register as one you type into Notes.app — and because falling through by
+  // accident and falling through on purpose look identical in a table like this.
+  { pattern: 'com.murmur.app', category: 'personal' },
 ])
+
+/** Murmur's own bundle id, as `electron-builder.yml` declares it. */
+export const MURMUR_BUNDLE_ID = 'com.murmur.app'
 
 export function categoryForBundleId(bundleId: string | null): AppCategory {
   if (!bundleId) return 'other'

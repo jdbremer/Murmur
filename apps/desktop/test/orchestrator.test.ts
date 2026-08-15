@@ -150,7 +150,10 @@ describe('happy path', () => {
   })
 
   it('applies dictionary replacements before polishing', async () => {
-    harness.deps.applyDictionary = (text) => text.replace('murmer', 'Murmur')
+    harness.deps.applyDictionary = (text) => ({
+      text: text.replace('murmer', 'Murmur'),
+      replacements: 1,
+    })
     harness.stt.transcript = {
       text: 'ship murmer on wednesday please',
       avgLogProb: null,
@@ -165,6 +168,49 @@ describe('happy path', () => {
     expect(harness.persisted[0]!.rawText).toBe('ship Murmur on wednesday please')
     // The polish prompt saw the corrected spelling.
     expect(harness.polish.requests[0]!.userText).toBe('ship Murmur on wednesday please')
+  })
+
+  it('reports what it fixed, so Insights counts measurements rather than guesses', async () => {
+    harness.deps.applyDictionary = (text) => ({
+      text: text.replace('murmer', 'Murmur'),
+      replacements: 1,
+    })
+    harness.snippets.push({
+      id: 's1',
+      trigger: 'my calendar link',
+      expansion: 'https://cal.example/jay',
+      enabled: true,
+    })
+    harness.stt.transcript = {
+      text: 'ship murmer and send my calendar link',
+      avgLogProb: null,
+      durationMs: 5,
+    }
+    // 7 raw words in, 5 polished words out: two words cleaned. The trigger has
+    // to survive polishing, because snippets expand against the polished text.
+    harness.polish.result = { text: 'Ship Murmur my calendar link', durationMs: 8 }
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(harness.persisted).toHaveLength(1))
+
+    expect(harness.persistedFixes[0]).toEqual({
+      dictionaryFixes: 1,
+      snippetExpansions: 1,
+      wordsCleaned: 2,
+    })
+  })
+
+  it('records the app name alongside the bundle id', async () => {
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(harness.persisted).toHaveLength(1))
+
+    expect(harness.persisted[0]!.appBundleId).toBe('com.tinyspeck.slackmacgap')
+    // Without this the Insights breakdown could only ever show a bundle id.
+    expect(harness.persisted[0]!.appName).toBe('Slack')
   })
 })
 

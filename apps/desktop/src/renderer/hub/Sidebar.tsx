@@ -1,5 +1,15 @@
 export type SectionId =
-  'home' | 'dictionary' | 'snippets' | 'style' | 'meetings' | 'models' | 'settings' | 'help'
+  | 'history'
+  | 'insights'
+  | 'notes'
+  | 'dictionary'
+  | 'snippets'
+  | 'style'
+  | 'meetings'
+  | 'models'
+  | 'vibeCoding'
+  | 'settings'
+  | 'help'
 
 interface SectionMeta {
   id: SectionId
@@ -10,9 +20,23 @@ interface SectionMeta {
 
 const SECTIONS: readonly SectionMeta[] = [
   {
-    id: 'home',
-    label: 'Home',
-    icon: 'M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1z',
+    id: 'history',
+    // Was "Home", which is where the transcript feed has always lived and the
+    // last place anyone looked for it. A clock face says what it holds.
+    label: 'History',
+    icon: 'M12 21a9 9 0 1 0-8.9-10.4M12 7v5l3.5 2M3 4v4h4',
+  },
+  {
+    id: 'insights',
+    label: 'Insights',
+    // A rising bar chart.
+    icon: 'M5 20V12M12 20V5M19 20v-5',
+  },
+  {
+    id: 'notes',
+    label: 'Scratchpad',
+    // A page with a folded corner and two lines of writing.
+    icon: 'M6 4h8l4 4v12H6zM14 4v4h4M9 13h6M9 16.5h4',
   },
   {
     id: 'dictionary',
@@ -43,6 +67,12 @@ const SECTIONS: readonly SectionMeta[] = [
     icon: 'M12 3 4 7.5v9L12 21l8-4.5v-9zM4 7.5 12 12l8-4.5M12 12v9',
   },
   {
+    id: 'vibeCoding',
+    label: 'Vibe coding',
+    // Angle brackets with a slash: the universal "this is code".
+    icon: 'm8 8-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13',
+  },
+  {
     id: 'settings',
     label: 'Settings',
     icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 13.6H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9.4a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
@@ -62,7 +92,7 @@ export function Sidebar({
   onSelect: (id: SectionId) => void
 }): React.JSX.Element {
   return (
-    <nav className="flex w-56 shrink-0 flex-col border-r border-line bg-surface">
+    <nav className="flex w-56 shrink-0 flex-col bg-canvas">
       {/* Space for the inset traffic lights on macOS; also the window drag area. */}
       <div className="h-11 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
 
@@ -92,10 +122,13 @@ export function Sidebar({
                   onClick={() => onSelect(section.id)}
                   aria-current={isActive ? 'page' : undefined}
                   className={[
-                    'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] transition-colors duration-150',
+                    'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition-colors duration-150',
+                    // Neutral rather than brand-tinted, like the reference: the
+                    // active pill is a slightly sunken patch of the canvas, not
+                    // an accent chip.
                     isActive
-                      ? 'bg-accent-soft font-medium text-accent'
-                      : 'text-ink-muted hover:bg-canvas hover:text-ink active:bg-accent-soft/60',
+                      ? 'bg-ink/[0.07] font-medium text-ink'
+                      : 'text-ink-muted hover:bg-ink/[0.04] hover:text-ink active:bg-ink/[0.08]',
                   ].join(' ')}
                 >
                   <svg

@@ -21,10 +21,11 @@
     'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Light — warm neutrals. */
-  --color-canvas: #faf8f5;
-  --color-surface: #ffffff;
-  --color-line: #e9e3da;
+  /* Light — warm neutrals, a shade warmer than before to sit closer to the
+     reference product's cream. */
+  --color-canvas: #f7f4ef;
+  --color-surface: #fffefb;
+  --color-line: #e8e2d8;
   --color-ink: #1c1a17;
   --color-ink-muted: #6d675e;
   --color-ink-faint: #9b948a;
