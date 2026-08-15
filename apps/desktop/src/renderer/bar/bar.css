@@ -248,6 +248,108 @@ body {
 }
 
 /*
+ * The orb's aurora core — a conic band of indigo-violet light revolving
+ * around the screen corner, clipped by the disc.
+ *
+ * Spun by the compositor: the element is a fixed-size square (Nub.tsx sizes it
+ * to the orb's maximum, so the orb's morph never resizes it) and only its
+ * `transform` animates. Brightness is driven per-frame from the microphone
+ * level by Nub.tsx, writing `opacity` — the other free property. Nothing here
+ * repaints; the light just turns.
+ *
+ * Two speeds: listening revolves with intent; processing coasts, the machine
+ * thinking rather than hearing. The entrance is a one-shot fade layered onto
+ * the spin — `backwards` so the light comes up rather than popping on.
+ */
+.nub-aurora {
+  background: conic-gradient(
+    from 200deg,
+    rgba(129, 140, 248, 0) 0deg,
+    rgba(129, 140, 248, 0.6) 80deg,
+    rgba(192, 132, 252, 0.5) 150deg,
+    rgba(96, 165, 250, 0.55) 230deg,
+    rgba(129, 140, 248, 0) 360deg
+  );
+  animation:
+    nub-aurora-spin 7s linear infinite,
+    nub-aurora-in 320ms ease-out backwards;
+  will-change: transform;
+}
+
+/* The revolution mirrors with the corner, so the light always rises from the
+   screen edge and sets into the panel. */
+.nub-stage[data-corner='bottomRight'] .nub-aurora {
+  animation-direction: reverse, normal;
+}
+
+/* Processing: the machine is thinking, not hearing — the light coasts. */
+.nub-orb[data-shape='shimmer'] .nub-aurora {
+  animation-duration: 14s, 320ms;
+}
+
+@keyframes nub-aurora-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes nub-aurora-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The voice-lit rim: opacity is written per frame, this just smooths it. */
+.nub-rim {
+  transition: opacity 90ms linear;
+}
+
+/*
+ * The corner halo — the pill's desktop-light, bent around a corner. Blurred
+ * once, statically; only opacity and scale ever animate.
+ */
+.nub-halo {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(14px);
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.nub-halo[data-live='true'] {
+  animation: nub-halo-breathe 2600ms ease-in-out infinite;
+}
+
+.nub-halo[data-flash='true'] {
+  /* Must land inside the 900 ms `inserted` hold — see .bar-halo's flash. */
+  animation: nub-halo-flash 700ms ease-out both;
+}
+
+@keyframes nub-halo-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes nub-halo-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/*
  * The start / stop flourish (settings: `barFlourish`).
  *
  * One ring, two directions. Starting, it blooms outward past the shape and
@@ -370,6 +472,20 @@ body {
   .bar-halo,
   .bar-halo[data-live='true'],
   .bar-halo[data-flash='true'] {
+    animation: none;
+  }
+
+  .nub-aurora {
+    animation: nub-aurora-in 120ms linear backwards;
+  }
+
+  .nub-rim {
+    transition: none;
+  }
+
+  .nub-halo,
+  .nub-halo[data-live='true'],
+  .nub-halo[data-flash='true'] {
     animation: none;
   }
 

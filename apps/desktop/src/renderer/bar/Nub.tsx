@@ -3,9 +3,12 @@ import { NubCanvas } from './NubCanvas'
 import { StatusDot } from './parts'
 import type { BarCorner } from '@murmur/shared'
 
+import { useEffect, useRef } from 'react'
+
 import {
   BAR_FLOURISH_BORDER,
   BAR_FLOURISH_GLOW,
+  BAR_HALO,
   BAR_SHADOW,
   NUB,
   type Flourish,
@@ -61,6 +64,48 @@ export function Nub({
   // The corner the disc is centred on is the one it must *not* round.
   const radius = left ? '0 100% 0 0' : '100% 0 0 0'
   const edge = { bottom: 0, ...(left ? { left: 0 } : { right: 0 }) }
+
+  /**
+   * The aurora core and the voice-lit rim.
+   *
+   * Driven straight from the level ref at animation-frame rate, exactly the
+   * way the fan is — through refs, never through React state, because 30 Hz
+   * re-renders for something only these two elements can see would be the
+   * renderer's whole frame budget. Only `opacity` is written: the one
+   * property (with transform) the compositor plays without repainting.
+   */
+  const auroraRef = useRef<HTMLSpanElement | null>(null)
+  const rimRef = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    if (reducedMotion || visual.shape !== 'waveform') return
+    let frame = 0
+    const step = (): void => {
+      frame = requestAnimationFrame(step)
+      const level = levelRef.current ?? 0
+      const aurora = auroraRef.current
+      const rim = rimRef.current
+      // The floor keeps the core alive through pauses in speech; the span is
+      // what makes a syllable visibly *land* in the glass.
+      if (aurora) aurora.style.opacity = (0.45 + level * 0.5).toFixed(3)
+      if (rim) rim.style.opacity = (0.18 + level * 0.8).toFixed(3)
+    }
+    frame = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(frame)
+  }, [visual.shape, levelRef, reducedMotion])
+
+  /** The states that cast light on the desktop around the corner. */
+  const haloState =
+    visual.shape === 'waveform'
+      ? ('listening' as const)
+      : visual.shape === 'check'
+        ? ('inserted' as const)
+        : visual.shape === 'message'
+          ? ('error' as const)
+          : null
+  /** The aurora runs while the machine is working; never at rest. */
+  const showAurora = visual.shape === 'waveform' || visual.shape === 'shimmer'
+  const haloSize = NUB.activeRadius * 2 + 100
   const morph = reducedMotion
     ? 'opacity 120ms linear, background-color 120ms linear'
     : [
@@ -73,6 +118,28 @@ export function Nub({
 
   return (
     <>
+      {/* The quarter halo — the pill's desktop-light language, bent around a
+          corner: a blurred wash on the wallpaper itself, breathing while
+          listening, one green flash for the ✓, a warm smoulder for an error.
+          Centred ON the screen corner; the half that falls off-screen is
+          clipped where nobody can see the cut. */}
+      {haloState ? (
+        <span
+          aria-hidden="true"
+          className="nub-halo"
+          data-live={!reducedMotion && haloState === 'listening' ? 'true' : undefined}
+          data-flash={!reducedMotion && haloState === 'inserted' ? 'true' : undefined}
+          style={{
+            width: haloSize,
+            height: haloSize,
+            bottom: -haloSize / 2,
+            ...(left ? { left: -haloSize / 2 } : { right: -haloSize / 2 }),
+            background: `radial-gradient(circle, ${BAR_HALO[haloState]}, transparent 70%)`,
+            ...(reducedMotion ? { opacity: 0.3 } : null),
+          }}
+        />
+      ) : null}
+
       {/* The error label. Text does not fit inside a quarter-disc, so it rides
           in a capsule above the orb — the pill's material, like everything
           else. It yields to the cluster: a user reaching for Cancel mid-error
@@ -140,6 +207,27 @@ export function Nub({
           transition: morph,
         }}
       >
+        {/* The aurora core: a conic band of indigo-violet light revolving
+            around the screen corner, clipped by the disc. A square twice the
+            orb's maximum radius, centred on the corner, spun by the compositor
+            (transform only) — its size never changes, so the orb's own morph
+            never forces it to relayout. Brightness rides the voice (see the
+            energy loop above). */}
+        {showAurora ? (
+          <span
+            ref={auroraRef}
+            aria-hidden="true"
+            className="nub-aurora pointer-events-none absolute"
+            style={{
+              width: NUB.maxRadius * 2,
+              height: NUB.maxRadius * 2,
+              bottom: -NUB.maxRadius,
+              ...(left ? { left: -NUB.maxRadius } : { right: -NUB.maxRadius }),
+              opacity: visual.shape === 'shimmer' ? 0.3 : reducedMotion ? 0.4 : 0.45,
+            }}
+          />
+        ) : null}
+
         {/* The pill's two glass coats, bent around the corner. */}
         <span
           aria-hidden="true"
@@ -166,6 +254,21 @@ export function Nub({
           reducedMotion={reducedMotion}
           left={left}
         />
+
+        {/* The rim, lit by the voice: the disc's own edge as a level meter.
+            Sat over the interior so the fan appears to glow through it. */}
+        {visual.shape === 'waveform' ? (
+          <span
+            ref={rimRef}
+            aria-hidden="true"
+            className="nub-rim pointer-events-none absolute inset-0"
+            style={{
+              borderRadius: radius,
+              border: '1.5px solid rgba(176,186,255,0.95)',
+              opacity: reducedMotion ? 0.5 : 0.18,
+            }}
+          />
+        ) : null}
 
         {/* The state lights tuck into the corner itself, where the orb is
             solid at every radius it ever takes: hands-free and command mode
@@ -212,7 +315,12 @@ function NubInterior({
   levelRef: React.RefObject<number>
   reducedMotion: boolean
   left: boolean
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  // The resting sliver is empty glass, as the pill's is — the ring is the
+  // whole idle statement, and an empty interior is also a free one: no canvas
+  // is mounted, so an idle orb schedules nothing at all.
+  if (visual.shape === 'dots') return null
+
   // Far enough from the corner to sit in the body of the disc, close enough
   // that a 14 px glyph still clears the arc at `activeRadius`.
   const diagonal = { bottom: 8, ...(left ? { left: 8 } : { right: 8 }) }
