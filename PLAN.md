@@ -584,6 +584,38 @@ property is optional on the native interface and *absent* rather than stubbed on
 platforms, so a caller has to handle "this platform cannot" instead of receiving a
 plausible empty string.
 
+### 18.4 File transcription — shipped
+
+Drop an audio or video file on the Hub's **Transcribe** section — MP3, MP4/M4A, WAV, FLAC,
+OGG/Opus, WebM, MOV, AIFF — and get a transcript with per-passage timestamps, exportable as
+plain text, SubRip subtitles or Markdown, copyable, or saved straight into the Scratchpad.
+Like everything else: transcribed on-device, and the file never leaves the machine.
+
+The division of labour is the design:
+
+- **The renderer decodes.** Chromium's media stack is the only decoder in the app that
+  reads MP3 and AAC/MP4, and it is already shipped — decoding through a 16 kHz
+  `OfflineAudioContext` also resamples for free, so main receives exactly the pipeline's
+  native 16 kHz mono Float32 and never sees a container format. No ffmpeg sidecar, no new
+  binary, no new parser exposed to hostile files beyond the one Chrome already hardens.
+- **Main transcribes.** Audio streams over IPC in slices with *back-pressure* — a push
+  resolves only while main holds under `TRANSCRIBE.highWaterMs` of buffered audio — so
+  main's share of a two-hour file is a bounded ~4 MB. The renderer necessarily holds the
+  whole decoded file (`decodeAudioData` is all-or-nothing), which is why the decoder
+  refuses files over 2 GB or 4 hours *before* the big allocation, via a metadata-only
+  duration probe.
+- **The same cut policy as meetings** (`audio/segmenter.ts`, extracted from §18.2's
+  segmenter): VAD-cut at silence, hard-capped at 15 s, because file segments ride the same
+  background half of the STT queue and the cap is what bounds how long a dictation can
+  ever wait. Unvoiced spans are reported rather than swallowed so dead air moves the
+  progress bar instead of imitating a hang.
+- **Failure is honest.** Each segment gets one retry; a second failure fails the job with
+  the engine's own words. A file is repeatable — unlike a meeting, which degrades and
+  keeps recording for exactly the opposite reason. A stall watchdog fails jobs whose
+  renderer vanished mid-push (Hub closed), instead of leaving a bar at 40 % forever.
+- The decode/push loop lives in a module singleton in the Hub renderer, not in the
+  section component, so switching sections mid-file does not kill the job.
+
 ## 19. References
 
 - Wispr Flow UX (Hub/Flow Bar/hotkeys/dictionary/tones): [navigating the app](https://docs.wisprflow.ai/articles/5096240724-navigating-the-wispr-flow-app-desktop-ios-and-android), [features](https://wisprflow.ai/features), [what is Flow](https://docs.wisprflow.ai/articles/2772472373-what-is-flow)

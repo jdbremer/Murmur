@@ -46,6 +46,7 @@ import {
 } from './audio/system-capture'
 import { LoopbackSystemAudio } from './audio/loopback-capture'
 import { MeetingRecorder } from './meeting/recorder'
+import { FileTranscriber } from './transcription/file-transcriber'
 import { MeetingWatcher, listAudioProcessesVia } from './meeting/watcher'
 import { TranscribeQueue } from './engines/stt-queue'
 import { SettingsStore } from './store/settings-store'
@@ -376,6 +377,16 @@ async function bootstrap(): Promise<void> {
     },
   })
 
+  // File transcription (PLAN §18.4) shares the queue at background priority,
+  // so a dropped audiobook and a live meeting obey the same rule: neither may
+  // ever add a millisecond to a dictation.
+  const transcriber = new FileTranscriber({
+    queue: sttQueue,
+    stt: () => engines.stt(),
+    settings: () => settings.get(),
+    dictionary: () => dictionary.enabled().map((entry) => entry.term),
+  })
+
   const meetingsFolder = join(app.getPath('documents'), 'Murmur Meetings')
 
   const meetings = new MeetingRecorder({
@@ -433,6 +444,7 @@ async function bootstrap(): Promise<void> {
     systemAudio,
     loopbackAudio,
     meetingsFolder,
+    transcriber,
     isDev,
     quit,
   })
@@ -554,6 +566,10 @@ async function bootstrap(): Promise<void> {
 
   meetings.on('completed', () => {
     watcher.declined(null)
+  })
+
+  transcriber.on('changed', (event) => {
+    ipc.broadcast(windows.uiWebContents(), 'transcribe.changed', event)
   })
 
   machine.on('event', (event: DictationEvent) => {
@@ -802,6 +818,9 @@ async function bootstrap(): Promise<void> {
     // being saved.
     watcher.dispose()
     await meetings.dispose().catch((error: unknown) => log.error('meeting teardown failed:', error))
+    await transcriber
+      .dispose()
+      .catch((error: unknown) => log.error('transcriber teardown failed:', error))
     sttQueue.clear('Murmur is shutting down')
     orchestrator.dispose()
     injector.dispose()

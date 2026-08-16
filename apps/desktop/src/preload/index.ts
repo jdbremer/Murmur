@@ -63,6 +63,17 @@ const api: MurmurApi = {
     requestSystemAudio: () => ipc.invoke('meeting.requestSystemAudio'),
   },
 
+  transcribe: {
+    begin: (request) => ipc.invoke('transcribe.begin', request),
+    push: (request) => ipc.invoke('transcribe.push', request),
+    cancel: (request) => ipc.invoke('transcribe.cancel', request),
+    list: () => ipc.invoke('transcribe.list'),
+    result: (request) => ipc.invoke('transcribe.result', request),
+    export: (request) => ipc.invoke('transcribe.export', request),
+    clear: (request) => ipc.invoke('transcribe.clear', request),
+    subscribe: (listener) => ipc.on('transcribe.changed', listener),
+  },
+
   audio: {
     sendFrame: (frame) => ipc.send('audio.frame', frame),
     sendSystemFrame: (frame) => ipc.send('audio.systemFrame', frame),

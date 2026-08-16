@@ -124,6 +124,11 @@ separate tracks, so the transcript attributes who said what. **Off by default,
 and off means inert**: nothing is watched, captured or written until you switch
 it on, and a live recording lights a red dot no setting can suppress.
 
+**Transcribe files.** Drop an MP3, MP4, WAV — any recording — on the Hub and get
+a timestamped transcript: copy it, save it as text, subtitles (.srt) or
+Markdown, or keep it as a searchable note. Decoded and transcribed entirely on
+your machine, so the recording is never uploaded anywhere.
+
 **The Bar.** A thin resting sliver that grows into a 60 fps waveform while you
 speak. Hover it and the pill becomes a row of buttons — Dictate, Scratchpad,
 Mic, Hub — so a dictation can start from the mouse, not only the hotkey. It

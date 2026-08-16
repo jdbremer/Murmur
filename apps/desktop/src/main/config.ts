@@ -97,6 +97,45 @@ export const MEETING = {
   tickMs: 1_000,
 } as const
 
+/**
+ * File transcription (PLAN §18.4).
+ *
+ * The segment tuning matches `MEETING` on purpose — same background queue,
+ * same reasoning: `maxSegmentMs` is the dictation-latency knob, because an
+ * in-flight segment cannot be preempted and 15 s of audio costs about a second
+ * of inference.
+ *
+ * `highWaterMs` is the memory story. The renderer holds the whole decoded file
+ * (it has to — Chromium's decoder is all-or-nothing) and main holds at most
+ * this much of it: pushes stop resolving until transcription catches up. A
+ * two-hour file therefore costs main a bounded ~4 MB however slow the engine.
+ */
+export const TRANSCRIBE = {
+  /** Trailing silence that ends a segment. */
+  segmentSilenceMs: 600,
+  /** Below this a "segment" is a click or a breath, not a sentence. */
+  minSegmentMs: 1_500,
+  /** Hard cut — the dictation-latency bound, as above. */
+  maxSegmentMs: 15_000,
+  /** Carried into the next segment so a cut never clips a word onset. */
+  segmentPreRollMs: 200,
+  /** Audio buffered in main (segmenter + queued cuts) before pushes wait. */
+  highWaterMs: 60_000,
+  /**
+   * A job still `receiving` that has heard nothing for this long is failed:
+   * its renderer is gone (Hub closed, page reloaded) and no more audio is
+   * coming. Generous, because the *renderer* is allowed to be slow — a push
+   * only stalls this long when nobody is on the other end at all.
+   */
+  pushStallMs: 60_000,
+  /** How often the stall watchdog looks. */
+  watchdogTickMs: 10_000,
+  /** One retry per segment, after this pause — transient beats terminal. */
+  retryDelayMs: 500,
+  /** Finished jobs kept for the session, so the section survives a remount. */
+  maxFinishedJobs: 20,
+} as const
+
 export const TIMEOUTS = {
   /**
    * Hotkey-up → first audio frame accounted for. Guards against a capture

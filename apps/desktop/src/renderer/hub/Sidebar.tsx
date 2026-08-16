@@ -6,6 +6,7 @@ export type SectionId =
   | 'snippets'
   | 'style'
   | 'meetings'
+  | 'transcribe'
   | 'models'
   | 'vibeCoding'
   | 'settings'
@@ -60,6 +61,12 @@ const SECTIONS: readonly SectionMeta[] = [
     // A waveform inside a rounded frame: recording, not a microphone — the mic
     // glyph already means dictation everywhere else in the app.
     icon: 'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 10v4M12 8v8M16 11v2',
+  },
+  {
+    id: 'transcribe',
+    label: 'Transcribe',
+    // A page with sound in it: the file the user drops, waveform inside.
+    icon: 'M6 4h8l4 4v12H6zM14 4v4h4M9 14v2.5M12 12.5v5.5M15 14v2.5',
   },
   {
     id: 'models',

@@ -22,6 +22,12 @@ import {
   NoteSchema,
 } from '../domain/note'
 import { SnippetDraftSchema, SnippetPatchSchema, SnippetSchema } from '../domain/snippet'
+import {
+  TranscriptionEventSchema,
+  TranscriptionExportFormatSchema,
+  TranscriptionJobSchema,
+  TranscriptionSegmentSchema,
+} from '../domain/transcription'
 import { EnginesStatusSchema } from '../domain/engine'
 import {
   MeetingEventSchema,
@@ -489,6 +495,85 @@ export const invokeContract = {
       error: z.string().optional(),
     }),
   },
+  // --- file transcription (PLAN §18.4) -------------------------------------
+  /**
+   * Start a job. The renderer has already decoded the file — main never sees
+   * the container, only 16 kHz mono PCM — so `totalMs` is exact, not estimated.
+   * Throws when no speech model is loaded or another file is still going: both
+   * are states the section shows *before* letting a drop begin, so hitting
+   * them here means the UI raced a settings change, and a loud error beats a
+   * job that was doomed at creation.
+   */
+  'transcribe.begin': {
+    request: z.object({
+      fileName: z.string().min(1).max(255),
+      totalMs: z.number().positive(),
+    }),
+    response: TranscriptionJobSchema,
+  },
+  /**
+   * One slice of decoded audio. The response resolves only once main has room
+   * for more — that back-pressure is the whole memory story: the renderer
+   * holds the decoded file, main holds at most `TRANSCRIBE.highWaterMs` of it,
+   * and nothing ever buffers a two-hour film's audio twice.
+   */
+  'transcribe.push': {
+    request: z
+      .object({
+        jobId: z.string().min(1),
+        /** Float32 PCM at 16 kHz mono, same wire shape as `audio.frame`. */
+        pcm: z.custom<ArrayBuffer>(
+          (value) =>
+            value instanceof ArrayBuffer ||
+            Object.prototype.toString.call(value) === '[object ArrayBuffer]',
+          { error: 'Expected an ArrayBuffer of Float32 PCM samples' },
+        ),
+        /** Number of Float32 samples in `pcm` — capped at 60 s per push. */
+        sampleCount: z
+          .number()
+          .int()
+          .positive()
+          .max(16_000 * 60),
+        /** True on the final slice; main flushes and finishes the job. */
+        last: z.boolean().default(false),
+      })
+      .refine((value) => value.pcm.byteLength === value.sampleCount * 4, {
+        error: 'sampleCount does not match the buffer size',
+      }),
+    response: z.object({ bufferedMs: z.number().nonnegative() }),
+  },
+  /** Stop a job. Safe on any state; resolves to the final snapshot, if known. */
+  'transcribe.cancel': {
+    request: z.object({ jobId: z.string().min(1) }),
+    response: TranscriptionJobSchema.nullable(),
+  },
+  /** Every job main still remembers — how a remounted section re-attaches. */
+  'transcribe.list': { request: z.void(), response: z.array(TranscriptionJobSchema) },
+  /** The full transcript of one job. Heavy, so fetched rather than broadcast. */
+  'transcribe.result': {
+    request: z.object({ jobId: z.string().min(1) }),
+    response: z
+      .object({
+        job: TranscriptionJobSchema,
+        segments: z.array(TranscriptionSegmentSchema),
+      })
+      .nullable(),
+  },
+  /**
+   * Save the transcript through a native dialog. Returns the written path, or
+   * `null` when the user cancelled — which is not an error and must not look
+   * like one.
+   */
+  'transcribe.export': {
+    request: z.object({
+      jobId: z.string().min(1),
+      format: TranscriptionExportFormatSchema,
+    }),
+    response: z.object({ path: z.string().nullable() }),
+  },
+  /** Forget a finished job — the row's "Remove". Active jobs must cancel first. */
+  'transcribe.clear': { request: z.object({ jobId: z.string().min(1) }), response: z.void() },
+
   // --- meetings (PLAN §18.2) ---------------------------------------------
   /** Begin recording. Fails loudly if `settings.meetings.enabled` is false. */
   'meeting.start': { request: MeetingStartRequestSchema, response: MeetingEventSchema },
@@ -574,6 +659,12 @@ export const eventContract = {
    * shared channel would make the Bar's state switch ambiguous.
    */
   'meeting.changed': MeetingEventSchema,
+  /**
+   * A file-transcription job moved: audio arrived, a segment landed, the state
+   * changed. Carries the snapshot (small) and at most one new segment; the
+   * whole transcript stays behind `transcribe.result`.
+   */
+  'transcribe.changed': TranscriptionEventSchema,
   /**
    * A note was created, edited or deleted.
    *

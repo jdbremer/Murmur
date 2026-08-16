@@ -11,6 +11,7 @@ import { DictionarySection } from './sections/DictionarySection'
 import { SnippetsSection } from './sections/SnippetsSection'
 import { StyleSection } from './sections/StyleSection'
 import { MeetingsSection } from './sections/MeetingsSection'
+import { TranscribeSection } from './sections/TranscribeSection'
 import { ModelsSection } from './sections/ModelsSection'
 import { VibeCodingSection } from './sections/VibeCodingSection'
 import { SettingsSection } from './sections/SettingsSection'
@@ -19,8 +20,8 @@ import { HelpSection } from './sections/HelpSection'
 /**
  * The Hub shell (PLAN §2.2): left sidebar, content pane on the right.
  *
- * Navigation is plain React state — eleven sections, no deep links, no history to
- * preserve. A router would be all cost and no benefit here.
+ * Navigation is plain React state — twelve sections, no deep links, no history
+ * to preserve. A router would be all cost and no benefit here.
  *
  * Two things happen at this level because they are whole-window concerns: the
  * appearance setting is applied to `<html data-theme>`, and a fresh install is
@@ -98,6 +99,8 @@ function renderSection(section: SectionId): React.JSX.Element {
       return <StyleSection />
     case 'meetings':
       return <MeetingsSection />
+    case 'transcribe':
+      return <TranscribeSection />
     case 'models':
       return <ModelsSection />
     case 'vibeCoding':

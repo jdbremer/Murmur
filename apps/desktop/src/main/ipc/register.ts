@@ -1,8 +1,16 @@
 import { mkdirSync, rmSync } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { app, clipboard, dialog, shell } from 'electron'
 
-import type { MainIpc } from '@murmur/shared'
+import type { MainIpc, TranscriptionExportFormat } from '@murmur/shared'
+import {
+  transcriptionExportName,
+  transcriptionMarkdown,
+  transcriptionSrt,
+  transcriptionText,
+} from '@murmur/shared'
 
 import type { DictationOrchestrator } from '../dictation/orchestrator'
 import type { DictationStateMachine } from '../dictation/state-machine'
@@ -19,6 +27,7 @@ import type {
   StyleRepository,
 } from '../store/repositories'
 import type { MeetingRecorder } from '../meeting/recorder'
+import type { FileTranscriber } from '../transcription/file-transcriber'
 import type { SystemAudioSource } from '../audio/system-capture'
 import type { LoopbackSystemAudio } from '../audio/loopback-capture'
 import type { FrameBus } from '../audio/frame-bus'
@@ -87,11 +96,20 @@ export interface IpcContext {
   loopbackAudio: LoopbackSystemAudio | null
   /** Where transcripts go unless the user picked a folder. */
   meetingsFolder: string
+  /** File transcription (PLAN §18.4). */
+  transcriber: FileTranscriber
   isDev: boolean
   quit: () => void
 }
 
 const log = createLogger('ipc')
+
+/** Save-dialog filters per export format, named as a person would say them. */
+const EXPORT_FILTERS: Record<TranscriptionExportFormat, { name: string; extensions: string[] }> = {
+  txt: { name: 'Plain text', extensions: ['txt'] },
+  srt: { name: 'SubRip subtitles', extensions: ['srt'] },
+  md: { name: 'Markdown', extensions: ['md'] },
+}
 
 export function registerIpcHandlers(context: IpcContext): MainIpc {
   const { ipc, windows, settings, machine, orchestrator, engines, models } = context
@@ -432,6 +450,48 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
 
   ipc.handle('meeting.systemAudioAccess', () => systemAudio.access())
   ipc.handle('meeting.requestSystemAudio', () => systemAudio.probe())
+
+  // -- file transcription (PLAN §18.4) ---------------------------------------
+  const { transcriber } = context
+
+  ipc.handle('transcribe.begin', ({ fileName, totalMs }) => transcriber.begin(fileName, totalMs))
+  ipc.handle('transcribe.push', ({ jobId, pcm, sampleCount, last }) =>
+    // A view, not a copy: the contract has already verified the byte length.
+    transcriber.push(jobId, new Float32Array(pcm, 0, sampleCount), last),
+  )
+  ipc.handle('transcribe.cancel', ({ jobId }) => transcriber.cancel(jobId))
+  ipc.handle('transcribe.list', () => transcriber.list())
+  ipc.handle('transcribe.result', ({ jobId }) => transcriber.result(jobId))
+  ipc.handle('transcribe.clear', ({ jobId }) => {
+    transcriber.clear(jobId)
+  })
+  ipc.handle('transcribe.export', async ({ jobId, format }) => {
+    const result = transcriber.result(jobId)
+    if (!result) throw new Error('That transcription no longer exists.')
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Save transcript',
+      defaultPath: join(
+        app.getPath('downloads'),
+        transcriptionExportName(result.job.fileName, format),
+      ),
+      filters: [EXPORT_FILTERS[format]],
+    })
+    if (canceled || !filePath) return { path: null }
+
+    const content =
+      format === 'srt'
+        ? transcriptionSrt(result.segments)
+        : format === 'md'
+          ? transcriptionMarkdown(result.segments, {
+              fileName: result.job.fileName,
+              totalMs: result.job.totalMs,
+            })
+          : transcriptionText(result.segments)
+
+    await writeFile(filePath, content, 'utf8')
+    return { path: filePath }
+  })
 
   // -- bar: click-through everywhere except the pill (PLAN §2.1) -------------
   ipc.receive('bar.pointerRegion', ({ interactive }) => {

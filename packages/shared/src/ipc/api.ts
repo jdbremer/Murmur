@@ -82,6 +82,22 @@ export interface MurmurApi {
     requestSystemAudio(): Promise<Res<'meeting.requestSystemAudio'>>
   }
 
+  /** File transcription (PLAN §18.4). The Hub decodes; main transcribes. */
+  readonly transcribe: {
+    begin(request: Req<'transcribe.begin'>): Promise<Res<'transcribe.begin'>>
+    /** Resolves when main has room for more — await it before the next slice. */
+    push(request: Req<'transcribe.push'>): Promise<Res<'transcribe.push'>>
+    cancel(request: Req<'transcribe.cancel'>): Promise<Res<'transcribe.cancel'>>
+    /** Jobs main still remembers, for a section that mounts mid-transcription. */
+    list(): Promise<Res<'transcribe.list'>>
+    /** The full transcript — heavy, so pulled rather than pushed. */
+    result(request: Req<'transcribe.result'>): Promise<Res<'transcribe.result'>>
+    /** Native save dialog; `path: null` means the user cancelled. */
+    export(request: Req<'transcribe.export'>): Promise<Res<'transcribe.export'>>
+    clear(request: Req<'transcribe.clear'>): Promise<void>
+    subscribe(listener: (event: Evt<'transcribe.changed'>) => void): Unsubscribe
+  }
+
   /** Only the hidden capture renderer uses this half of the bridge. */
   readonly audio: {
     /** Capture renderer only: one ~100 ms chunk of 16 kHz mono Float32 PCM. */
