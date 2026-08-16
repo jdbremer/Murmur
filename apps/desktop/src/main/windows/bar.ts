@@ -127,12 +127,14 @@ export function createBarWindow(layout: BarLayout = DEFAULT_BAR_LAYOUT): Browser
  *
  * Three details, and every one of them was learned the hard way:
  *
- *  1. **`floating`, not `screen-saver`.** The stronger level looks like the
- *     safer choice and is the wrong one: `NSFloatingWindowLevel` is what macOS
- *     expects of an auxiliary window over a full-screen Space, and at
- *     `screen-saver` the pill simply is not composited there. The cost is that
- *     another app's always-on-top window can now cover it, which is a fair
- *     trade for existing at all.
+ *  1. **Near `floating`, nowhere near `screen-saver`.** The stronger level
+ *     looks like the safer choice and is the wrong one: `NSFloatingWindowLevel`
+ *     is the neighbourhood macOS expects of an auxiliary window over a
+ *     full-screen Space, and at `screen-saver` the pill simply is not
+ *     composited there. The exact offset within that neighbourhood is
+ *     {@link BAR_WINDOW_LEVEL_ABOVE_FLOATING} — see there for why it is not 1.
+ *     The cost either way is that another app's always-on-top window can cover
+ *     the indicator, which is a fair trade for existing at all.
  *  2. **`skipTransformProcessType`.** Without it, Electron buys the
  *     full-screen float by transforming the whole process into a UIElement
  *     app — which fights `app.dock.show()` when the Hub opens, and lost. It is
@@ -149,9 +151,34 @@ export function createBarWindow(layout: BarLayout = DEFAULT_BAR_LAYOUT): Browser
  * be: `app.dock.show()` / `hide()` transform the process, and a transform
  * resets the window levels of every window the process owns.
  */
+/**
+ * How far above `NSFloatingWindowLevel` the indicator sits, as the
+ * `relativeLevel` argument to `setAlwaysOnTop`.
+ *
+ * Electron adds this straight onto the named level, so the window lands at
+ * `NSFloatingWindowLevel (3) + 18 = 21` — one above `kCGDockWindowLevel` (20),
+ * and well below `NSMainMenuWindowLevel` (24). That single step over the Dock
+ * is the whole reason the constant is not `1`: at level 4 the corner orb is
+ * *correctly positioned* in the physical corner and simply painted over by the
+ * Dock, which reads as the orb being clipped or mispositioned when it is
+ * neither.
+ *
+ * Deliberately the smallest offset that clears the Dock rather than a jump to
+ * `status` or `pop-up-menu`. The full-screen-Space behaviour this window
+ * depends on (see above) is known to survive down at `floating` and known to
+ * break at `screen-saver`; where in between it turns over is not documented
+ * anywhere, so staying 18 steps from the working end rather than 900-odd from
+ * it is the conservative choice.
+ *
+ * This cannot be verified from inside the process — `isVisibleOnAllWorkspaces()`
+ * and page screenshots both read healthy regardless of what the window server
+ * actually did. Changing it needs a human switching Spaces.
+ */
+const BAR_WINDOW_LEVEL_ABOVE_FLOATING = 18
+
 export function keepBarEverywhere(window: BrowserWindow): void {
   if (!isMac || window.isDestroyed()) return
-  window.setAlwaysOnTop(true, 'floating', 1)
+  window.setAlwaysOnTop(true, 'floating', BAR_WINDOW_LEVEL_ABOVE_FLOATING)
   window.setVisibleOnAllWorkspaces(true, {
     visibleOnFullScreen: true,
     skipTransformProcessType: true,
