@@ -1,254 +1,218 @@
+<div align="center">
+
 # Murmur
 
-**Local-first dictation for macOS, Windows and Linux.** Hold a key, speak, release — polished text appears wherever your cursor is.
+**Hold a key, speak, release — polished text appears wherever your cursor is.**
 
-Murmur mirrors the Wispr Flow experience (floating recording bar, hub window, per-app tones, personal dictionary) but runs **entirely on-device**: speech-to-text and LLM polishing both use local models you choose from a **US-only catalog** — every listed model comes from a US-based organization, enforced by the catalog's origin policy — and no audio or text ever leaves the machine. Built as an Electron app.
+Dictation that runs entirely on your own machine. No account, no subscription,
+no audio leaving the device.
 
-- 🎙️ System-wide push-to-talk (`fn` on macOS, Right Ctrl on Windows and Linux) + hands-free mode
-- 🧠 Local STT (Parakeet, Whisper, Moonshine, …) and local polishing LLMs (Gemma 3, Phi-4-mini, Llama 3.2, OLMo 2, …) — US-origin only, with origin + license labels
-- 🔒 No accounts, no telemetry, no network traffic except user-initiated model downloads
-- 📊 Local-only Insights, a dictate-into Scratchpad, and opt-in code-aware dictation for VS Code / Cursor / Windsurf
+[![Release](https://img.shields.io/github/v/release/jdbremer/Murmur?label=release)](https://github.com/jdbremer/Murmur/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/jdbremer/Murmur/total?label=downloads)](https://github.com/jdbremer/Murmur/releases)
+[![CI](https://github.com/jdbremer/Murmur/actions/workflows/ci.yml/badge.svg)](https://github.com/jdbremer/Murmur/actions/workflows/ci.yml)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#platform-support)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-## Download
+</div>
 
-Installers are attached to each [release](https://github.com/jdbremer/Murmur/releases):
+<!--
+  TODO: a demo GIF belongs here, and it is the single highest-value thing this
+  README is missing — the whole product is a gesture, and no amount of prose
+  substitutes for watching text land in another app.
 
-| OS      | File                             | Signed                   | Notes                                                                                                                        |
-| ------- | -------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| macOS   | `.dmg`, separate arm64 and Intel | Developer ID + notarised | macOS 13 Ventura or newer                                                                                                    |
-| Windows | NSIS `.exe`, x64                 | **no**                   | Windows 10 / 11                                                                                                              |
-| Linux   | `.AppImage` and `.deb`, x64      | n/a                      | **X11 sessions only** — see [Platform support](#platform-support). Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+) |
+  Roughly 8 seconds: hold the key, speak a sentence with an "um" in it, release,
+  watch the cleaned line appear in a note. Record with the corner orb visible.
+  Commit it to docs/demo.gif and swap this comment for:
+      <div align="center"><img src="docs/demo.gif" alt="Murmur in use" width="720"></div>
+-->
 
-**macOS opens normally.** The DMG is signed with a Developer ID and notarised,
-so Gatekeeper lets it through with no warning and no `xattr` incantation. Two
-things follow from that signature beyond a quiet first launch: the app can
-update itself in place (Squirrel refuses to swap in a replacement that is not
-signed with the same identity), and your Accessibility and Input Monitoring
-grants survive an update, because macOS ties those to the code signature.
+---
 
-**Windows is not signed.** SmartScreen shows "Windows protected your PC" →
-More info → Run anyway. Only accept that if you trust this build — Murmur asks
-for permission to watch your keyboard and type into other applications, so it
-is not a prompt to wave through on a whim. Building it yourself (below)
-sidesteps the question entirely. Authenticode is the fix and is not configured
-yet.
+## Install
 
-**Linux has no equivalent gate.** Mark the AppImage executable and run it
-(`chmod +x Murmur-*.AppImage`), or `sudo apt install ./murmur_*.deb`.
+### [⬇ Download the latest release](https://github.com/jdbremer/Murmur/releases/latest)
 
-Installers bundle the `whisper-server` and `llama-server` binaries, so the only
-thing left after installing is downloading a model from the Hub.
+That link always resolves to the newest version, so it is the one worth sharing
+or bookmarking — never a specific tag. You only need it once: the app updates
+itself from then on.
 
-## Status
+### macOS
 
-**Field-proven on macOS. Gated green on Windows. New and unproven on Linux.** Hold the key, speak, release — polished text lands in the frontmost app.
+| Chip          | File                         |
+| ------------- | ---------------------------- |
+| Apple Silicon | `Murmur-<version>-arm64.dmg` |
+| Intel         | `Murmur-<version>.dmg`       |
 
-Read that ordering literally, because the three are not at the same maturity. macOS is used daily. The Windows port has its native hook, paste, whisper/llama sidecars, Models install UX and NSIS installer, with gates G0–G10 green on a Windows dev box ([WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)); human field testing is what is still thin. The Linux/X11 backend is the newest of the three — it compiles and loads in CI on every push, and has not yet been driven through a dictation on real hardware. Treat it accordingly. The full plan lives in **[PLAN.md](./PLAN.md)**. Remaining work:
+Open the DMG and drag Murmur to Applications. It is signed with a Developer ID
+and notarised, so it opens normally — no Gatekeeper warning, and none of the
+`xattr` incantation an unsigned build would need.
 
-- **[HANDOFF.md](./HANDOFF.md)** — product-wide backlog
-- **[MAC-HANDOFF.md](./MAC-HANDOFF.md)** — macOS residual work
-- **[WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md)** — Windows residual work
-- **[LINUX-HANDOFF.md](./LINUX-HANDOFF.md)** — Linux residual work, and the X11/Wayland boundary
+### Windows
 
-What works today:
+Download `Murmur.Setup.<version>.exe` from the [latest release](https://github.com/jdbremer/Murmur/releases/latest).
 
-- **The whole dictation loop**: key listener (own thread, HID-reconciled release so a lost up-edge can never strand a dictation) → capture renderer → pre-roll + VAD → whisper.cpp or ONNX Runtime → local LLM polish with the hallucination guard → clipboard-swap insertion (with an Accessibility fallback on macOS, for apps that drop synthetic keystrokes) → history. The listener is a `CGEventTap` on macOS, a `WH_KEYBOARD_LL` hook on Windows and an XRecord context on Linux; the reconciliation reads `IOHID`, `GetAsyncKeyState` and `XQueryKeymap` respectively.
-- **Command mode** (PLAN §18.1): hold the key with text selected and speak an instruction — the selection is rewritten in place by the local model, with a no-fallback failure discipline that never pastes over a selection on error.
-- **Meeting capture** (PLAN §18.2, macOS 14.2+ and Windows): record a call and transcribe it live to a Markdown file named after the meeting and the date. Both sides are captured as separate tracks — your microphone, and the system audio via a CoreAudio process tap on macOS or WASAPI loopback on Windows — so the transcript attributes who said what. **Off by default**, and off means inert: nothing is watched, captured or written until it is switched on. Detection offers rather than starts, and a live recording lights a red dot on the Bar that no visibility setting can suppress.
-- **The Bar**: a thin resting sliver that grows to a 28-bar 60 fps canvas waveform on a ~30 Hz mic meter, shimmer, ✓ pulse, error hold, Esc-to-cancel, Reduce Motion support, and a distinct indicator when an utterance is editing a selection. Hovering it **replaces** the pill with a row of floating buttons — Dictate · Scratchpad · Mic · Hub — so a dictation can be started with the mouse, not only the hotkey.
-- **Insights**: what you have actually used it for — speaking rate against published typing speeds, lifetime words with a month-over-month figure, the fixes Murmur made for you (fillers removed, dictionary rules fired, snippets expanded), a per-app breakdown, and a year-long streak heatmap. Every counter is local, survives the history retention sweep on purpose, and is reset only when you press reset.
-- **Scratchpad**: a small floating note window, one button away on the Bar, that you can dictate straight into; notes are searchable from the Hub and are never touched by the retention window.
-- **Vibe coding** (off by default): with variable recognition on, Murmur reads the editor in VS Code, Cursor or Windsurf while you dictate and uses the names in the open file to recognise what you said — `useCallback` comes back as one word. Spoken filenames become real ones, `@`-tagged in Cursor and Windsurf. Nothing is stored or logged, no other app is ever read, and it needs your IDE's own Screen Reader Accessibility Mode to be on. macOS only for now.
-- **The Hub**: first-run onboarding (permissions → starter models → tutorial), Models with the enforced US-only catalog, History with FTS5 search, Insights, Notes, Dictionary, Snippets, per-app-category Style, Vibe coding, Settings (hotkey, mic picker, language, retention, meetings), Help with live permission/engine/capture status.
-- **CI**: the full gate (lint, format, typecheck, test, build) on macOS arm64 per push/PR, plus a port gate on `windows-latest` and `ubuntu-latest` that compiles _and loads_ each platform's native addon — the only check that catches an MSVC or GCC break the Mac job never sees; sidecar builds on demand and weekly.
+**It is not code-signed yet**, so SmartScreen shows "Windows protected your PC"
+→ _More info_ → _Run anyway_. Only accept that if you trust this build — Murmur
+asks for permission to watch your keyboard and type into other applications, so
+it is not a prompt to wave through on a whim. [Building it
+yourself](CONTRIBUTING.md) sidesteps the question entirely.
 
-Still to come: app-wide items in [HANDOFF.md](./HANDOFF.md) (spoken language UX, Parakeet catalog, History tab, insert-copy fallback); llama Metal pin on macOS 27; on Windows, hook-health recovery and a human E2E pass on the installer; on Linux, a first dictation on real hardware, plus Wayland (see below). See also [MAC-HANDOFF.md](./MAC-HANDOFF.md), [WINDOWS-HANDOFF.md](./WINDOWS-HANDOFF.md) and [LINUX-HANDOFF.md](./LINUX-HANDOFF.md).
+### Linux
 
-## Development
-
-The same on all three platforms:
+**X11 sessions only** — see [Platform support](#platform-support) before you
+install. Needs glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+).
 
 ```bash
-npm install          # workspaces: apps/desktop, packages/shared
-npm run dev          # electron-vite dev — tray, Hub, Bar, hidden capture window
-npm run build        # main + preload + all three renderers → apps/desktop/out
-npm run typecheck    # tsc across every workspace
-npm test             # vitest
-npm run lint         # eslint (flat config) — `npm run format` for prettier
+chmod +x Murmur-*.AppImage && ./Murmur-*.AppImage   # or:
+sudo apt install ./Murmur-*-amd64.deb
 ```
 
-Building the native addon needs a toolchain, and only that differs by OS:
+---
 
-| OS      | What `npm install` needs to compile `@murmur/native`                     |
-| ------- | ------------------------------------------------------------------------ |
-| macOS   | Xcode Command Line Tools (`xcode-select --install`)                      |
-| Windows | Visual Studio Build Tools with the C++ workload                          |
-| Linux   | `apt install libx11-dev libxtst-dev` (dnf: `libX11-devel libXtst-devel`) |
+## First run
 
-A failed addon build never fails the install — you get a working checkout with
-a no-op stub and no dictation, and `npm run native:build` is the command that
-reports why, loudly.
+Installers bundle the speech and polishing servers, so the only thing left is a
+model and two permissions.
 
-### Packaging
+1. **Grant the permissions.** Onboarding asks for Accessibility and Input
+   Monitoring on macOS — the first lets Murmur type into other apps, the second
+   lets it see your dictation key. Nothing works without both, and macOS
+   requires you to grant them by hand.
+2. **Download a model.** Open the Hub → Models and pick a starter. Everything in
+   the catalog is downloaded from Hugging Face, checksum-verified, and stored
+   locally.
+3. **Hold the key and talk.** `fn` on macOS, Right Ctrl on Windows and Linux.
+   Release, and the polished text lands in whatever app has your cursor. Press
+   Esc mid-sentence to cancel.
 
-Run the script for the OS you are on:
+---
 
-```bash
-CSC_IDENTITY_AUTO_DISCOVERY=false npm run pack:mac --workspace @murmur/desktop
-```
+## Why local-first
 
-| Script       | Runs on | Produces                                                         |
-| ------------ | ------- | ---------------------------------------------------------------- |
-| `pack:mac`   | macOS   | `apps/desktop/release/Murmur-<version>-arm64.dmg` and an x64 one |
-| `pack:win`   | Windows | the NSIS `.exe`                                                  |
-| `pack:linux` | Linux   | the `.AppImage` and the `.deb`                                   |
+Speech-to-text and LLM polishing both run on your machine, against models you
+chose and downloaded. That is the entire architecture, not a privacy mode you
+switch on.
 
-Each has to be built on its own OS: the native module and `better-sqlite3` are
-both compiled per platform.
+- **No audio or text ever leaves the device.** The only outbound network path in
+  the codebase is a Hugging-Face-only allowlist for downloading models, and it
+  is a single file you can read.
+- **No accounts, no telemetry, no analytics.** There is nothing to sign into and
+  nothing phoning home.
+- **A US-only model catalog.** Every listed speech and polishing model comes
+  from a US-based organisation, enforced by an origin policy that is validated
+  every time the catalog loads — not a claim in a README.
+- **It works on a plane.** Once the model is downloaded, the network is
+  irrelevant.
 
-Whatever is in `.sidecars/bin` is bundled into the app's resources, which is
-where a packaged app looks first. Build them first or you get an installer that
-runs and cannot transcribe:
+---
 
-| OS      | Sidecar build                                                            |
-| ------- | ------------------------------------------------------------------------ |
-| macOS   | `scripts/sidecars/build-whisper.sh` and `build-llama.sh` (needs `cmake`) |
-| Windows | `scripts/sidecars/fetch-*-win.ps1` — downloads official prebuilds        |
-| Linux   | `scripts/sidecars/build-linux.sh` (needs `cmake` and `build-essential`)  |
+## What it does
 
-Packaging without them succeeds deliberately, so a contributor who only needs
-the UI is not forced through a whisper.cpp build — the release workflow is
-where their absence is a hard failure.
+**Dictation, everywhere.** System-wide push-to-talk plus a hands-free mode.
+Local speech-to-text (Parakeet, Whisper, Moonshine) and local polishing (Gemma
+3, Phi-4-mini, Llama 3.2, OLMo 2), each labelled with its origin and licence.
+Fillers removed, punctuation added, your personal dictionary and snippets
+applied.
 
-The env var above skips macOS code signing, which is what you want for a local
-build on a machine that has no Developer ID in its keychain — without it,
-electron-builder hunts for an identity, fails, and takes the build down with
-it. Drop it if you do have the certificate: `hardenedRuntime`, the entitlements
-and notarisation are declared in `apps/desktop/electron-builder.yml`, and that
-is the path releases take.
+**Command mode.** Select text, hold the key, and speak an instruction — the
+selection is rewritten in place by the local model. On failure it never pastes
+over your selection.
 
-### Cutting a release
+**Meeting capture** (macOS 14.2+ and Windows). Record a call and transcribe it
+live to a Markdown file. Your microphone and the system audio are captured as
+separate tracks, so the transcript attributes who said what. **Off by default,
+and off means inert**: nothing is watched, captured or written until you switch
+it on, and a live recording lights a red dot no setting can suppress.
 
-Push a tag and `.github/workflows/release.yml` builds every installer on its
-native runner and attaches them all to a **draft** release:
+**The Bar.** A thin resting sliver that grows into a 60 fps waveform while you
+speak. Hover it and the pill becomes a row of buttons — Dictate, Scratchpad,
+Mic, Hub — so a dictation can start from the mouse, not only the hotkey. It
+floats over full-screen apps and follows you across Spaces.
 
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
+**Insights.** What you have actually used it for: speaking rate against
+published typing speeds, lifetime words, the fixes Murmur made for you, a
+per-app breakdown, and a year-long streak heatmap. Every counter is local and is
+reset only when you press reset.
 
-Draft, so nothing reaches anyone until you open it and click publish. The
-workflow runs typecheck and tests against the tagged commit first, and fails
-loudly if the native module does not compile or load — an installer whose addon
-silently failed would launch fine and never dictate. The macOS signing secrets
-it expects are listed in a comment in the workflow.
+**Scratchpad.** A small floating note window, one button away, that you can
+dictate straight into. Notes are searchable and are never touched by the history
+retention window.
 
-### Layout
+**Vibe coding** (off by default, macOS only). With variable recognition on,
+Murmur reads the editor in VS Code, Cursor or Windsurf while you dictate and
+uses the names in the open file to recognise what you said — `useCallback` comes
+back as one word. Spoken filenames become real ones, `@`-tagged in Cursor and
+Windsurf. Nothing is stored or logged, and no other app is ever read.
 
-| Path                | What lives there                                                                                                                                                                            |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/desktop`      | The Electron app: `src/main`, `src/preload`, `src/renderer/{hub,bar,audio}`                                                                                                                 |
-| `packages/shared`   | `@murmur/shared` — domain types, zod schemas, catalog policy, the typed IPC contract                                                                                                        |
-| `packages/native`   | `@murmur/native` — the N-API addon (hotkey, text insertion, permissions): `src/murmur_native.mm` for macOS, `src/win/` for Windows, `src/linux/` for X11                                    |
-| `resources/catalog` | `models.json`, validated against the origin policy every time it loads                                                                                                                      |
-| `scripts/sidecars`  | `whisper-server` / `llama-server` binaries — `build-whisper.sh`/`build-llama.sh` build macOS universal, `build-linux.sh` builds Linux x64, `fetch-*-win.ps1` download Windows x64 prebuilds |
-| `scripts/models`    | The first-party Parakeet NeMo→ONNX export we will run before listing it                                                                                                                     |
+**The Hub.** Onboarding, Models, History with full-text search, Insights, Notes,
+Dictionary, Snippets, per-app-category Style, and Help with live permission and
+engine status.
 
-Inside `apps/desktop/src/main`:
+---
 
-| Path           | What lives there                                                                 |
-| -------------- | -------------------------------------------------------------------------------- |
-| `dictation/`   | The orchestrator (the loop), the hotkey bridge, clipboard-swap insertion         |
-| `engines/`     | `SttEngine` / `PolishEngine` impls, sidecar lifecycle, the ONNX decode loops     |
-| `models/`      | Catalog loading, the resumable downloader, on-disk storage, the hardware advisor |
-| `store/`       | SQLite (WAL, migrations, FTS5), the repositories, the settings JSON store        |
-| `net/fetch.ts` | The **only** outbound network path — a Hugging-Face-only allowlist (PLAN §10.2)  |
-| `config.ts`    | Every timeout, threshold and budget, in one place                                |
+## Platform support
 
-### Running without models or sidecars
+| Platform           | Dictation           | Default key | Installer              |
+| ------------------ | ------------------- | ----------- | ---------------------- |
+| macOS 13+          | yes — field-proven  | `fn`        | `.dmg` (arm64 + x64)   |
+| Windows 10/11 x64  | yes — gated green   | Right Ctrl  | NSIS `.exe` (unsigned) |
+| Linux x64, **X11** | yes — new, unproven | Right Ctrl  | AppImage + `.deb`      |
+| Linux, **Wayland** | **no** — see below  | —           | (same package)         |
 
-Everything degrades to a status rather than a crash, which is what makes the app
-developable on a machine that has none of the heavy parts:
+Read that ordering literally, because the three are not at the same maturity.
+**macOS is used daily.** The **Windows** port has its native hook, paste,
+sidecars, model install UX and installer, with every gate green on a Windows dev
+box — human field testing is what is still thin. The **Linux/X11** backend is
+the newest: it compiles and loads in CI on every push and has not yet been
+driven through a dictation on real hardware. Treat it accordingly.
 
-| Missing                    | What happens                                                                   |
-| -------------------------- | ------------------------------------------------------------------------------ |
-| `whisper-server` binary    | STT engine reports `unavailable(binary-missing)`, naming every path searched   |
-| `llama-server` binary      | Polish engine likewise; dictation still inserts the raw transcript             |
-| `onnxruntime-node`         | ONNX engine reports `unavailable(runtime-missing)`; Whisper is unaffected      |
-| The model files themselves | `unavailable(model-missing)` until the download finishes                       |
-| `@murmur/native`           | Hotkey listener never starts; insertion returns `unsupported-platform`         |
-| An X11 session (Linux)     | The addon loads but reports `available: false` and names Wayland as the reason |
-
-`MURMUR_SIDECAR_DIR` points a dev build at a custom sidecar build.
-`MURMUR_DEBUG=1` enables debug logging; `MURMUR_LOG_TRANSCRIPTS=1` disables
-transcript redaction (local debugging only — see `src/main/logging.ts`).
-
-In an unpackaged build two dev-only IPC channels exist:
-`debug.simulateDictation` cycles the state machine with no mic or models, and
-`debug.simulateHotkey` feeds the **real** orchestrator a synthetic hotkey edge.
-On macOS and Linux, `kill -USR2 <electron pid>` does the same as
-`simulateHotkey` — each signal alternates down/up — so a whole dictation can be
-driven from a shell without touching the app: signal, speak (`say` on macOS,
-`spd-say` on Linux), signal again. Windows has no POSIX signals; drive it
-through the IPC channel or `scripts/agent/` instead.
-
-### Platform support
-
-| Platform           | Dictation           | Default key | Installer                      |
-| ------------------ | ------------------- | ----------- | ------------------------------ |
-| macOS 13+          | yes — field-proven  | `fn`        | `.dmg` (arm64 + x64)           |
-| Windows 10/11 x64  | yes — gates G0–G10  | Right Ctrl  | NSIS `.exe`                    |
-| Linux x64, **X11** | yes — new, unproven | Right Ctrl  | AppImage + `.deb`, glibc 2.39+ |
-| Linux, **Wayland** | **no** — see below  | —           | (same package)                 |
-
-Everything platform-specific — the key listener, clipboard-swap text insertion,
-secure-input detection, the permission prompts — is isolated in
-`@murmur/native`, which compiles on all three (`"os": ["darwin", "win32", "linux"]`)
-and is referenced as an _optional_ dependency:
-
-```bash
-npm run native:build   # node-gyp rebuild in packages/native
-```
-
-Anywhere the addon is missing or fails to build, the app loads a typed no-op
-stub instead. `npm run dev` boots and the UI, IPC and state machine all work;
-dictation does not — the stub reports `available: false`, every permission reads
-`unavailable`, and text insertion refuses. macOS-only Electron calls (the Bar's
-`visibleOnFullScreen`, the Hub's inset title bar) are guarded, not assumed.
-
-#### Linux: X11 only, and it says so
+### Linux: X11 only, and it says so
 
 The Linux backend uses XRecord to watch the key and XTEST to paste. Neither
-reaches a native Wayland client, so on a Wayland session Murmur would observe
-nothing and paste nowhere. That failure is silent by nature — XWayland still
-sets `DISPLAY`, `XOpenDisplay` still succeeds, the record context is still
-created, and no key ever arrives — so the addon detects the session up front
-and reports `available: false` with Wayland named as the reason, rather than
-presenting a dictation key that quietly does nothing.
+reaches a native Wayland client, so on Wayland Murmur would observe nothing and
+paste nowhere. That failure is silent by nature — XWayland still sets `DISPLAY`
+and every call still succeeds — so the app detects the session up front and
+reports itself unavailable with Wayland named as the reason, rather than
+offering a dictation key that quietly does nothing.
 
-To dictate on Linux today, choose an **X11**/**Xorg** session at the login
-screen. Wayland support needs the `xdg-desktop-portal` GlobalShortcuts protocol
-plus a `uinput` injector, and is its own milestone (PLAN §4.1, M8).
+Choose an **X11**/**Xorg** session at the login screen. Wayland support needs
+the `xdg-desktop-portal` GlobalShortcuts protocol plus a `uinput` injector, and
+is its own milestone.
 
-Two more consequences of XRecord being listen-only — it can observe keys but
-never swallow one:
+Two more consequences of XRecord being listen-only: **Caps Lock and the Space
+chords are not offered** on Linux (both need key suppression), and
+**secure-input detection reports false** (X11 has no equivalent probe that does
+not involve grabbing the keyboard away from the password dialog asking for it).
 
-- **Caps Lock and the Space chords are not offered** on Linux. Both depend on
-  suppression; without it, Caps Lock would toggle caps on every dictation and a
-  chord would type a space. Right Ctrl, Right Alt, Right Super and a custom
-  keycode are the presets, and none of those is suppressed on any platform.
-- **Secure-input detection reports false.** X11 has no
-  `EnableSecureEventInput` twin, and the nearest probe — testing for an
-  exclusive keyboard grab — would mean grabbing the keyboard away from whatever
-  password dialog is asking for it.
+---
 
-The macOS Accessibility insertion fallback also has no Linux twin (its
-equivalent is AT-SPI2 over D-Bus); `insertTextViaAccessibility` reports that
-plainly rather than letting main believe a fallback succeeded.
+## Building from source
 
-### Adding an IPC channel
+Everything a contributor needs — the dev loop, the per-OS native toolchain,
+packaging, the release process, the IPC contract, and how the app degrades with
+no models or sidecars installed — is in **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
-1. Declare it in `packages/shared/src/ipc/contract.ts` — `invokeContract` (renderer → main, request/response), `eventContract` (main → renderer) or `messageContract` (renderer → main, fire-and-forget).
-2. Register a handler in `apps/desktop/src/main/ipc/register.ts`.
-3. Expose it on `window.murmur` in `apps/desktop/src/preload/index.ts`.
+The short version:
 
-Payload types flow from step 1 to steps 2 and 3 automatically, and zod validates at the boundary — see the header comment in `packages/shared/src/ipc/typed.ts` for exactly what is checked when.
+```bash
+npm install && npm run dev
+```
+
+## Project documents
+
+| Document                                 | What is in it                             |
+| ---------------------------------------- | ----------------------------------------- |
+| [PLAN.md](PLAN.md)                       | The full product and architecture plan    |
+| [CONTRIBUTING.md](CONTRIBUTING.md)       | Development, packaging, releases, layout  |
+| [HANDOFF.md](HANDOFF.md)                 | Product-wide backlog                      |
+| [MAC-HANDOFF.md](MAC-HANDOFF.md)         | macOS residual work                       |
+| [WINDOWS-HANDOFF.md](WINDOWS-HANDOFF.md) | Windows residual work                     |
+| [LINUX-HANDOFF.md](LINUX-HANDOFF.md)     | Linux residual work, and the X11 boundary |
+
+## License
+
+[MIT](LICENSE) © 2026 Jordan Bremer.
+
+The bundled `whisper-server` and `llama-server` binaries come from whisper.cpp
+and llama.cpp, both MIT. Model weights are **not** bundled — you download them
+yourself, and each carries its own licence, shown beside it in the Hub.
