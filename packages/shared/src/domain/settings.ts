@@ -186,7 +186,15 @@ export type RetentionPolicy = z.infer<typeof RetentionPolicySchema>
 export const PolishingLevelSchema = z.enum(['off', 'clean', 'rewrite'])
 export type PolishingLevel = z.infer<typeof PolishingLevelSchema>
 
-/** PLAN §2.1 visibility modes for the floating Bar. */
+/**
+ * PLAN §2.1 visibility modes for the floating Bar.
+ *
+ * Defaults to `always` — the resting sliver is on screen from launch, and
+ * turning it off is a choice the user makes rather than one they have to
+ * discover. An indicator that only exists while it is already too late to look
+ * at it teaches nobody where dictation lives; at 44 × 8 px of translucent
+ * hairline it costs almost nothing to leave on.
+ */
 export const BarVisibilitySchema = z.enum(['showWhileDictating', 'always', 'hidden'])
 export type BarVisibility = z.infer<typeof BarVisibilitySchema>
 
@@ -261,6 +269,33 @@ export const MeetingSettingsSchema = z.object({
   autoRecord: z.record(z.string(), z.enum(['ask', 'always', 'never'])).default({}),
 })
 export type MeetingSettings = z.infer<typeof MeetingSettingsSchema>
+
+/**
+ * Updates (PLAN §10.2).
+ *
+ * The one place Murmur reaches the network without being asked in the moment,
+ * and the reason the privacy copy in Help names it explicitly rather than
+ * claiming nothing is ever automatic. What a check discloses to GitHub is one
+ * HTTPS request for a small YAML feed — which reveals this machine's IP, the
+ * running version, and roughly when it is awake. That is a real if modest
+ * disclosure, so it gets a switch, and the switch is named in Help next to the
+ * sentence describing the traffic.
+ *
+ * On by default all the same: a dictation tool that silently rots three
+ * versions behind, on a machine whose owner never thinks to look, is the worse
+ * outcome — and the update is how they get every fix.
+ */
+export const UpdateSettingsSchema = z.object({
+  /** Check on launch and every few hours. Off means the button is the only path. */
+  checkAutomatically: z.boolean().default(true),
+  /**
+   * Fetch the installer as soon as one is found, so the user only has to
+   * restart. Requires `checkAutomatically` — there is nothing to download
+   * automatically if nothing looks automatically.
+   */
+  autoDownload: z.boolean().default(true),
+})
+export type UpdateSettings = z.infer<typeof UpdateSettingsSchema>
 
 // ---------------------------------------------------------------------------
 // Vibe coding
@@ -365,6 +400,8 @@ const settingsFields = {
   insightsEnabled: z.boolean(),
   /** Code-aware dictation. Off by default — see {@link VibeCodingSettingsSchema}. */
   vibeCoding: VibeCodingSettingsSchema,
+  /** Automatic update checks and downloads — see {@link UpdateSettingsSchema}. */
+  updates: UpdateSettingsSchema,
 } as const
 
 /** Full settings: unknown/missing keys fall back to the shipped defaults. */
@@ -379,7 +416,7 @@ export const SettingsSchema = z.object({
     days: 90,
   })),
   launchAtLogin: settingsFields.launchAtLogin.default(false),
-  barVisibility: settingsFields.barVisibility.default('showWhileDictating'),
+  barVisibility: settingsFields.barVisibility.default('always'),
   barStyle: settingsFields.barStyle.default('pill'),
   barCorner: settingsFields.barCorner.default('bottomLeft'),
   barFlourish: settingsFields.barFlourish.default(true),
@@ -393,6 +430,7 @@ export const SettingsSchema = z.object({
   meetings: settingsFields.meetings.default(() => MeetingSettingsSchema.parse({})),
   insightsEnabled: settingsFields.insightsEnabled.default(true),
   vibeCoding: settingsFields.vibeCoding.default(() => VibeCodingSettingsSchema.parse({})),
+  updates: settingsFields.updates.default(() => UpdateSettingsSchema.parse({})),
 })
 export type Settings = z.infer<typeof SettingsSchema>
 

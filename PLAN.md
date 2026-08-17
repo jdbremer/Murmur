@@ -11,7 +11,7 @@
 
 - Company policy forbids cloud dictation tools (Wispr Flow, Superwhisper cloud modes, etc.) because dictated audio/text leaves the machine.
 - Existing local tools don't combine all of: Wispr-Flow-grade UX, an LLM "polishing" pass, and model choice inside a compliance-friendly, US-only catalog.
-- Goal: a tool an IT/security team can approve at a glance — **no audio, transcript, or telemetry ever leaves the device**. The only network traffic is model downloads, which are user-initiated and auditable.
+- Goal: a tool an IT/security team can approve at a glance — **no audio, transcript, or telemetry ever leaves the device**. The only network traffic is model downloads, which are user-initiated and auditable, and the app's own update check against GitHub, which is switchable and described in §10.2.
 
 ### Goals (v1)
 
@@ -327,7 +327,8 @@ Guardrail: if polish output diverges wildly in length from input (hallucination 
 ## 10. Privacy & security posture (the selling point — make it auditable)
 
 1. **No telemetry, no analytics, no accounts, no crash uploads.** Crash reports write to local disk; the user chooses whether to share them.
-2. Network access happens **only** for: model catalog refresh + model downloads (user-initiated, to Hugging Face) and the optional update check (off by default in v1; see §16). Enforced in code by a single fetch wrapper with an allowlist, and documented so IT can verify with Little Snitch/proxy logs.
+2. Network access happens **only** for: model catalog refresh + model downloads (user-initiated, to Hugging Face) and the update check against this project's own GitHub releases. The update check is the **one** request nobody presses a button for — it runs shortly after launch and every six hours, and fetches the installer when `settings.updates.autoDownload` is on. It reveals the machine's IP, the running version and roughly when it is awake, and nothing else; both halves are switchable in Settings › Updates, and Help's Network activity row states which is currently on rather than making a blanket promise. Everything else is enforced in code by a single fetch wrapper with an allowlist, and documented so IT can verify with Little Snitch/proxy logs.
+   - *Changed in 0.4.8, deliberately.* v1 shipped this off by default on the reasoning that a background poll is traffic nobody agreed to. That is true, and it was still the wrong trade: the users who sit furthest behind are exactly the ones who never open Help to press Check, and every fix reaches them through this path. The honest answer was not to avoid the request but to name it — which is why the copy above is specific about what it discloses instead of reassuring.
 3. Sidecars bind to `127.0.0.1` with a random port + bearer token generated per launch (no other local user/process can use our inference servers or read prompts).
 4. Audio in memory only by default; history is local SQLite; both retention windows user-controlled.
 5. The event tap is **listen-only for the configured hotkey** — key events other than the hotkey are never logged, buffered, or transmitted; this is stated in-app and verifiable in source.

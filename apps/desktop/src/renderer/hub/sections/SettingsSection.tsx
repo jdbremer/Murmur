@@ -339,6 +339,35 @@ export function SettingsSection(): React.JSX.Element {
         </Row>
       </Card>
 
+      <h2 className="mb-2 text-[13px] font-semibold text-ink">Updates</h2>
+      <Card className="mb-6">
+        <Row
+          label="Check for updates automatically"
+          hint="Asks GitHub for the latest release on launch and every few hours. That request tells GitHub your IP address and which version you are running — it is the only thing Murmur sends without you pressing something."
+        >
+          <Toggle
+            label="Check for updates automatically"
+            checked={settings.updates.checkAutomatically}
+            onChange={(checkAutomatically) =>
+              void update({ updates: { ...settings.updates, checkAutomatically } })
+            }
+          />
+        </Row>
+        <Row
+          label="Download updates in the background"
+          hint="Fetches the installer (~190 MB) as soon as one is found, so all that is left is to restart. Worth turning off if you are often on a tethered connection."
+        >
+          <Toggle
+            label="Download updates in the background"
+            checked={settings.updates.autoDownload}
+            onChange={(autoDownload) =>
+              void update({ updates: { ...settings.updates, autoDownload } })
+            }
+            disabled={!settings.updates.checkAutomatically}
+          />
+        </Row>
+      </Card>
+
       <h2 className="mb-2 text-[13px] font-semibold text-ink">What is kept</h2>
       <Card>
         <Row

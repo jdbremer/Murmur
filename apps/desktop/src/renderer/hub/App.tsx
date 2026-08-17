@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { useSettings } from '../hooks/useSettings'
 import { DictationToast } from './components/Toast'
+import { UpdateNotice } from './components/UpdateNotice'
 import { Onboarding } from './onboarding/Onboarding'
 import { Sidebar, type SectionId } from './Sidebar'
 import { HistorySection } from './sections/HistorySection'
@@ -63,6 +64,9 @@ export function App(): React.JSX.Element {
         </div>
       </main>
       <DictationToast />
+      {/* Top-right, opposite corner from the dictation toast so a failure and
+          a pending update never stack on top of each other. */}
+      <UpdateNotice />
     </div>
   )
 }

@@ -167,6 +167,7 @@ const api: MurmurApi = {
     warmMic: () => ipc.invoke('debug.warmMic'),
     injectPcm: (request) => ipc.invoke('debug.injectPcm', request ?? {}),
     injectSystemPcm: (request) => ipc.invoke('debug.injectSystemPcm', request ?? {}),
+    pushUpdateState: (state) => ipc.invoke('debug.pushUpdateState', state),
     snapshot: () => ipc.invoke('debug.snapshot'),
     barWindow: () => ipc.invoke('debug.barWindow'),
     insertText: (request) => ipc.invoke('debug.insertText', request ?? {}),

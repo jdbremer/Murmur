@@ -24,7 +24,7 @@ describe('SettingsSchema', () => {
       audioRetention: { mode: 'off' },
       historyRetention: { mode: 'days', days: 90 },
       launchAtLogin: false,
-      barVisibility: 'showWhileDictating',
+      barVisibility: 'always',
       barStyle: 'pill',
       barCorner: 'bottomLeft',
       barFlourish: true,
@@ -44,7 +44,23 @@ describe('SettingsSchema', () => {
       },
       insightsEnabled: true,
       vibeCoding: { variableRecognition: false, fileTagging: false },
+      updates: { checkAutomatically: true, autoDownload: true },
     } satisfies Settings)
+  })
+
+  it('shows the indicator by default — hiding it is the choice, not finding it', () => {
+    // An indicator that only appears once dictation is already under way
+    // teaches nobody where dictation lives.
+    expect(createDefaultSettings().barVisibility).toBe('always')
+  })
+
+  it('keeps updates automatic by default, with both halves switchable', () => {
+    // The one thing that reaches the network unasked, which is why it is
+    // named in Help rather than left to be discovered — and why the fetch is
+    // a separate switch from the check.
+    const updates = createDefaultSettings().updates
+    expect(updates.checkAutomatically).toBe(true)
+    expect(updates.autoDownload).toBe(true)
   })
 
   it('audio retention defaults to off — audio is never written to disk unasked', () => {
@@ -80,7 +96,7 @@ describe('SettingsSchema', () => {
     const settings = SettingsSchema.parse(fromDisk)
     expect(settings.language).toBe('de')
     expect(settings.polishingLevel).toBe('rewrite')
-    expect(settings.barVisibility).toBe('showWhileDictating')
+    expect(settings.barVisibility).toBe('always')
   })
 
   it('accepts Windows hotkey presets alongside macOS ones', () => {

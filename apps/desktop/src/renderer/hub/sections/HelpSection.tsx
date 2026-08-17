@@ -159,9 +159,19 @@ export function HelpSection(): React.JSX.Element {
         </Row>
         <Row
           label="Network activity"
-          hint="Model downloads from Hugging Face and from Murmur\u2019s own GitHub releases, and updates from GitHub when you press the button. Nothing else \u2014 no telemetry, no accounts, nothing on a timer."
+          hint={
+            settings?.updates.checkAutomatically
+              ? 'Model downloads from Hugging Face and from Murmur\u2019s own GitHub releases, when you ask for them. One thing happens on its own: Murmur asks GitHub for the latest release on launch and every few hours, which tells GitHub your IP address and which version you run \u2014 and downloads it if that is switched on. Turn either off under Settings \u203a Updates. Nothing else: no telemetry, no accounts, no audio or text.'
+              : 'Model downloads from Hugging Face and from Murmur\u2019s own GitHub releases, and updates from GitHub when you press the button. Nothing else \u2014 no telemetry, no accounts, nothing on a timer.'
+          }
         >
-          <Badge tone="positive">Only when you ask</Badge>
+          {settings?.updates.checkAutomatically ? (
+            <Badge tone="neutral" title="Everything else happens only when you ask">
+              Update checks only
+            </Badge>
+          ) : (
+            <Badge tone="positive">Only when you ask</Badge>
+          )}
         </Row>
         <Row
           label="Screen content"

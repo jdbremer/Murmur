@@ -503,6 +503,11 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     ipc.handle('debug.simulateDictation', async () => {
       await simulateDictation(machine)
     })
+    // Purely a display state: broadcast and nothing else. The updater is never
+    // touched, so this cannot start a download or install anything.
+    ipc.handle('debug.pushUpdateState', (state) => {
+      ipc.broadcast(windows.uiWebContents(), 'app.updateChanged', state)
+    })
     ipc.handle('debug.simulateHotkey', ({ action }) => {
       // Drives the *real* pipeline, so a dev machine with no event tap can
       // still exercise capture → VAD → STT → polish → insert end to end.

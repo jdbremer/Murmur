@@ -220,6 +220,8 @@ export interface MurmurApi {
     injectPcm(request?: Req<'debug.injectPcm'>): Promise<Res<'debug.injectPcm'>>
     /** Push synthetic PCM into a meeting's system-audio track. */
     injectSystemPcm(request?: Req<'debug.injectSystemPcm'>): Promise<Res<'debug.injectSystemPcm'>>
+    /** Drive the Hub's update notice without a published release. */
+    pushUpdateState(state: Req<'debug.pushUpdateState'>): Promise<void>
     /** Machine-readable status for the agent loop. */
     snapshot(): Promise<Res<'debug.snapshot'>>
     /** What macOS actually did with the Bar's window (level, Spaces, bounds). */

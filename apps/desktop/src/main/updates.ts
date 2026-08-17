@@ -1,17 +1,30 @@
 import { app } from 'electron'
 import electronUpdater from 'electron-updater'
 
-import type { UpdateState } from '@murmur/shared'
+import type { UpdateSettings, UpdateState } from '@murmur/shared'
 
 import { createLogger } from './logging'
 
 /**
- * Updates (PLAN §10.2) — user-pressed, never on a timer.
+ * Updates (PLAN §10.2) — automatic by default, and disclosed because of it.
  *
- * Help promises no telemetry and nothing on a schedule, and a background poll
- * would make that false: it tells GitHub this machine's IP, its version and
- * when it is awake, on a cadence nobody agreed to. So `autoDownload` is off
- * too — finding an update and fetching 190 MB are separate consents.
+ * This used to be strictly user-pressed, on the grounds that a background poll
+ * tells GitHub this machine's IP, its version and roughly when it is awake, on
+ * a cadence nobody agreed to. That reasoning was sound and the conclusion was
+ * still wrong for a shipped product: the people most likely to sit three
+ * versions behind are exactly the ones who never open Help to press a button,
+ * and every fix reaches them through this path.
+ *
+ * So it now checks on launch and every {@link CHECK_INTERVAL_MS}, and fetches
+ * the installer as soon as it finds one. What keeps that honest is not the
+ * absence of traffic but its description: `settings.updates` carries a switch
+ * for each half, Help's Network activity row names this as the one thing that
+ * happens without being asked in the moment, and both defaults are stated
+ * there rather than discovered.
+ *
+ * The two switches are separate because the consents are: finding out a
+ * release exists is one HTTPS request for a small YAML feed, and fetching it
+ * is ~190 MB, which is a different proposition on a tethered phone.
  *
  * ## Where this sits relative to `net/fetch.ts`
  *
@@ -121,15 +134,21 @@ export function initUpdates(listener: Listener): void {
   notify = listener
   state = { ...state, currentVersion: app.getVersion() }
 
-  // Both off deliberately: see the header. Checking is a button, downloading
-  // is a second button.
+  // Left off at the library level even when the *setting* is on, so the
+  // decision stays here where the setting can be read. electron-updater's own
+  // autoDownload would fire inside `checkForUpdates` before this module could
+  // consult anything.
   autoUpdater.autoDownload = false
+  // Never swap the app out from under someone at quit: they pressed Restart or
+  // they did not.
   autoUpdater.autoInstallOnAppQuit = false
   autoUpdater.logger = null
 
   autoUpdater.on('update-available', (info) => {
     log.info(`update available: ${info.version}`)
     setState({ status: 'available', latestVersion: info.version, percent: null })
+    // The second half of "all the user has to do is install".
+    if (wantsAutoDownload()) void downloadUpdate()
   })
   autoUpdater.on('update-not-available', () => {
     setState({ status: 'current', latestVersion: state.currentVersion, percent: null })
@@ -150,6 +169,86 @@ export function initUpdates(listener: Listener): void {
 
 export function updateState(): UpdateState {
   return state
+}
+
+// ---------------------------------------------------------------------------
+// Automatic checking
+// ---------------------------------------------------------------------------
+
+/** How often a long-running Murmur looks again. */
+export const CHECK_INTERVAL_MS = 6 * 60 * 60_000
+/**
+ * Grace period after launch before the first check.
+ *
+ * Boot is the busiest moment this process has — engines loading, the model
+ * catalog validating, the window painting — and an update check is the least
+ * urgent thing in it. Twenty seconds keeps it off that critical path without
+ * being long enough for anyone to close the app first.
+ */
+export const FIRST_CHECK_DELAY_MS = 20_000
+
+let timer: NodeJS.Timeout | null = null
+let lastCheckAt = 0
+let readSettings: (() => UpdateSettings) | null = null
+
+function wantsAutoDownload(): boolean {
+  const settings = readSettings?.()
+  return settings ? settings.checkAutomatically && settings.autoDownload : false
+}
+
+/**
+ * Whether a check should run now.
+ *
+ * Pure, and exported for the tests: this is the whole of the scheduling policy
+ * and it is much easier to assert on than a timer. `lastAt` of 0 means "never
+ * checked", which is always due.
+ */
+export function isCheckDue(
+  settings: UpdateSettings,
+  lastAt: number,
+  now: number,
+  interval = CHECK_INTERVAL_MS,
+): boolean {
+  if (!settings.checkAutomatically) return false
+  if (lastAt === 0) return true
+  return now - lastAt >= interval
+}
+
+/**
+ * Start the background schedule.
+ *
+ * Re-callable: `settings.changed` runs it again, which is what makes toggling
+ * the switch take effect immediately rather than at next launch. Reads the
+ * settings through a getter rather than a snapshot for the same reason.
+ */
+export function startAutoUpdates(getSettings: () => UpdateSettings): void {
+  readSettings = getSettings
+  stopAutoUpdates()
+
+  if (!getSettings().checkAutomatically) {
+    log.info('automatic update checks are off')
+    return
+  }
+  if (!isSelfUpdateSupported().ok) return
+
+  const tick = (): void => {
+    if (!readSettings) return
+    if (!isCheckDue(readSettings(), lastCheckAt, Date.now())) return
+    lastCheckAt = Date.now()
+    void checkForUpdate()
+  }
+
+  const first = setTimeout(tick, FIRST_CHECK_DELAY_MS)
+  first.unref?.()
+  // Polled rather than scheduled exactly, so a machine that slept through its
+  // window checks on the next tick instead of waiting another six hours.
+  timer = setInterval(tick, 15 * 60_000)
+  timer.unref?.()
+}
+
+export function stopAutoUpdates(): void {
+  if (timer) clearInterval(timer)
+  timer = null
 }
 
 export async function checkForUpdate(): Promise<UpdateState> {

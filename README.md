@@ -97,7 +97,12 @@ switch on.
   the codebase is a Hugging-Face-only allowlist for downloading models, and it
   is a single file you can read.
 - **No accounts, no telemetry, no analytics.** There is nothing to sign into and
-  nothing phoning home.
+  nothing reporting on you.
+- **One thing is automatic, and it is named.** Murmur asks GitHub for its own
+  latest release on launch and every few hours, then downloads it so all you do
+  is restart. That request tells GitHub your IP address and which version you
+  run — nothing about your dictation. Both halves have a switch in
+  Settings › Updates, and Help states which is on.
 - **A US-only model catalog.** Every listed speech and polishing model comes
   from a US-based organisation, enforced by an origin policy that is validated
   every time the catalog loads — not a claim in a README.

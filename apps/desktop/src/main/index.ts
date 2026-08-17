@@ -47,6 +47,7 @@ import {
 import { LoopbackSystemAudio } from './audio/loopback-capture'
 import { MeetingRecorder } from './meeting/recorder'
 import { FileTranscriber } from './transcription/file-transcriber'
+import { startAutoUpdates, stopAutoUpdates } from './updates'
 import { MeetingWatcher, listAudioProcessesVia } from './meeting/watcher'
 import { TranscribeQueue } from './engines/stt-queue'
 import { SettingsStore } from './store/settings-store'
@@ -496,6 +497,12 @@ async function bootstrap(): Promise<void> {
   // No-op unless the user has turned meeting detection on.
   watcher.sync()
 
+  // Look for a new release shortly after boot, then periodically. On by
+  // default and switchable in Settings — see `updates.ts` and Help's Network
+  // activity row, which names this as the one request nobody presses a button
+  // for.
+  startAutoUpdates(() => settings.get().updates)
+
   // Sleeping mid-meeting must not look like nobody spoke for two hours: mark
   // the break in the transcript and rebuild the tap on the way back. Nothing
   // else in the app cares about power state, which is why this is the only
@@ -512,6 +519,9 @@ async function bootstrap(): Promise<void> {
     // Turning detection off has to actually tear the timer down, not just make
     // its result unused — "off" means inert.
     watcher.sync()
+    // Same for the update schedule: switching it off stops the timer now, not
+    // at next launch.
+    startAutoUpdates(() => settings.get().updates)
     // Same discipline for the editor read: switching vibe coding off must drop
     // what was already extracted, not merely stop extracting more.
     codeContext.forget()
@@ -810,6 +820,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(): Promise<void> {
     log.info('shutting down')
     tray.destroy()
+    stopAutoUpdates()
     escape.dispose()
     hotkeys.stop()
     // Before the engines: a meeting in progress has to finish transcribing

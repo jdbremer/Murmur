@@ -30,8 +30,15 @@ vi.mock('electron', () => ({
 }))
 vi.mock('electron-updater', () => ({ default: { autoUpdater } }))
 
-const { checkForUpdate, compareVersions, initUpdates, isUpdateReleaseUrl, updateState } =
-  await import('../src/main/updates')
+const {
+  CHECK_INTERVAL_MS,
+  checkForUpdate,
+  compareVersions,
+  initUpdates,
+  isCheckDue,
+  isUpdateReleaseUrl,
+  updateState,
+} = await import('../src/main/updates')
 
 function emit(event: string, payload?: unknown): void {
   const cb = emitters.get(event)
@@ -91,8 +98,14 @@ describe('the update state machine', () => {
     initUpdates((s) => seen.push(s.status))
   })
 
-  it('never downloads on its own — that is a second, separate consent', () => {
+  it('keeps the library flags off so the settings decide, not electron-updater', () => {
+    // `autoDownload` false does *not* mean downloads never happen
+    // automatically — they do, when `settings.updates.autoDownload` is on. It
+    // means the library must not start one inside `checkForUpdates`, before
+    // this module can consult the setting at all.
     expect(autoUpdater.autoDownload).toBe(false)
+    // And never swap the app out at quit: the user pressed Restart, or nothing
+    // happens.
     expect(autoUpdater.autoInstallOnAppQuit).toBe(false)
   })
 
@@ -143,5 +156,35 @@ describe('the update state machine', () => {
     emit('error', new Error('code signature did not match'))
     expect(updateState().status).toBe('error')
     expect(updateState().message).toContain('signature')
+  })
+})
+
+describe('isCheckDue', () => {
+  const on = { checkAutomatically: true, autoDownload: true }
+  const off = { checkAutomatically: false, autoDownload: true }
+
+  it('never checks when the setting is off', () => {
+    // "Off" has to mean no request at all, not a request whose result is
+    // ignored — the whole point of the switch is the traffic.
+    expect(isCheckDue(off, 0, Date.now())).toBe(false)
+    expect(isCheckDue(off, 1, Date.now() + CHECK_INTERVAL_MS * 10)).toBe(false)
+  })
+
+  it('checks once at launch, having never checked', () => {
+    expect(isCheckDue(on, 0, 1_000)).toBe(true)
+  })
+
+  it('waits out the interval before checking again', () => {
+    const now = 10_000_000
+    expect(isCheckDue(on, now, now)).toBe(false)
+    expect(isCheckDue(on, now, now + CHECK_INTERVAL_MS - 1)).toBe(false)
+    expect(isCheckDue(on, now, now + CHECK_INTERVAL_MS)).toBe(true)
+  })
+
+  it('checks on the next tick after a long sleep rather than missing the window', () => {
+    // The timer polls every 15 minutes; a machine asleep for two days must not
+    // have to wait another full interval on waking.
+    const now = 10_000_000
+    expect(isCheckDue(on, now, now + 48 * 3_600_000)).toBe(true)
   })
 })

@@ -32,7 +32,7 @@ describe('SettingsStore', () => {
     expect(reloaded.get().polishingLevel).toBe('off')
     expect(reloaded.get().language).toBe('de')
     // Untouched keys keep their defaults.
-    expect(reloaded.get().barVisibility).toBe('showWhileDictating')
+    expect(reloaded.get().barVisibility).toBe('always')
   })
 
   it('writes readable JSON', () => {

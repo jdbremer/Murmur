@@ -448,6 +448,17 @@ export const invokeContract = {
       sampleCount: z.number().int().nonnegative(),
     }),
   },
+  /**
+   * Agent / Dev: broadcast a synthetic {@link UpdateStateSchema} so the Hub's
+   * update notice can be driven without a published release.
+   *
+   * An unpackaged build can never reach `available` on its own — it refuses to
+   * self-update at all (`isSelfUpdateSupported`) — so this is the only way to
+   * see the notification, short of cutting a release to look at a toast.
+   * Dev-only, like every other `debug.*` channel; it moves a display state and
+   * touches no updater.
+   */
+  'debug.pushUpdateState': { request: UpdateStateSchema, response: z.void() },
   'debug.snapshot': {
     request: z.void(),
     response: z.object({
