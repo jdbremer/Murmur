@@ -339,8 +339,17 @@ body {
   opacity: 0.5;
 }
 
+/*
+ * While listening, the wash brightens with the voice rather than breathing on
+ * a 2600 ms timer of its own. A halo pulsing to its own clock is motion that
+ * means nothing — it kept moving through silences, and against a meter that
+ * was also moving it read as two unrelated animations sharing a corner. The
+ * renderer writes `--bar-voice` (0..1) each frame; the floor keeps the light
+ * present when nobody is speaking.
+ */
 .bar-halo[data-live='true'] {
-  animation: bar-halo-breathe 2600ms ease-in-out infinite;
+  opacity: calc(0.26 + 0.44 * var(--bar-voice, 0));
+  transition: opacity 90ms linear;
 }
 
 .bar-halo[data-flash='true'] {
@@ -454,31 +463,31 @@ body {
  * swell — but pairing an eased scale with an eased fade spent most of the
  * ring's life at an opacity too low to see, so the two curves are separated.
  */
+/*
+ * Start / stop now read as the capsule's own rim catching the light, not as a
+ * ring detaching and flying outward. Opacity only, no scale: the expanding
+ * ring was a second object appearing beside the pill at the exact moment the
+ * pill itself was morphing, and two things moving apart at once is what made
+ * beginning a dictation feel busy.
+ */
 @keyframes flourish-bloom {
   from {
-    opacity: 0.9;
-    transform: scale(1);
-  }
-  55% {
-    opacity: 0.5;
+    opacity: 0.85;
   }
   to {
     opacity: 0;
-    transform: scale(1.14);
   }
 }
 
 @keyframes flourish-collapse {
   from {
     opacity: 0;
-    transform: scale(1.16);
   }
-  45% {
-    opacity: 0.6;
+  40% {
+    opacity: 0.55;
   }
   to {
     opacity: 0;
-    transform: scale(0.985);
   }
 }
 

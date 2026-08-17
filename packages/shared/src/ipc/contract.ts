@@ -459,6 +459,18 @@ export const invokeContract = {
    * touches no updater.
    */
   'debug.pushUpdateState': { request: UpdateStateSchema, response: z.void() },
+  /**
+   * Agent / Dev: broadcast a synthetic microphone level.
+   *
+   * The waveform and the halo are both driven by `audio.level`, which only
+   * ever flows from a real microphone — so without this the meter can only be
+   * reviewed by speaking at it, which is no way to judge a design frame by
+   * frame. Moves a display value and touches no audio path.
+   */
+  'debug.pushLevel': {
+    request: z.object({ level: z.number().min(0).max(1) }),
+    response: z.void(),
+  },
   'debug.snapshot': {
     request: z.void(),
     response: z.object({

@@ -147,6 +147,52 @@ export function barHeights(
 }
 
 /**
+ * Bar heights for the pill's live meter — the redesigned waveform.
+ *
+ * The scrolling history this replaced (still used by the corner orb, which is
+ * a different shape with different needs) read as a log being written: bars
+ * marched right-to-left under an alpha ramp, and at a glance it looked like a
+ * progress indicator rather than a voice. Three properties fix that:
+ *
+ *  - **Symmetric.** Heights depend on distance from the centre, so the meter
+ *    has an axis and blooms outward from it. Nothing travels, so there is no
+ *    implied direction and nothing to mistake for progress.
+ *  - **Silence is perfectly still.** At `level` 0 every bar sits at `min`,
+ *    which is exactly the resting sliver's row of dots — so the idle dots
+ *    *become* the meter rather than being replaced by it, and a quiet moment
+ *    mid-dictation costs no motion at all.
+ *  - **Alive, not mechanical.** A slow per-bar phase offset means the bars
+ *    undulate against each other instead of rising as one block. The wobble is
+ *    scaled by level, so it cannot animate silence.
+ *
+ * Pure and clock-injected, like everything else here.
+ */
+export function meterHeights(
+  level: number,
+  count: number = BAR.waveformBars,
+  elapsedMs = 0,
+  options: { min?: number; max?: number } = {},
+): number[] {
+  const min = options.min ?? BAR.waveformMinHeight
+  const max = options.max ?? BAR.waveformMaxHeight
+  const bars = Math.max(1, Math.floor(count))
+  const last = Math.max(1, bars - 1)
+  // Quiet speech should still move the meter; a raw level barely lifts it.
+  const eased = Math.pow(clamp01(level), 0.7)
+
+  const heights: number[] = []
+  for (let index = 0; index < bars; index += 1) {
+    const distance = Math.abs(index / last - 0.5) * 2
+    // Centre-weighted: edges reach ~45% of the middle, so the row reads as one
+    // shape rather than a picket fence.
+    const shape = 1 - 0.55 * Math.pow(distance, 1.6)
+    const wobble = 0.86 + 0.14 * Math.sin(elapsedMs / 320 + index * 0.9)
+    heights.push(min + (max - min) * eased * shape * wobble)
+  }
+  return heights
+}
+
+/**
  * The shimmer sweep's highlight centre, 0..1 across the pill (PLAN §2.1).
  *
  * The sweep is eased, not linear: it accelerates out of the left edge, glides

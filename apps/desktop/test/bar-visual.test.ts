@@ -65,7 +65,7 @@ describe('describeBar', () => {
 
   it('expands with a waveform while listening', () => {
     const visual = describeBar(listening)
-    expect(visual.width).toBe(BAR.listeningWidth)
+    expect(visual.width).toBe(BAR.activeWidth)
     expect(visual.shape).toBe('waveform')
     expect(visual.handsFree).toBe(false)
   })
@@ -239,26 +239,39 @@ describe('isBarVisible', () => {
 })
 
 describe('the spec numbers themselves', () => {
-  it('keeps the waveform sparse — PLAN §2.1, 12–20 bars at 2 px + 3 px', () => {
-    // The range is the design intent, not an arbitrary fence: below ~12 bars a
-    // level meter stops reading as a waveform, and above ~20 it becomes the
-    // dense hedge this was redesigned away from.
-    expect(BAR.waveformBars).toBeGreaterThanOrEqual(12)
-    expect(BAR.waveformBars).toBeLessThanOrEqual(20)
+  it('keeps the waveform sparse — PLAN §2.1, 10–14 bars at 2 px + 3 px', () => {
+    // The range is the design intent, not an arbitrary fence: below ~10 bars a
+    // level meter stops reading as a voice, and above ~14 it becomes texture.
+    expect(BAR.waveformBars).toBeGreaterThanOrEqual(10)
+    expect(BAR.waveformBars).toBeLessThanOrEqual(14)
     expect(BAR.waveformBarWidth).toBe(2)
     expect(BAR.waveformBarGap).toBe(3)
   })
 
-  it('morphs in ~150 ms and dismisses errors in ~2.5 s', () => {
-    expect(BAR.morphMs).toBe(150)
+  it('morphs quickly but without a snap, and dismisses errors in ~2.5 s', () => {
+    // A range, not a number: the exact value is a design judgement, but a
+    // morph under ~120 ms reads as a jump and over ~250 ms as sluggish.
+    expect(BAR.morphMs).toBeGreaterThanOrEqual(120)
+    expect(BAR.morphMs).toBeLessThanOrEqual(250)
     expect(BAR.errorHoldMs).toBe(2500)
   })
 
-  it('fits the waveform inside the listening capsule with room at both ends', () => {
+  it('fits the waveform inside the capsule with room at both ends', () => {
     const waveform = BAR.waveformBars * (BAR.waveformBarWidth + BAR.waveformBarGap)
     // Not merely "fits": a capsule with bars touching its rounded ends looks
     // like a progress bar. Insist on real padding either side.
-    expect(BAR.listeningWidth - waveform).toBeGreaterThanOrEqual(16)
+    expect(BAR.activeWidth - waveform).toBeGreaterThanOrEqual(16)
+  })
+
+  it('holds one size through the working states', () => {
+    // The pill used to be 104, 92 then 84 px across listening, transcribing
+    // and inserting, so a two-second dictation resized it three times before
+    // collapsing. It grows once and holds still; only the ✓ differs, because
+    // by then the work is done and shrinking is how it starts leaving.
+    const working = [listening, processing, { state: 'inserting' } as const]
+    const widths = new Set(working.map((event) => describeBar(event).width))
+    expect(widths).toEqual(new Set([BAR.activeWidth]))
+    expect(describeBar(inserted).width).toBeLessThan(BAR.activeWidth)
   })
 
   it('keeps the waveform inside the thinner capsule', () => {
@@ -269,8 +282,8 @@ describe('the spec numbers themselves', () => {
     // The redesign's whole point: speaking wakes the sliver, it does not
     // replace it. A capsule more than ~2.5x its resting width, or more than
     // double its height, stops reading as the same object.
-    expect(BAR.listeningWidth).toBeLessThanOrEqual(BAR.idleWidth * 2.5)
-    expect(BAR.activeHeight).toBeLessThanOrEqual(BAR.idleHeight * 2)
+    expect(BAR.activeWidth).toBeLessThanOrEqual(BAR.idleWidth * 2)
+    expect(BAR.activeHeight).toBeLessThanOrEqual(BAR.idleHeight * 1.75)
   })
 
   it('keeps the active capsule the same glass as the resting one', () => {

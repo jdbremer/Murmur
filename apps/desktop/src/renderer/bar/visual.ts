@@ -34,14 +34,11 @@ export const BAR = {
   /**
    * Height once there is something to show — a waveform, a shimmer, a ✓.
    *
-   * 14, not the 18 this shipped with. The resting sliver is 8 px of hairline
-   * ring, and the old active capsule was more than twice that and near-opaque:
-   * speaking swapped one object for a visibly different, heavier one. Growing
-   * by six pixels instead of ten keeps the two states recognisably the same
-   * piece of glass — which is the whole point of a pill that morphs rather
-   * than one that switches.
+   * 12, against the resting sliver's 8. Half again as tall, no more: this is
+   * still the same hairline capsule, and every pixel of growth is screen the
+   * user is trying to work in.
    */
-  activeHeight: 14,
+  activeHeight: 12,
   /**
    * The error pill is the exception, and has to be: it carries 11 px type, and
    * type needs vertical room a waveform does not. Sizing it to `activeHeight`
@@ -49,53 +46,67 @@ export const BAR = {
    */
   messageHeight: 20,
   /**
-   * Listening.
+   * **One width for the whole of the working part of a dictation** —
+   * listening, transcribing and inserting all measure this.
    *
-   * 104, down from 148. At 148 the capsule was three and a half times its
-   * resting width — the expansion read as a different widget arriving rather
-   * than the sliver waking up, and it was the loudest thing on the screen
-   * while you were trying to think. The waveform below was narrowed to suit;
-   * this width follows from it, with even breathing room at both ends.
+   * The single biggest change to how this reads. Those three states used to be
+   * 104, 92 and 84 px, so a two-second dictation resized the capsule four
+   * times before it collapsed: grow, shrink, shrink, shrink, gone. Each step
+   * was individually defensible ("less to show, so less capsule") and the sum
+   * was a pill that fidgeted while you were trying to think. It now grows
+   * once, holds absolutely still through the work, and collapses once.
+   *
+   * 84 px is sized from the waveform below plus even margins, and is under
+   * twice the resting width.
    */
-  listeningWidth: 104,
-  processingWidth: 92,
-  insertingWidth: 84,
-  insertedWidth: 72,
+  activeWidth: 84,
+  /**
+   * The ✓ is the one state that *should* differ: the work is over, and a
+   * smaller capsule is how the pill starts getting out of the way.
+   */
+  insertedWidth: 60,
   /** Error pills size to their message, within these bounds. */
   errorMinWidth: 180,
   errorMaxWidth: 300,
   /** The window is 360 px wide; nothing may exceed it (see windows/bar.ts). */
   maxWidth: 344,
-  /** Every state change morphs over this, ease-out (PLAN §2.1). */
-  morphMs: 150,
+  /**
+   * Every state change morphs over this (PLAN §2.1).
+   *
+   * 180, up from 150. The old curve overshot and sprang back, which *reads*
+   * fast however long it lasts; a pure decelerate needs a little longer to
+   * land as a settle rather than a snap. Still well inside the window main
+   * leaves before it retires the Bar.
+   */
+  morphMs: 180,
   /** How long the ✓ pulse holds — shared with main's window retirement. */
   insertedHoldMs: MOMENTARY_HOLD_MS.inserted,
   /** Error auto-dismiss (PLAN §2.1) — likewise shared. */
   errorHoldMs: MOMENTARY_HOLD_MS.error,
   /**
-   * Waveform: 16 bars, 2 px wide, with a 3 px gap (PLAN §2.1).
+   * Waveform: 12 bars, 2 px wide, with a 3 px gap (PLAN §2.1).
    *
-   * Was 28 bars at a 2 px gap — 112 px of dense hedge, which is what forced
-   * the old 148 px capsule and read as *busy* rather than alive. Sixteen bars
-   * with a wider gap is the same instrument played quietly: the airiness now
-   * echoes the five resting dots, so the sliver's dots opening into bars looks
-   * like one object waking up instead of two designs meeting.
+   * Twelve, down from sixteen and originally twenty-eight. A level meter does
+   * not become more truthful with more bars — past about a dozen it becomes
+   * texture, and texture at the bottom of the screen is noise. Twelve is
+   * enough to read as a voice and few enough to look drawn rather than
+   * generated.
    */
-  waveformBars: 16,
+  waveformBars: 12,
   waveformBarWidth: 2,
   waveformBarGap: 3,
   /** Bar heights inside the capsule. */
   waveformMinHeight: 2,
-  /** Leaves 3 px of dark either side inside a 14 px capsule. */
-  waveformMaxHeight: 8,
+  /** Leaves 2.5 px of dark either side inside a 12 px capsule. */
+  waveformMaxHeight: 7,
   /**
    * The ambient halo's box, relative to the capsule it sits behind: this much
    * wider, and this tall. Here rather than in the renderer so the geometry is
    * pinned by the same tests as everything else — and because a halo narrower
    * than its pill would read as a shadow, not a light.
    */
-  haloSpreadX: 56,
-  haloHeight: 32,
+  haloSpreadX: 48,
+  haloHeight: 28,
   /** One shimmer sweep across the pill while processing. */
   shimmerPeriodMs: 1100,
 } as const
@@ -263,7 +274,7 @@ function describeBase(event: DictationEvent): BarVisual {
     case 'listening':
       return {
         shape: 'waveform',
-        width: BAR.listeningWidth,
+        width: BAR.activeWidth,
         height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_LISTENING_BORDER,
@@ -282,7 +293,7 @@ function describeBase(event: DictationEvent): BarVisual {
     case 'processing':
       return {
         shape: 'shimmer',
-        width: BAR.processingWidth,
+        width: BAR.activeWidth,
         height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_BORDER,
@@ -301,7 +312,7 @@ function describeBase(event: DictationEvent): BarVisual {
     case 'inserting':
       return {
         shape: 'shimmer',
-        width: BAR.insertingWidth,
+        width: BAR.activeWidth,
         height: BAR.activeHeight,
         background: BAR_BACKGROUND,
         border: BAR_BORDER,

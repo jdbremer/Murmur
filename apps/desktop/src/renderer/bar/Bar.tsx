@@ -535,6 +535,8 @@ export function Bar(): React.JSX.Element | null {
             state={haloState}
             width={visual.width}
             pillHeight={visual.height}
+            live={haloState === 'listening' && !reducedMotion}
+            levelRef={levelRef}
             reducedMotion={reducedMotion}
           />
         ) : null}
@@ -571,8 +573,14 @@ export function Bar(): React.JSX.Element | null {
             transition: reducedMotion
               ? `opacity ${CLUSTER.fadeMs}ms linear`
               : [
-                  `width ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
-                  `height ${BAR.morphMs}ms cubic-bezier(0.3,1.33,0.4,1)`,
+                  // A pure decelerate, not the overshooting spring this had.
+                  // With four different active widths the bounce fired four
+                  // times per dictation and read as fidgeting; even with one
+                  // width, a capsule that springs past its size and settles
+                  // back draws attention to the container rather than to the
+                  // voice inside it.
+                  `width ${BAR.morphMs}ms cubic-bezier(0.32,0.72,0,1)`,
+                  `height ${BAR.morphMs}ms cubic-bezier(0.32,0.72,0,1)`,
                   `background-color ${BAR.morphMs}ms ease-out`,
                   `border-color ${BAR.morphMs}ms ease-out`,
                   // The glow blooms and fades slower than the morph, so a state
@@ -659,19 +667,51 @@ function Halo({
   state,
   width,
   pillHeight,
+  live,
+  levelRef,
   reducedMotion,
 }: {
   state: keyof typeof BAR_HALO
   width: number
   /** The capsule this is lighting, so the wash can be centred on it. */
   pillHeight: number
+  /** Drive the brightness from the microphone rather than from a timer. */
+  live: boolean
+  levelRef: React.RefObject<number>
   reducedMotion: boolean
 }): React.JSX.Element {
+  const ref = useRef<HTMLSpanElement | null>(null)
+
+  /**
+   * Write the voice level onto the element as a custom property, once per
+   * frame, while listening.
+   *
+   * Through a ref and a raw rAF rather than React state for the same reason
+   * the waveform is a canvas: this updates 60 times a second and nothing about
+   * the tree depends on it. The value is smoothed on the way in — the raw
+   * meter is jumpy enough that a light tracking it exactly would flicker
+   * rather than glow.
+   */
+  useEffect(() => {
+    if (!live) return
+    let frame = 0
+    let shown = 0
+    const tick = (): void => {
+      frame = requestAnimationFrame(tick)
+      const target = Math.min(1, Math.max(0, levelRef.current ?? 0))
+      shown += (target - shown) * 0.18
+      ref.current?.style.setProperty('--bar-voice', shown.toFixed(3))
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [live, levelRef])
+
   return (
     <span
+      ref={ref}
       aria-hidden="true"
       className="bar-halo"
-      data-live={!reducedMotion && state === 'listening' ? 'true' : undefined}
+      data-live={live ? 'true' : undefined}
       data-flash={!reducedMotion && state === 'inserted' ? 'true' : undefined}
       style={{
         width: width + BAR.haloSpreadX,
@@ -679,7 +719,7 @@ function Halo({
         // Centred *on the capsule*, which sits at the bottom of this row and is
         // shorter than the halo — so the light spills evenly above and below it
         // rather than hanging off one edge. Horizontal centring is the CSS's
-        // job (`margin-inline: auto`); only this axis needs the pill's size.
+        // job; only this axis needs the pill's size.
         bottom: (pillHeight - BAR.haloHeight) / 2,
         // Fully transparent well inside the box — see .bar-halo for why the
         // edge of this gradient is load-bearing and not just taste.

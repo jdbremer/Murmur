@@ -508,6 +508,9 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     ipc.handle('debug.pushUpdateState', (state) => {
       ipc.broadcast(windows.uiWebContents(), 'app.updateChanged', state)
     })
+    ipc.handle('debug.pushLevel', ({ level }) => {
+      ipc.broadcast(windows.uiWebContents(), 'audio.level', { level })
+    })
     ipc.handle('debug.simulateHotkey', ({ action }) => {
       // Drives the *real* pipeline, so a dev machine with no event tap can
       // still exercise capture → VAD → STT → polish → insert end to end.

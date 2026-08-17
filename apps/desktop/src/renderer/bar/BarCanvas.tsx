@@ -1,12 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import {
-  barHeights,
-  checkPulseScale,
-  LevelEnvelope,
-  shimmerPosition,
-  WaveformHistory,
-} from './level'
+import { checkPulseScale, LevelEnvelope, meterHeights, shimmerPosition } from './level'
 import { BAR, type BarShape } from './visual'
 
 /**
@@ -49,7 +43,6 @@ export interface BarCanvasProps {
 export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const envelopeRef = useRef(new LevelEnvelope())
-  const historyRef = useRef(new WaveformHistory())
   const shapeRef = useRef<BarShape>(shape)
   const startRef = useRef(0)
 
@@ -57,7 +50,6 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
     shapeRef.current = shape
     startRef.current = 0
     if (shape === 'waveform') return
-    historyRef.current.reset()
     envelopeRef.current.reset(0)
   }, [shape, epoch])
 
@@ -98,11 +90,9 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
 
       context.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
       switch (shapeRef.current) {
-        case 'waveform': {
-          historyRef.current.advance(dt, level)
-          paintWaveform(context, historyRef.current.values())
+        case 'waveform':
+          paintWaveform(context, level, elapsed)
           break
-        }
         case 'shimmer':
           paintShimmer(context, elapsed)
           break
@@ -124,13 +114,12 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
   )
 }
 
-function paintWaveform(context: CanvasRenderingContext2D, levels: readonly number[]): void {
-  const heights = barHeights(levels)
+function paintWaveform(context: CanvasRenderingContext2D, level: number, elapsedMs: number): void {
+  const heights = meterHeights(level, BAR.waveformBars, elapsedMs)
   const pitch = BAR.waveformBarWidth + BAR.waveformBarGap
-  const totalWidth = levels.length * pitch - BAR.waveformBarGap
+  const totalWidth = heights.length * pitch - BAR.waveformBarGap
   const left = (CANVAS_WIDTH - totalWidth) / 2
   const middle = CANVAS_HEIGHT / 2
-  const last = Math.max(1, heights.length - 1)
 
   // A cool cast at the tips fading to pure white at the centreline gives the
   // bars a lit-from-within depth that flat white lacks.
@@ -145,15 +134,13 @@ function paintWaveform(context: CanvasRenderingContext2D, levels: readonly numbe
   gradient.addColorStop(1, 'rgba(205,213,255,0.9)')
   context.fillStyle = gradient
 
+  // No per-bar alpha ramp. The old one faded older bars to mark which way the
+  // history scrolled; with a symmetric meter there is no "older", and the ramp
+  // only read as a stripe pattern laid over the voice.
   for (let index = 0; index < heights.length; index += 1) {
     const height = heights[index] ?? BAR.waveformMinHeight
-    const x = left + index * pitch
-    // Older bars fade as they scroll away; the leading edge stays brightest,
-    // which is what makes the waveform read as *moving* rather than wiggling.
-    context.globalAlpha = 0.38 + 0.6 * (index / last)
-    roundedBar(context, x, middle - height / 2, BAR.waveformBarWidth, height)
+    roundedBar(context, left + index * pitch, middle - height / 2, BAR.waveformBarWidth, height)
   }
-  context.globalAlpha = 1
 }
 
 /**
@@ -163,11 +150,10 @@ function paintWaveform(context: CanvasRenderingContext2D, levels: readonly numbe
  */
 function paintShimmer(context: CanvasRenderingContext2D, elapsedMs: number): void {
   const height = 2
-  // Narrower than the processing capsule (92) with room to spare. It used to
-  // be 96 against a 120 px pill; left at that, the narrower capsule would clip
-  // the hairline's faded ends and the sweep would appear to start and stop
-  // abruptly at a hard edge instead of condensing out of the glass.
-  const width = 68
+  // Narrower than the capsule (84) with room to spare, so the hairline's faded
+  // ends stay inside the glass and the sweep condenses out of it rather than
+  // starting and stopping at a hard clipped edge.
+  const width = 52
   const left = (CANVAS_WIDTH - width) / 2
   const top = (CANVAS_HEIGHT - height) / 2
 
@@ -180,7 +166,7 @@ function paintShimmer(context: CanvasRenderingContext2D, elapsedMs: number): voi
   roundedBar(context, left, top, width, height)
 
   const centre = left + shimmerPosition(elapsedMs) * width
-  const highlight = context.createLinearGradient(centre - 22, 0, centre + 22, 0)
+  const highlight = context.createLinearGradient(centre - 16, 0, centre + 16, 0)
   highlight.addColorStop(0, 'rgba(255,255,255,0)')
   highlight.addColorStop(0.5, 'rgba(255,255,255,0.95)')
   highlight.addColorStop(1, 'rgba(255,255,255,0)')
