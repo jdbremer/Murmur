@@ -32,15 +32,35 @@ export const BAR = {
   idleWidth: 44,
   idleHeight: 8,
   /**
-   * Height once there is something to show — a waveform, a shimmer, a ✓, a
-   * message. Still thinner than the old resting pill.
+   * Height once there is something to show — a waveform, a shimmer, a ✓.
+   *
+   * 14, not the 18 this shipped with. The resting sliver is 8 px of hairline
+   * ring, and the old active capsule was more than twice that and near-opaque:
+   * speaking swapped one object for a visibly different, heavier one. Growing
+   * by six pixels instead of ten keeps the two states recognisably the same
+   * piece of glass — which is the whole point of a pill that morphs rather
+   * than one that switches.
    */
-  activeHeight: 18,
-  /** Listening. */
-  listeningWidth: 148,
-  processingWidth: 120,
-  insertingWidth: 104,
-  insertedWidth: 88,
+  activeHeight: 14,
+  /**
+   * The error pill is the exception, and has to be: it carries 11 px type, and
+   * type needs vertical room a waveform does not. Sizing it to `activeHeight`
+   * would crop the very message the state exists to deliver.
+   */
+  messageHeight: 20,
+  /**
+   * Listening.
+   *
+   * 104, down from 148. At 148 the capsule was three and a half times its
+   * resting width — the expansion read as a different widget arriving rather
+   * than the sliver waking up, and it was the loudest thing on the screen
+   * while you were trying to think. The waveform below was narrowed to suit;
+   * this width follows from it, with even breathing room at both ends.
+   */
+  listeningWidth: 104,
+  processingWidth: 92,
+  insertingWidth: 84,
+  insertedWidth: 72,
   /** Error pills size to their message, within these bounds. */
   errorMinWidth: 180,
   errorMaxWidth: 300,
@@ -52,19 +72,46 @@ export const BAR = {
   insertedHoldMs: MOMENTARY_HOLD_MS.inserted,
   /** Error auto-dismiss (PLAN §2.1) — likewise shared. */
   errorHoldMs: MOMENTARY_HOLD_MS.error,
-  /** Waveform: 24–32 bars, ~2 px wide with a 2 px gap (PLAN §2.1). */
-  waveformBars: 28,
+  /**
+   * Waveform: 16 bars, 2 px wide, with a 3 px gap (PLAN §2.1).
+   *
+   * Was 28 bars at a 2 px gap — 112 px of dense hedge, which is what forced
+   * the old 148 px capsule and read as *busy* rather than alive. Sixteen bars
+   * with a wider gap is the same instrument played quietly: the airiness now
+   * echoes the five resting dots, so the sliver's dots opening into bars looks
+   * like one object waking up instead of two designs meeting.
+   */
+  waveformBars: 16,
   waveformBarWidth: 2,
-  waveformBarGap: 2,
+  waveformBarGap: 3,
   /** Bar heights inside the capsule. */
   waveformMinHeight: 2,
-  waveformMaxHeight: 10,
+  /** Leaves 3 px of dark either side inside a 14 px capsule. */
+  waveformMaxHeight: 8,
+  /**
+   * The ambient halo's box, relative to the capsule it sits behind: this much
+   * wider, and this tall. Here rather than in the renderer so the geometry is
+   * pinned by the same tests as everything else — and because a halo narrower
+   * than its pill would read as a shadow, not a light.
+   */
+  haloSpreadX: 56,
+  haloHeight: 32,
   /** One shimmer sweep across the pill while processing. */
   shimmerPeriodMs: 1100,
 } as const
 
-/** Near-black, per PLAN §2.1. */
-export const BAR_BACKGROUND = 'rgba(17,17,23,0.94)'
+/**
+ * Near-black, per PLAN §2.1 — but *translucent*, at 0.80 rather than the 0.94
+ * this shipped with.
+ *
+ * The resting sliver is deliberately see-through (0.60): its whole statement
+ * is a drawn ring with the wallpaper dim behind it. Going to 0.94 the instant
+ * someone spoke turned that ring into a solid black slab, and no amount of
+ * matching the *shape* hides a change of material. At 0.80 the capsule is
+ * still dark enough to carry a white waveform over a bright desktop, and still
+ * visibly the same glass it was a frame earlier.
+ */
+export const BAR_BACKGROUND = 'rgba(18,18,23,0.80)'
 /** Warm red for the error state. */
 export const BAR_ERROR_BACKGROUND = 'rgba(72,20,22,0.95)'
 export const BAR_BORDER = 'rgba(255,255,255,0.10)'
@@ -86,7 +133,7 @@ export const BAR_IDLE_BACKGROUND = 'rgba(18,18,23,0.60)'
  * *cooled* towards the listening glow's indigo rather than plain white, so the
  * rim and the halo read as one light source instead of two coincidences.
  */
-export const BAR_LISTENING_BORDER = 'rgba(186,196,255,0.30)'
+export const BAR_LISTENING_BORDER = 'rgba(190,199,255,0.34)'
 export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.35)'
 /**
  * The capsule's shadow stack — the half of the material that sells it.
@@ -113,9 +160,9 @@ export const CLUSTER_SHADOW =
  * so states bleed into each other instead of snapping.
  */
 export const BAR_GLOW = {
-  listening: '0 0 30px rgba(129,140,248,0.36)',
-  inserted: '0 0 26px rgba(110,231,168,0.30)',
-  error: '0 0 26px rgba(248,113,113,0.28)',
+  listening: '0 0 20px rgba(129,140,248,0.24)',
+  inserted: '0 0 20px rgba(110,231,168,0.26)',
+  error: '0 0 24px rgba(248,113,113,0.28)',
 } as const
 
 /** The start / stop ring's stroke and glow — the listening indigo. */
@@ -130,8 +177,8 @@ export const BAR_FLOURISH_GLOW = '0 0 14px rgba(129,140,248,0.32)'
  * once for the ✓, and smoulders steadily for an error.
  */
 export const BAR_HALO = {
-  listening: 'rgba(105,110,245,0.55)',
-  inserted: 'rgba(74,222,128,0.50)',
+  listening: 'rgba(105,110,245,0.40)',
+  inserted: 'rgba(74,222,128,0.44)',
   error: 'rgba(248,113,113,0.45)',
 } as const
 
@@ -291,7 +338,7 @@ function describeBase(event: DictationEvent): BarVisual {
       return {
         shape: 'message',
         width: errorWidth(DICTATION_ERROR_LABEL[event.code]),
-        height: BAR.activeHeight,
+        height: BAR.messageHeight,
         background: BAR_ERROR_BACKGROUND,
         border: BAR_ERROR_BORDER,
         label: DICTATION_ERROR_LABEL[event.code],

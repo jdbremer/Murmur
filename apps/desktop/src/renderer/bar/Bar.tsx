@@ -531,7 +531,12 @@ export function Bar(): React.JSX.Element | null {
           than swapped so neither reflows the other on the way in or out. */}
       <div className="relative flex items-end justify-center" style={{ height: cluster.height }}>
         {haloState ? (
-          <Halo state={haloState} width={visual.width} reducedMotion={reducedMotion} />
+          <Halo
+            state={haloState}
+            width={visual.width}
+            pillHeight={visual.height}
+            reducedMotion={reducedMotion}
+          />
         ) : null}
 
         <div
@@ -653,10 +658,13 @@ export function Bar(): React.JSX.Element | null {
 function Halo({
   state,
   width,
+  pillHeight,
   reducedMotion,
 }: {
   state: keyof typeof BAR_HALO
   width: number
+  /** The capsule this is lighting, so the wash can be centred on it. */
+  pillHeight: number
   reducedMotion: boolean
 }): React.JSX.Element {
   return (
@@ -666,8 +674,13 @@ function Halo({
       data-live={!reducedMotion && state === 'listening' ? 'true' : undefined}
       data-flash={!reducedMotion && state === 'inserted' ? 'true' : undefined}
       style={{
-        width: width + 72,
-        height: 40,
+        width: width + BAR.haloSpreadX,
+        height: BAR.haloHeight,
+        // Centred *on the capsule*, which sits at the bottom of this row and is
+        // shorter than the halo — so the light spills evenly above and below it
+        // rather than hanging off one edge. Horizontal centring is the CSS's
+        // job (`margin-inline: auto`); only this axis needs the pill's size.
+        bottom: (pillHeight - BAR.haloHeight) / 2,
         // Fully transparent well inside the box — see .bar-halo for why the
         // edge of this gradient is load-bearing and not just taste.
         background: `radial-gradient(closest-side, ${BAR_HALO[state]}, transparent 66%)`,

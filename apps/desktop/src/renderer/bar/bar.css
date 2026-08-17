@@ -305,6 +305,75 @@ body {
 }
 
 /*
+ * The pill's ambient halo — the desktop-light behind the capsule, and the
+ * twin of `.nub-halo` below.
+ *
+ * **`position: absolute` is the load-bearing line.** Without it this span is a
+ * static flex item in the pill's row, so it claims horizontal space of its own
+ * and shoves the capsule sideways for exactly as long as a halo state lasts —
+ * which is why the pill visibly jumped off-centre the moment you started
+ * speaking, with the wash left behind on the empty side. It looked like the
+ * *pill* had moved; nothing had moved but the flex line it sits on.
+ *
+ * Centred with `left: 50%` and a translate, and the translate is repeated in
+ * every keyframe below. That duplication is deliberate: an animation's
+ * `transform` replaces the base one outright, so a breathing halo centred by
+ * transform alone would jump half its width sideways the moment it started —
+ * the same trap the start/stop ring hit (see Bar.tsx).
+ *
+ * `left: 0; right: 0; margin-inline: auto` is the tidier-looking centring and
+ * is *wrong here*: this row shrink-wraps the capsule, so the halo is far wider
+ * than its containing block, and an over-constrained auto margin resolves to
+ * zero and left-aligns. Measured, it sat 58 px right of the pill.
+ *
+ * Painted behind the capsule by DOM order — both are positioned with
+ * `z-index: auto`, and this one comes first.
+ */
+.bar-halo {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 9999px;
+  filter: blur(14px);
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.bar-halo[data-live='true'] {
+  animation: bar-halo-breathe 2600ms ease-in-out infinite;
+}
+
+.bar-halo[data-flash='true'] {
+  /* Must land inside the 900 ms `inserted` hold — same budget as the nub's. */
+  animation: bar-halo-flash 700ms ease-out both;
+}
+
+@keyframes bar-halo-breathe {
+  0%,
+  100% {
+    opacity: 0.32;
+    /* The centring translate must be restated — see .bar-halo. */
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 0.56;
+    transform: translateX(-50%) scale(1.05);
+  }
+}
+
+@keyframes bar-halo-flash {
+  0% {
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/*
  * The corner halo — the pill's desktop-light, bent around a corner. Blurred
  * once, statically; only opacity and scale ever animate.
  */

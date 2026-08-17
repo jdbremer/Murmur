@@ -55,15 +55,12 @@ describe('describeBar', () => {
     // The sliver is an indicator; every other state is showing the user
     // something and gets the taller capsule.
     expect(describeBar({ state: 'idle' }).height).toBe(BAR.idleHeight)
-    for (const event of [
-      listening,
-      processing,
-      { state: 'inserting' } as const,
-      inserted,
-      failed,
-    ]) {
+    for (const event of [listening, processing, { state: 'inserting' } as const, inserted]) {
       expect(describeBar(event).height).toBe(BAR.activeHeight)
     }
+    // The error pill is the one exception: it carries type, and 11 px type
+    // does not fit in a capsule sized for a waveform.
+    expect(describeBar(failed).height).toBe(BAR.messageHeight)
   })
 
   it('expands with a waveform while listening', () => {
@@ -242,11 +239,14 @@ describe('isBarVisible', () => {
 })
 
 describe('the spec numbers themselves', () => {
-  it('keeps the waveform inside PLAN §2.1 24–32 bars at 2 px + 2 px', () => {
-    expect(BAR.waveformBars).toBeGreaterThanOrEqual(24)
-    expect(BAR.waveformBars).toBeLessThanOrEqual(32)
+  it('keeps the waveform sparse — PLAN §2.1, 12–20 bars at 2 px + 3 px', () => {
+    // The range is the design intent, not an arbitrary fence: below ~12 bars a
+    // level meter stops reading as a waveform, and above ~20 it becomes the
+    // dense hedge this was redesigned away from.
+    expect(BAR.waveformBars).toBeGreaterThanOrEqual(12)
+    expect(BAR.waveformBars).toBeLessThanOrEqual(20)
     expect(BAR.waveformBarWidth).toBe(2)
-    expect(BAR.waveformBarGap).toBe(2)
+    expect(BAR.waveformBarGap).toBe(3)
   })
 
   it('morphs in ~150 ms and dismisses errors in ~2.5 s', () => {
@@ -254,13 +254,43 @@ describe('the spec numbers themselves', () => {
     expect(BAR.errorHoldMs).toBe(2500)
   })
 
-  it('fits 28 bars inside the listening capsule', () => {
+  it('fits the waveform inside the listening capsule with room at both ends', () => {
     const waveform = BAR.waveformBars * (BAR.waveformBarWidth + BAR.waveformBarGap)
-    expect(waveform).toBeLessThan(BAR.listeningWidth)
+    // Not merely "fits": a capsule with bars touching its rounded ends looks
+    // like a progress bar. Insist on real padding either side.
+    expect(BAR.listeningWidth - waveform).toBeGreaterThanOrEqual(16)
   })
 
   it('keeps the waveform inside the thinner capsule', () => {
     expect(BAR.waveformMaxHeight).toBeLessThan(BAR.activeHeight)
+  })
+
+  it('stays close to the resting sliver when it grows', () => {
+    // The redesign's whole point: speaking wakes the sliver, it does not
+    // replace it. A capsule more than ~2.5x its resting width, or more than
+    // double its height, stops reading as the same object.
+    expect(BAR.listeningWidth).toBeLessThanOrEqual(BAR.idleWidth * 2.5)
+    expect(BAR.activeHeight).toBeLessThanOrEqual(BAR.idleHeight * 2)
+  })
+
+  it('keeps the active capsule the same glass as the resting one', () => {
+    // Both translucent: an opaque active fill was what made speaking look like
+    // a different widget arriving. Parsed rather than string-compared so the
+    // colours stay free to move.
+    const alpha = (colour: string): number => Number(/,\s*([\d.]+)\)$/.exec(colour)?.[1] ?? 1)
+    expect(alpha(BAR_BACKGROUND)).toBeLessThan(0.9)
+    expect(alpha(BAR_BACKGROUND)).toBeGreaterThan(alpha(BAR_IDLE_BACKGROUND))
+  })
+
+  it('gives the error pill room for its type', () => {
+    // It is the one state carrying text; cropping the message would defeat it.
+    expect(BAR.messageHeight).toBeGreaterThan(BAR.activeHeight)
+  })
+
+  it('spreads the halo wider than the capsule it lights', () => {
+    // Narrower than its pill and it reads as a shadow rather than a light.
+    expect(BAR.haloSpreadX).toBeGreaterThan(0)
+    expect(BAR.haloHeight).toBeGreaterThan(BAR.activeHeight)
   })
 
   it('gives the cluster buttons a real click target', () => {

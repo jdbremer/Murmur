@@ -163,7 +163,11 @@ function paintWaveform(context: CanvasRenderingContext2D, levels: readonly numbe
  */
 function paintShimmer(context: CanvasRenderingContext2D, elapsedMs: number): void {
   const height = 2
-  const width = 96
+  // Narrower than the processing capsule (92) with room to spare. It used to
+  // be 96 against a 120 px pill; left at that, the narrower capsule would clip
+  // the hairline's faded ends and the sweep would appear to start and stop
+  // abruptly at a hard edge instead of condensing out of the glass.
+  const width = 68
   const left = (CANVAS_WIDTH - width) / 2
   const top = (CANVAS_HEIGHT - height) / 2
 
@@ -176,7 +180,7 @@ function paintShimmer(context: CanvasRenderingContext2D, elapsedMs: number): voi
   roundedBar(context, left, top, width, height)
 
   const centre = left + shimmerPosition(elapsedMs) * width
-  const highlight = context.createLinearGradient(centre - 30, 0, centre + 30, 0)
+  const highlight = context.createLinearGradient(centre - 22, 0, centre + 22, 0)
   highlight.addColorStop(0, 'rgba(255,255,255,0)')
   highlight.addColorStop(0.5, 'rgba(255,255,255,0.95)')
   highlight.addColorStop(1, 'rgba(255,255,255,0)')

@@ -44,7 +44,8 @@ The signature element: a small dark capsule floating at the bottom-center of the
 **Geometry & look**
 
 - Anchored bottom-center of the display containing the focused window, ~10 px above the screen edge; floats above the Dock and full-screen apps (`screen-saver` window level, all Spaces, `visibleOnFullScreen`).
-- Idle: a ~44 × 8 px sliver with a clearly visible outline (`rgba(255,255,255,0.32)`) over a near-black fill — at rest the ring *is* the pill, as in the reference product. It is an indicator, not a control; active states grow to ~18 px, which is enough for the waveform. No backdrop-filter anywhere on this window: in a transparent Electron window it can only sample the window's own (empty) content, so it costs GPU per frame and shows nothing — the glass look comes from gradient sheen layers and a five-layer shadow stack instead.
+- Idle: a ~44 × 8 px sliver with a clearly visible outline (`rgba(255,255,255,0.32)`) over a translucent near-black fill — at rest the ring *is* the pill, as in the reference product. It is an indicator, not a control; active states grow to ~14 px, which is enough for the waveform. No backdrop-filter anywhere on this window: in a transparent Electron window it can only sample the window's own (empty) content, so it costs GPU per frame and shows nothing — the glass look comes from gradient sheen layers and a five-layer shadow stack instead.
+- **Waking, not swapping.** The active capsule is the resting sliver a little larger, never a different object: it stays translucent (0.80, against the sliver's 0.60), keeps a bright hairline rim, and grows by six pixels rather than ten. The first cut of this expanded to 148 × 18 with a near-opaque fill and 28 dense bars, and the change of *material* is what made it read as a second widget arriving on top of the first — an easy thing to miss when each state is judged on its own instead of as a frame of one morph.
 - Visibility modes matching Flow: **Show while dictating** (default) · Always show · Hidden (hotkey still works).
 - Every state change animates width/opacity with a ~150 ms ease-out spring — the pill morphs, never jumps or reflows.
 
@@ -53,7 +54,7 @@ The signature element: a small dark capsule floating at the bottom-center of the
 | State | Visual | Trigger |
 |---|---|---|
 | Idle | small capsule, dim dots | per visibility mode |
-| Listening | expands to ~160 px; 24–32 thin vertical bars (~2 px wide, 2 px gap) dancing with live mic amplitude at 60 fps, white-on-dark | hotkey down |
+| Listening | expands to ~104 px; 16 thin vertical bars (~2 px wide, 3 px gap) dancing with live mic amplitude at 60 fps, white-on-dark. The airy spacing echoes the five resting dots, so the sliver appears to open rather than be replaced | hotkey down |
 | Hands-free | same + small persistent indicator dot for the latched mode | double-tap hotkey (exit: tap again or Esc) |
 | Processing | bars collapse into a left→right shimmer sweep | hotkey up |
 | Inserted | quick ✓ pulse, then contracts to idle or hides | text injected |
