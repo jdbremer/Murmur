@@ -199,6 +199,41 @@ export class WindowManager {
   }
 
   /**
+   * Move the pill to the display the user is actually working on.
+   *
+   * `showBar()` re-anchors only while the window is *hidden*, which was fine
+   * when the Bar appeared per dictation: every appearance re-read the cursor.
+   * Once `barVisibility` began defaulting to `always` the window stopped ever
+   * being hidden, so that branch stopped running and the pill sat on whichever
+   * display it was first placed on for the life of the process — plug in a
+   * second monitor, work there all afternoon, and the indicator stays behind.
+   *
+   * A no-op when the pill is already on the right display, which is every call
+   * on a single-monitor machine: two cheap `screen` reads and an early return,
+   * nothing touched.
+   *
+   * The *when* is the delicate half and lives with the caller — this may not
+   * run mid-utterance. A pill that changed screens while someone was speaking
+   * would take the waveform away from where they were looking, and the cursor
+   * is a poor guide exactly then (it sits wherever it was left, not where the
+   * voice is going). Main calls this as a dictation begins and while nothing
+   * is happening; never in between.
+   *
+   * @returns whether the window actually moved.
+   */
+  followActiveDisplay(): boolean {
+    const window = this.#bar
+    if (!window || window.isDestroyed() || !window.isVisible()) return false
+
+    const cursor = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    const showing = screen.getDisplayMatching(window.getBounds())
+    if (cursor.id === showing.id) return false
+
+    anchorBar(window, repositionBar(window, this.#barLayout()))
+    return true
+  }
+
+  /**
    * Re-anchor the Bar window now.
    *
    * Called on display changes and whenever the style or corner setting moves —

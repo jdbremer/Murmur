@@ -497,6 +497,25 @@ async function bootstrap(): Promise<void> {
   // No-op unless the user has turned meeting detection on.
   watcher.sync()
 
+  /**
+   * Follow the user between displays while nothing is happening.
+   *
+   * The `listening` hook above covers dictation; this covers the rest of the
+   * day, which is most of it now that the pill is visible by default — someone
+   * who moves to their second monitor should not have to start speaking to
+   * find out where the indicator went.
+   *
+   * Idle only, and deliberately unhurried. `followActiveDisplay` returns
+   * immediately when the pill is already on the cursor's screen, so on a
+   * single-monitor machine this costs two `screen` reads a second and never
+   * touches a window.
+   */
+  const displayFollow = setInterval(() => {
+    if (machine.getState().state !== 'idle') return
+    windows.followActiveDisplay()
+  }, 1_000)
+  displayFollow.unref?.()
+
   // Look for a new release shortly after boot, then periodically. On by
   // default and switchable in Settings — see `updates.ts` and Help's Network
   // activity row, which names this as the one request nobody presses a button
@@ -587,6 +606,12 @@ async function bootstrap(): Promise<void> {
     // sounds the start/stop cue off these transitions (PLAN §2.1), and it is
     // the only renderer guaranteed to still be alive when the Bar is hidden.
     ipc.broadcast(windows.allWebContents(), 'dictation.state', event)
+    // A dictation beginning is the one moment the pill *must* be on the right
+    // screen, and the last moment it is safe to move it: from here until the
+    // text lands, the user is watching it. Before `applyBarVisibility`, so a
+    // pill about to be shown is positioned before it appears rather than
+    // appearing and then jumping.
+    if (event.state === 'listening') windows.followActiveDisplay()
     applyBarVisibility(settings.get(), event)
   })
 
@@ -820,6 +845,7 @@ async function bootstrap(): Promise<void> {
   async function shutdown(): Promise<void> {
     log.info('shutting down')
     tray.destroy()
+    clearInterval(displayFollow)
     stopAutoUpdates()
     escape.dispose()
     hotkeys.stop()
