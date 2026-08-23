@@ -511,7 +511,14 @@ async function bootstrap(): Promise<void> {
    * touches a window.
    */
   const displayFollow = setInterval(() => {
-    if (machine.getState().state !== 'idle') return
+    // `machine.state`, NOT `machine.getState().state`. The first is the resting
+    // state; the second is the last *event*, which stays `inserted` (or
+    // `error`) for the rest of the session, because those are momentary and no
+    // trailing idle event ever follows them. Guarding on the event meant this
+    // worked until the first successful dictation and never again — and it
+    // survived review because the obvious test moves the cursor *before*
+    // dictating, which is precisely the window in which the bug is invisible.
+    if (machine.state !== 'idle') return
     windows.followActiveDisplay()
   }, 1_000)
   displayFollow.unref?.()
@@ -818,8 +825,21 @@ async function bootstrap(): Promise<void> {
   // -- lifecycle -----------------------------------------------------------
 
   app.on('activate', () => {
-    // macOS: clicking the Dock icon reopens the Hub.
-    if (!quitting) windows.showHub()
+    if (quitting) return
+    /*
+     * macOS: clicking the Dock icon reopens the Hub — but *only* when there is
+     * nothing already open to come back to.
+     *
+     * This used to call `showHub()` unconditionally, and `showHub()` ends in
+     * `show()` + `focus()`. Focusing a window is how you ask macOS to take the
+     * user to whichever Space and display that window lives on, so any
+     * activation at all — not just a deliberate Dock click — could yank
+     * someone off the screen they had just moved to and dump them in front of
+     * the Hub. Activation happens for plenty of reasons that are not "please
+     * show me your window".
+     */
+    if (windows.hubIsOpen()) return
+    windows.showHub()
   })
 
   app.on('window-all-closed', () => {

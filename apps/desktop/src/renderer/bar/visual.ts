@@ -149,15 +149,19 @@ export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.35)'
 /**
  * The capsule's shadow stack — the half of the material that sells it.
  *
- * Five layers, each with one job: a 1 px contact shadow that seats the capsule
- * on the screen, a mid-distance shadow that gives it body, a wide soft ambient
- * that lifts it off whatever is behind it, an inset top light (the glass
- * highlight), and a half-pixel inner ring that reads as the polished edge of
- * the glass. Collapsing these into two layers is what made the old pill look
- * like a screenshot of a pill.
+ * Four layers now, not five. The one removed was `0 18px 44px rgba(0,0,0,0.42)`
+ * — a 44 px ambient offset 18 px *downward*, which on a transparent window over
+ * the desktop is not "depth" but a dark smear hanging below the pill. It was
+ * written for a 22 px capsule and survived the pill shrinking to 12, by which
+ * point the shadow was nearly four times the height of the thing casting it.
+ *
+ * What is left does the actual work: a 1 px contact shadow that seats the
+ * capsule on the screen, a short mid shadow that gives it body, an inset top
+ * light (the glass highlight), and a half-pixel inner ring that reads as the
+ * polished edge of the glass.
  */
 export const BAR_SHADOW =
-  '0 1px 2px rgba(0,0,0,0.34), 0 6px 16px rgba(0,0,0,0.35), 0 18px 44px rgba(0,0,0,0.42), ' +
+  '0 1px 2px rgba(0,0,0,0.32), 0 4px 10px rgba(0,0,0,0.26), ' +
   'inset 0 1px 0 rgba(255,255,255,0.09), inset 0 0 0 0.5px rgba(255,255,255,0.05)'
 
 /** The cluster buttons' lighter stack — a 30 px chip does not cast a 44 px shadow. */

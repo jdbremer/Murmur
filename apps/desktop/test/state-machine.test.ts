@@ -127,3 +127,47 @@ describe('DictationStateMachine', () => {
     expect(machine.getState()).not.toBe(snapshot)
   })
 })
+
+describe('`state` versus `getState()` — the trap that shipped a bug', () => {
+  /**
+   * These two answer different questions and are one character apart at the
+   * call site. `state` is where the machine is resting; `getState()` is the
+   * last event it emitted, including the momentary `inserted` / `error` ones
+   * that no trailing idle event ever follows.
+   *
+   * Guarding a background task on `getState().state === 'idle'` therefore works
+   * until the first successful dictation and never again — which is exactly
+   * how the Bar stopped following the user between displays in 0.4.10.
+   */
+  it('rests at idle after an insertion while the last event stays `inserted`', () => {
+    const machine = new DictationStateMachine(silent)
+    machine.startListening()
+    machine.startProcessing('transcribing')
+    machine.startInserting()
+    machine.finishInserted(12, 'paste')
+
+    expect(machine.state).toBe('idle')
+    // The momentary event is still what a late subscriber is served.
+    expect(machine.getState().state).toBe('inserted')
+  })
+
+  it('rests at idle after an error while the last event stays `error`', () => {
+    const machine = new DictationStateMachine(silent)
+    machine.startListening()
+    machine.fail('no-speech', "Didn't catch that")
+
+    expect(machine.state).toBe('idle')
+    expect(machine.getState().state).toBe('error')
+  })
+
+  it('agrees with the event for the states that are not momentary', () => {
+    const machine = new DictationStateMachine(silent)
+    machine.startListening()
+    expect(machine.state).toBe('listening')
+    expect(machine.getState().state).toBe('listening')
+
+    machine.startProcessing('transcribing')
+    expect(machine.state).toBe('processing')
+    expect(machine.getState().state).toBe('processing')
+  })
+})

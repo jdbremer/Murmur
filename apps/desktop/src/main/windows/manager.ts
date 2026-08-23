@@ -70,6 +70,18 @@ export class WindowManager {
     return this.#hub
   }
 
+  /**
+   * Whether the Hub is already on screen and ready to be switched to.
+   *
+   * Exists so `app.on('activate')` can tell "the user wants their window back"
+   * from "the app was activated for some other reason". Minimised counts as
+   * *not* open: clicking the Dock icon should un-minimise it.
+   */
+  hubIsOpen(): boolean {
+    const window = this.#hub
+    return window !== null && !window.isDestroyed() && window.isVisible() && !window.isMinimized()
+  }
+
   /** Focus the Hub, creating it if the user closed it earlier. */
   showHub(): void {
     const window = this.hub()
