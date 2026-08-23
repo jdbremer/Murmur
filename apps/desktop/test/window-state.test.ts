@@ -144,8 +144,20 @@ describe('reading and writing', () => {
 
   it('does not throw when the path cannot be written', () => {
     // Losing a remembered size must never take the app down with it.
-    expect(() =>
-      writeWindowState('/proc/definitely/not/writable/state.json', saved()),
-    ).not.toThrow()
+    //
+    // The unwritable path is built rather than hard-coded, and deliberately
+    // not `/proc/...`. That version passed on macOS and Windows — neither has
+    // a `/proc` — and on Linux it wedged the whole test run: `mkdirSync`
+    // against procfs blocks in a synchronous syscall, where a JS timer cannot
+    // run, so vitest's own `testTimeout` could never fire and CI burned its
+    // full 25 minutes before the runner killed it.
+    //
+    // A regular file standing in for a parent directory fails with ENOTDIR
+    // instantly, on every platform, and tests exactly the same thing.
+    const blocker = join(directory, 'not-a-directory')
+    writeFileSync(blocker, 'this is a file, not a folder', 'utf8')
+
+    expect(() => writeWindowState(join(blocker, 'state.json'), saved())).not.toThrow()
+    expect(readWindowState(join(blocker, 'state.json'))).toBeNull()
   })
 })
