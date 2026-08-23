@@ -60,6 +60,17 @@ describe('resources/catalog/models.json', () => {
     expect(catalog.notes ?? '').toContain('export-parakeet.md')
   })
 
+  it('never cites the design document in text a user reads', () => {
+    // `notes` is rendered in the Models section. "PLAN §7.2" is a pointer into
+    // a file that ships with the source and not with the app, so to a user it
+    // is a reference to nothing. Naming a script in this repository is fine and
+    // deliberate — that is checkable provenance, not an internal cross-reference.
+    for (const model of catalog.models) {
+      expect(model.notes ?? '', `${model.id} cites PLAN`).not.toMatch(/PLAN\s*§/)
+    }
+    expect(catalog.notes ?? '').not.toMatch(/PLAN\s*§/)
+  })
+
   it('has exactly one recommended default per RAM tier and kind', () => {
     for (const kind of ['stt', 'polish'] as const) {
       const recommended = catalog.models.filter(

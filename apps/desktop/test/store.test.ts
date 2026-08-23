@@ -254,6 +254,78 @@ describe('DictationsRepository', () => {
     expect(repository.query({ search: 'wednesday', limit: 50, offset: 0 }).total).toBe(0)
   })
 
+  describe('restore — the undo behind the delete toast', () => {
+    it('puts the row back exactly as it was', () => {
+      const record = repository.insert(draft())
+      repository.delete(record.id)
+      expect(repository.get(record.id)).toBeNull()
+
+      expect(repository.restore(record)).toBe(true)
+      expect(repository.get(record.id)).toEqual(record)
+    })
+
+    it('leaves the lifetime counters untouched', () => {
+      // Delete never moved them — the dictation still happened, only the text
+      // went away — so undoing a delete must not move them either. Routing
+      // undo through `insert` would count the words a second time.
+      const record = repository.insert(draft())
+      const before = repository.stats()
+
+      repository.delete(record.id)
+      repository.restore(record)
+
+      expect(repository.stats()).toEqual(before)
+    })
+
+    it('re-indexes for search', () => {
+      const record = repository.insert(draft({ rawText: 'sphinx of black quartz' }))
+      repository.delete(record.id)
+      expect(repository.query({ search: 'sphinx', limit: 10, offset: 0 }).total).toBe(0)
+
+      repository.restore(record)
+      expect(repository.query({ search: 'sphinx', limit: 10, offset: 0 }).total).toBe(1)
+    })
+
+    it('is a no-op when the row is already there, rather than an error', () => {
+      // A double-tapped Undo should not surface a constraint failure for an
+      // operation that already succeeded.
+      const record = repository.insert(draft())
+      expect(repository.restore(record)).toBe(false)
+      expect(repository.count()).toBe(1)
+    })
+  })
+
+  describe('setPolishedText — re-polishing from History', () => {
+    it('replaces only the polished column', () => {
+      const record = repository.insert(draft())
+      const updated = repository.setPolishedText(record.id, 'A tidier sentence.')
+
+      expect(updated?.polishedText).toBe('A tidier sentence.')
+      // The raw transcript is what was actually said and is never rewritten.
+      expect(updated?.rawText).toBe(record.rawText)
+      expect(updated?.ts).toBe(record.ts)
+    })
+
+    it('leaves the lifetime counters alone', () => {
+      // Polishing the same sentence again did not make the user say it twice.
+      const record = repository.insert(draft())
+      const before = repository.stats()
+      repository.setPolishedText(record.id, 'Something much much longer than before.')
+      expect(repository.stats()).toEqual(before)
+    })
+
+    it('fills in a row that was inserted raw', () => {
+      const record = repository.insert(draft({ polishedText: null }))
+      expect(repository.setPolishedText(record.id, 'Now polished.')?.polishedText).toBe(
+        'Now polished.',
+      )
+    })
+
+    it('returns null for a row that is no longer there', () => {
+      expect(repository.setPolishedText('gone', 'x')).toBeNull()
+    })
+  })
+
   it('prunes by retention window', () => {
     const now = Date.parse('2026-08-01T00:00:00Z')
     repository.insert(draft({ ts: now - 100 * 86_400_000 }))

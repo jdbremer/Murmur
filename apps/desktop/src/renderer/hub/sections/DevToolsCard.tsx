@@ -9,6 +9,7 @@ import type {
 } from '@murmur/shared'
 
 import { Badge, Button, Card, ProgressBar, Row } from '../../components/Section'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Unpackaged-only iteration controls (WINDOWS-HANDOFF Phase A).
@@ -65,7 +66,7 @@ export function DevToolsCard(): React.JSX.Element {
       await action()
       setNote(label)
     } catch (cause: unknown) {
-      setNote(cause instanceof Error ? cause.message : String(cause))
+      setNote(errorMessage(cause))
     } finally {
       setBusy(false)
     }

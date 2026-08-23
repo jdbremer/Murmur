@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { surfaceClasses, type SurfaceOptions } from '../design/elevation'
+
 export function Section({
   title,
   description,
@@ -16,7 +18,10 @@ export function Section({
     <section>
       <header className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[24px] font-semibold tracking-tight text-ink">{title}</h1>
+          {/* One per screen, and the label the content region is named by. */}
+          <h1 id="section-title" className="text-[24px] font-semibold tracking-tight text-ink">
+            {title}
+          </h1>
           <p className="mt-1.5 text-[13px] leading-relaxed text-ink-muted">{description}</p>
         </div>
         {actions ? <div className="shrink-0 pt-1">{actions}</div> : null}
@@ -26,15 +31,24 @@ export function Section({
   )
 }
 
+/**
+ * A raised surface. Everything about how it looks comes from the elevation
+ * scale — see `design/elevation.ts` for why the two themes get there by
+ * different routes.
+ */
 export function Card({
   children,
   className = '',
-}: {
-  children: ReactNode
-  className?: string
-}): React.JSX.Element {
+  elevation,
+  padding,
+  tone,
+  interactive,
+}: { children: ReactNode; className?: string } & Pick<
+  SurfaceOptions,
+  'elevation' | 'padding' | 'tone' | 'interactive'
+>): React.JSX.Element {
   return (
-    <div className={`rounded-card border border-line bg-surface p-5 ${className}`.trim()}>
+    <div className={surfaceClasses({ elevation, padding, tone, interactive, className })}>
       {children}
     </div>
   )
@@ -46,26 +60,83 @@ export function Card({
  * Distinct from an error: an empty dictionary and a dictionary that failed to
  * load should never look the same, because only one of them is the user's fault
  * to fix.
+ *
+ * An empty state is also the most-seen screen in the app for exactly one user
+ * — the one who just installed it — so it is worth more than a grey sentence
+ * in a dashed box. Three parts, and the third is the one that earns its place:
+ * a glyph so the space reads as designed rather than broken, a sentence saying
+ * what would fill it, and a button that goes and does that. An empty state with
+ * no way out of it is a dead end dressed as an explanation.
  */
-export function EmptyState({ children }: { children: ReactNode }): React.JSX.Element {
+export function EmptyState({
+  icon,
+  title,
+  children,
+  action,
+}: {
+  icon?: EmptyIconName | undefined
+  title?: string | undefined
+  children: ReactNode
+  action?: ReactNode | undefined
+}): React.JSX.Element {
   return (
-    <Card className="border-dashed">
-      <p className="mx-auto max-w-md py-4 text-center text-[13px] leading-relaxed text-ink-muted">
-        {children}
-      </p>
-    </Card>
+    <div className={surfaceClasses({ tone: 'dashed', elevation: 0, padding: 'lg' })}>
+      <div className="mx-auto flex max-w-sm flex-col items-center py-6 text-center">
+        {icon ? <EmptyIcon name={icon} /> : null}
+        {title ? <p className="mb-1.5 text-[14px] font-medium text-ink">{title}</p> : null}
+        <p className="text-[13px] leading-relaxed text-ink-muted">{children}</p>
+        {action ? <div className="mt-4 flex flex-wrap justify-center gap-2">{action}</div> : null}
+      </div>
+    </div>
   )
 }
 
-/** Loading, honestly: a quiet spinner instead of a fake empty state. */
-export function LoadingState({ label = 'Loading…' }: { label?: string }): React.JSX.Element {
+export type EmptyIconName =
+  | 'history'
+  | 'search'
+  | 'dictionary'
+  | 'snippets'
+  | 'notes'
+  | 'models'
+  | 'meetings'
+  | 'transcribe'
+  | 'apps'
+
+/**
+ * Empty-state glyphs, drawn from the same 24×24 stroked vocabulary as the
+ * sidebar so the illustration in a section matches the icon that got you there.
+ */
+const EMPTY_ICONS: Record<EmptyIconName, string> = {
+  history: 'M12 21a9 9 0 1 0-8.9-10.4M12 7v5l3.5 2M3 4v4h4',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM16 16l5 5',
+  dictionary: 'M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2zm2 0v12h11',
+  snippets: 'M13 3 5 14h6l-1 7 8-11h-6z',
+  notes: 'M6 4h8l4 4v12H6zM14 4v4h4M9 13h6M9 16.5h4',
+  models: 'M12 3 4 7.5v9L12 21l8-4.5v-9zM4 7.5 12 12l8-4.5M12 12v9',
+  meetings:
+    'M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 10v4M12 8v8M16 11v2',
+  transcribe: 'M6 4h8l4 4v12H6zM14 4v4h4M9 14v2.5M12 12.5v5.5M15 14v2.5',
+  apps: 'M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v6H4zM14 15h6v6h-6z',
+}
+
+function EmptyIcon({ name }: { name: EmptyIconName }): React.JSX.Element {
   return (
-    <Card className="border-dashed">
-      <div className="flex items-center justify-center gap-2.5 py-4" role="status">
-        <Spinner />
-        <p className="text-[13px] text-ink-muted">{label}</p>
-      </div>
-    </Card>
+    <span
+      aria-hidden="true"
+      className="mb-3.5 grid size-11 place-items-center rounded-full bg-accent-soft text-accent"
+    >
+      <svg
+        viewBox="0 0 24 24"
+        className="size-[21px]"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d={EMPTY_ICONS[name]} />
+      </svg>
+    </span>
   )
 }
 
@@ -117,7 +188,7 @@ function ToneIcon({ tone }: { tone: 'danger' | 'warning' | 'accent' }): React.JS
 
 export function ErrorCard({ children }: { children: ReactNode }): React.JSX.Element {
   return (
-    <Card className="mb-5 border-danger/40">
+    <Card tone="danger" className="mb-5">
       <div className="flex items-start gap-2.5" role="alert">
         <ToneIcon tone="danger" />
         <p className="text-[13px] leading-relaxed text-danger">{children}</p>
@@ -225,15 +296,19 @@ export function TextInput({
   placeholder,
   ariaLabel,
   onKeyDown,
+  inputRef,
 }: {
   value: string
   onChange: (value: string) => void
   placeholder?: string
   ariaLabel: string
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void
+  /** So a section can put the cursor here — see `useFocusShortcut`. */
+  inputRef?: React.RefObject<HTMLInputElement | null> | undefined
 }): React.JSX.Element {
   return (
     <input
+      ref={inputRef}
       type="text"
       value={value}
       aria-label={ariaLabel}
@@ -326,16 +401,10 @@ export function Banner({
   children?: ReactNode
   actions?: ReactNode | undefined
 }): React.JSX.Element {
-  const border =
-    tone === 'danger'
-      ? 'border-danger/40'
-      : tone === 'accent'
-        ? 'border-accent/40'
-        : 'border-warning/40'
   const text =
     tone === 'danger' ? 'text-danger' : tone === 'accent' ? 'text-accent' : 'text-warning'
   return (
-    <div className={`rounded-card border ${border} bg-surface p-4`} role="status">
+    <div className={surfaceClasses({ tone, padding: 'sm' })} role="status">
       <div className="flex items-start gap-2.5">
         <ToneIcon tone={tone} />
         <div className="min-w-0 flex-1">

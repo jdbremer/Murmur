@@ -102,9 +102,18 @@ const api: MurmurApi = {
     chooseFile: () => ipc.invoke('models.chooseFile'),
   },
 
+  data: {
+    exportHistory: (request) => ipc.invoke('data.exportHistory', request),
+    exportNotes: () => ipc.invoke('data.exportNotes'),
+    backup: (request) => ipc.invoke('data.backup', request),
+    restorePreview: () => ipc.invoke('data.restorePreview'),
+    restore: (request) => ipc.invoke('data.restore', request),
+  },
   history: {
     query: (request) => ipc.invoke('history.query', request),
     remove: (request) => ipc.invoke('history.delete', request),
+    restore: (request) => ipc.invoke('history.restore', request),
+    repolish: (request) => ipc.invoke('history.repolish', request),
     clear: () => ipc.invoke('history.clear'),
     stats: () => ipc.invoke('history.stats'),
     subscribe: (listener) => ipc.on('history.changed', listener),

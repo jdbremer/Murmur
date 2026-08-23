@@ -8,11 +8,13 @@ import {
   Card,
   EmptyState,
   ErrorCard,
-  LoadingState,
   Section,
   TextInput,
   Toggle,
 } from '../../components/Section'
+import { SkeletonList } from '../../components/Skeleton'
+import { useToast } from '../components/ToastHost'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Snippets (PLAN §2.2.2) — say a short phrase, insert a stored block of text.
@@ -28,6 +30,7 @@ export function SnippetsSection(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [trigger, setTrigger] = useState('')
   const [expansion, setExpansion] = useState('')
+  const toast = useToast()
 
   const active = useRef(true)
 
@@ -40,7 +43,7 @@ export function SnippetsSection(): React.JSX.Element {
       })
       .catch((cause: unknown) => {
         if (!active.current) return
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(errorMessage(cause))
         setSnippets([])
       })
     return () => {
@@ -57,7 +60,7 @@ export function SnippetsSection(): React.JSX.Element {
         setError(null)
       }
     } catch (cause) {
-      if (active.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (active.current) setError(errorMessage(cause))
     }
   }
 
@@ -126,11 +129,24 @@ export function SnippetsSection(): React.JSX.Element {
       </Card>
 
       {snippets === null ? (
-        <LoadingState label="Loading your snippets…" />
+        <SkeletonList label="Loading your snippets…" rows={4} seed={3} />
       ) : snippets.length === 0 ? (
-        <EmptyState>
-          No snippets yet. They expand after polishing, so whatever you store here comes out exactly
-          as written — links and addresses are never reworded.
+        <EmptyState
+          icon="snippets"
+          title="No snippets yet"
+          action={
+            <Button
+              onClick={() => {
+                setTrigger('my email')
+                setExpansion('')
+              }}
+            >
+              Try an example
+            </Button>
+          }
+        >
+          Say a short phrase, get a stored block of text. Snippets expand after polishing, so what
+          you store here comes out exactly as written — links and addresses are never reworded.
         </EmptyState>
       ) : (
         <ul className="space-y-2">
@@ -161,7 +177,21 @@ export function SnippetsSection(): React.JSX.Element {
                     <Button
                       variant="danger"
                       onClick={() =>
-                        void run(() => window.murmur.snippets.remove({ id: snippet.id }))
+                        void run(() => window.murmur.snippets.remove({ id: snippet.id })).then(() =>
+                          toast.show({
+                            message: `Removed “${snippet.trigger}”`,
+                            actionLabel: 'Undo',
+                            onAction: () => {
+                              void run(() =>
+                                window.murmur.snippets.create({
+                                  trigger: snippet.trigger,
+                                  expansion: snippet.expansion,
+                                  enabled: snippet.enabled,
+                                }),
+                              )
+                            },
+                          }),
+                        )
                       }
                     >
                       Delete

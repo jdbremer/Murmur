@@ -25,10 +25,21 @@
      reference product's cream. */
   --color-canvas: #f7f4ef;
   --color-surface: #fffefb;
+  /* Two more rungs on the surface ladder. In light they barely move — light
+     elevation is carried by shadow (see `--elevation-*` below), and tinting a
+     near-white card any lighter has nowhere to go. */
+  --color-surface-raised: #fffefb;
+  --color-surface-sunken: #f1ece3;
   --color-line: #e8e2d8;
   --color-ink: #1c1a17;
-  --color-ink-muted: #6d675e;
-  --color-ink-faint: #9b948a;
+  /* Both secondary tones are set by contrast, not by eye. `ink-faint` was
+     #9b948a, which is 2.7:1 on the canvas — well under the 4.5:1 that text
+     this small needs, and it carries real text: timestamps, units, section
+     labels. Darkening it alone would have collapsed it into `ink-muted`, so
+     the whole ramp moved down together and stayed three visibly distinct
+     steps: 17.2 / 7.2 / 4.9 against the surface. */
+  --color-ink-muted: #59544d;
+  --color-ink-faint: #756f68;
   --color-accent: #4338ca;
   --color-accent-soft: #eef0fd;
   --color-positive: #157f4a;
@@ -38,21 +49,59 @@
   --radius-card: 0.875rem;
 }
 
+/*
+ * The elevation scale.
+ *
+ * Three rungs, and every raised thing in the app is on exactly one of them:
+ *
+ *   1  resting    cards and panes lying on the canvas
+ *   2  lifted     something the pointer is on, or a popover
+ *   3  overlay    toasts and notices, floating clear of the page
+ *
+ * The two themes reach elevation by completely different means, which is why
+ * this is a variable rather than a Tailwind `shadow-*` class. In light, a card
+ * casts onto the cream — and the shadow is tinted warm (toward the ink) rather
+ * than neutral black, because a grey shadow on a warm ground reads as dirt. In
+ * dark there is nothing to cast onto: a black shadow on a near-black canvas is
+ * invisible. Elevation there is a lit top edge plus a lighter surface (see
+ * `--color-surface-raised`), with the shadow only doing the work of separating
+ * an overlay from the page behind it.
+ *
+ * Declared here rather than inside `@theme` deliberately: Tailwind inlines
+ * `shadow-*` theme values into the utility instead of referencing the variable,
+ * so a `shadow-e1` class would freeze the light-theme shadow into both themes.
+ */
+:root {
+  --elevation-1: 0 1px 2px rgba(28, 24, 16, 0.05), 0 1px 1px rgba(28, 24, 16, 0.04);
+  --elevation-2: 0 2px 4px rgba(28, 24, 16, 0.05), 0 6px 14px -4px rgba(28, 24, 16, 0.09);
+  --elevation-3: 0 8px 20px -6px rgba(28, 24, 16, 0.14), 0 20px 44px -12px rgba(28, 24, 16, 0.16);
+}
+
 /* Dark — near-black. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
     --color-canvas: #0d0d10;
     --color-surface: #16161b;
+    /* In dark, elevation *is* lightness: a shadow on near-black is invisible,
+       so a raised card has to come up off the ground instead of casting onto
+       it. Sunken goes the other way, below the canvas. */
+    --color-surface-raised: #1c1c23;
+    --color-surface-sunken: #101014;
     --color-line: #2a2a32;
     --color-ink: #f2f0ee;
     --color-ink-muted: #a09aa8;
-    --color-ink-faint: #6c6878;
+    /* 3.1:1 against a raised card before this; 4.5:1 after. */
+    --color-ink-faint: #868194;
     --color-accent: #a5a0ff;
     --color-accent-soft: #22212f;
     --color-positive: #4ade80;
     --color-warning: #fbbf24;
     --color-danger: #fb7185;
+
+    --elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 2px rgba(0, 0, 0, 0.5);
+    --elevation-2: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 4px 12px -2px rgba(0, 0, 0, 0.6);
+    --elevation-3: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 40px -8px rgba(0, 0, 0, 0.75);
   }
 }
 
@@ -61,19 +110,53 @@
   color-scheme: dark;
   --color-canvas: #0d0d10;
   --color-surface: #16161b;
+  --color-surface-raised: #1c1c23;
+  --color-surface-sunken: #101014;
   --color-line: #2a2a32;
   --color-ink: #f2f0ee;
   --color-ink-muted: #a09aa8;
-  --color-ink-faint: #6c6878;
+  --color-ink-faint: #868194;
   --color-accent: #a5a0ff;
   --color-accent-soft: #22212f;
   --color-positive: #4ade80;
   --color-warning: #fbbf24;
   --color-danger: #fb7185;
+
+  --elevation-1: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --elevation-2: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 4px 12px -2px rgba(0, 0, 0, 0.6);
+  --elevation-3: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 40px -8px rgba(0, 0, 0, 0.75);
 }
 
 :root[data-theme='light'] {
   color-scheme: light;
+}
+
+/* The three rungs, as classes. `elevation.ts` is the only thing that names
+   them — components ask for a level, never for a box-shadow. */
+.elev-1 {
+  box-shadow: var(--elevation-1);
+}
+
+.elev-2 {
+  box-shadow: var(--elevation-2);
+}
+
+.elev-3 {
+  box-shadow: var(--elevation-3);
+}
+
+/* Lifting on hover is a transition between two rungs, so it has to be one
+   property. Cards that opt in get this instead of a `hover:` utility. */
+.elev-lift {
+  box-shadow: var(--elevation-1);
+  transition:
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.elev-lift:hover {
+  box-shadow: var(--elevation-2);
 }
 
 html,
@@ -107,6 +190,18 @@ button:not(:disabled) {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/*
+ * The section container takes focus programmatically on navigation so screen
+ * readers land in the new content (see App.tsx). That is not a keyboard focus
+ * the user asked for, and Chromium's `:focus-visible` heuristic matches it
+ * anyway — which drew a 2px accent ring around the whole content pane every
+ * time someone clicked a sidebar item. Higher specificity than the rule above,
+ * so `outline-none` on the element itself is not fighting Tailwind's layering.
+ */
+.hub-section:focus-visible {
+  outline: none;
 }
 
 ::selection {
@@ -193,9 +288,103 @@ kbd {
   }
 }
 
+/*
+ * Skeletons.
+ *
+ * A skeleton is a promise about the shape of what is coming, so the sweep is
+ * deliberately slow and low-contrast: a fast, bright shimmer turns a quiet
+ * loading pane into a light show, and the whole point is that the arrival of
+ * the real content should be unremarkable.
+ */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface-sunken);
+  border-radius: 6px;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-ink) 7%, transparent),
+    transparent
+  );
+  animation: skeleton-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  /* Set per bar so the sweep travels down a list the way reading does, rather
+     than every row flashing at once. */
+  animation-delay: var(--skeleton-delay, 0ms);
+}
+
+@keyframes skeleton-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/*
+ * Toasts.
+ *
+ * The stack is bottom-anchored and grows upward, so a new toast enters from
+ * below and the ones above it slide up to make room. The slide is a layout
+ * transition on the flex column rather than per-toast offsets, which is why
+ * there is nothing here that knows how many toasts there are.
+ */
+.toast-enter {
+  animation: toast-in 260ms cubic-bezier(0.32, 1.2, 0.5, 1) both;
+}
+
+.toast-leave {
+  animation: toast-out 160ms ease-in both;
+  pointer-events: none;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+
+/* The countdown hairline along a toast's bottom edge: the only honest way to
+   say "this is going to disappear" before it does. Driven by a duration
+   variable so a sticky toast simply never sets one. */
+.toast-timer {
+  animation: toast-timer linear both;
+  animation-duration: var(--toast-duration, 5s);
+}
+
+@keyframes toast-timer {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Reaching for a toast pauses it. The stack's own clock is paused in
+   `toast-stack.ts`; this keeps the hairline honest about it. */
+.toast-stack:hover .toast-timer {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hub-section,
-  .hub-toast {
+  .hub-toast,
+  .toast-enter,
+  .toast-leave {
     animation-duration: 1ms;
   }
 
@@ -203,5 +392,16 @@ kbd {
     animation: none;
     width: 100%;
     opacity: 0.6;
+  }
+
+  /* The sweep goes; the skeleton stays. Removing the block entirely would
+     leave a loading pane looking like an empty one. */
+  .skeleton::after {
+    animation: none;
+    opacity: 0;
+  }
+
+  .elev-lift {
+    transition-duration: 1ms;
   }
 }

@@ -31,6 +31,8 @@ import {
   stepIndex,
   type OnboardingStepId,
 } from './steps'
+import { errorMessage } from '../../lib/errors'
+import { MicCheck } from './MicCheck'
 
 /**
  * First run (PLAN §2.4).
@@ -252,6 +254,11 @@ function PermissionStep({
       <p className="mt-2 max-w-lg text-[14px] leading-relaxed text-ink-muted">{copy.why}</p>
       <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-faint">{copy.notDone}</p>
 
+      {/* Only the microphone gets a live test, because it is the only one of
+          the three whose success is invisible: a granted permission says
+          nothing about the wrong input device or a muted headset. */}
+      {kind === 'microphone' ? <MicCheck /> : null}
+
       <div className="mt-6 flex flex-wrap items-center gap-2">
         {!granted && state !== 'unavailable' ? (
           <Button
@@ -455,7 +462,7 @@ function ModelStep({ settings }: { settings: Settings }): React.JSX.Element {
         })}
 
         {options.length === 0 ? (
-          <Card className="border-dashed">
+          <Card tone="dashed">
             <p className="text-[13px] text-ink-muted">
               No models are available to suggest. Open the Models section once the catalog is
               readable.
@@ -624,5 +631,5 @@ function DoneStep(): React.JSX.Element {
 }
 
 function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
+  return errorMessage(cause)
 }

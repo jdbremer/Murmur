@@ -1,15 +1,30 @@
 import { mkdirSync, rmSync } from 'node:fs'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { app, clipboard, dialog, shell } from 'electron'
 
-import type { MainIpc, TranscriptionExportFormat } from '@murmur/shared'
+import type {
+  DictationRecord,
+  HistoryExportFormat,
+  MainIpc,
+  SettingsPatch,
+  TranscriptionExportFormat,
+} from '@murmur/shared'
 import {
+  backupFileName,
+  buildBackup,
+  historyExportFileName,
+  noteFileName,
+  noteToMarkdown,
+  readBackup,
+  serializeHistory,
+  summarizeBackup,
   transcriptionExportName,
   transcriptionMarkdown,
   transcriptionSrt,
   transcriptionText,
+  uniqueFileNames,
 } from '@murmur/shared'
 
 import type { DictationOrchestrator } from '../dictation/orchestrator'
@@ -110,6 +125,14 @@ const EXPORT_FILTERS: Record<TranscriptionExportFormat, { name: string; extensio
   srt: { name: 'SubRip subtitles', extensions: ['srt'] },
   md: { name: 'Markdown', extensions: ['md'] },
 }
+
+const HISTORY_EXPORT_FILTERS: Record<HistoryExportFormat, { name: string; extensions: string[] }> =
+  {
+    json: { name: 'JSON', extensions: ['json'] },
+    csv: { name: 'Comma-separated values', extensions: ['csv'] },
+    md: { name: 'Markdown', extensions: ['md'] },
+    txt: { name: 'Plain text', extensions: ['txt'] },
+  }
 
 export function registerIpcHandlers(context: IpcContext): MainIpc {
   const { ipc, windows, settings, machine, orchestrator, engines, models } = context
@@ -241,8 +264,143 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
   ipc.handle('history.delete', ({ id }) => {
     context.dictations.delete(id)
   })
+  ipc.handle('history.restore', (record) => {
+    context.dictations.restore(record)
+  })
+  ipc.handle('history.repolish', async ({ id }) => {
+    const record = context.dictations.get(id)
+    if (!record) throw new Error('That dictation no longer exists.')
+
+    const polished = await orchestrator.repolish(record.rawText, record.appCategory)
+    const updated = context.dictations.setPolishedText(id, polished)
+    // Deleted between the polish starting and finishing — rare, but a two-second
+    // window is long enough for someone to press Delete.
+    if (!updated) throw new Error('That dictation was deleted while it was being polished.')
+    return updated
+  })
   ipc.handle('history.clear', () => {
     context.dictations.clear()
+  })
+
+  // -- export / backup (PLAN §10.5) ----------------------------------------
+  ipc.handle('data.exportHistory', async ({ format, ids, search }) => {
+    // "Everything" has to mean everything, including the rows the renderer
+    // never fetched, which is why the reading happens here.
+    const records =
+      ids.length > 0
+        ? ids
+            .map((id) => context.dictations.get(id))
+            .filter((record): record is DictationRecord => record !== null)
+        : context.dictations.query({ search, limit: 500, offset: 0 }).records
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Export dictations',
+      defaultPath: join(app.getPath('downloads'), historyExportFileName(Date.now(), format)),
+      filters: [HISTORY_EXPORT_FILTERS[format]],
+    })
+    if (canceled || !filePath) return { path: null, count: 0 }
+
+    await writeFile(filePath, serializeHistory(records, format), 'utf8')
+    return { path: filePath, count: records.length }
+  })
+
+  ipc.handle('data.exportNotes', async () => {
+    const { notes } = context.notes.list({ search: '', limit: 5_000 })
+    if (notes.length === 0) return { path: null, count: 0 }
+
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Choose a folder for your notes',
+      buttonLabel: 'Export here',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    const directory = filePaths[0]
+    if (canceled || !directory) return { path: null, count: 0 }
+
+    // Names are made unique across the whole set before anything is written:
+    // two notes called "Ideas" would otherwise silently become one file.
+    const names = uniqueFileNames(notes.map((note, index) => noteFileName(note, index)))
+    await Promise.all(
+      notes.map((note, index) =>
+        writeFile(join(directory, names[index] as string), noteToMarkdown(note), 'utf8'),
+      ),
+    )
+    return { path: directory, count: notes.length }
+  })
+
+  ipc.handle('data.backup', async ({ includeHistory }) => {
+    const backup = buildBackup({
+      createdAt: Date.now(),
+      appVersion: app.getVersion(),
+      dictionary: context.dictionary.list(),
+      snippets: context.snippets.list(),
+      notes: context.notes.list({ search: '', limit: 5_000 }).notes,
+      history: includeHistory
+        ? context.dictations.query({ search: '', limit: 500, offset: 0 }).records
+        : [],
+      settings: settings.get() as unknown as Record<string, unknown>,
+    })
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: 'Save a Murmur backup',
+      defaultPath: join(app.getPath('downloads'), backupFileName(Date.now())),
+      filters: [{ name: 'Murmur backup', extensions: ['json'] }],
+    })
+    if (canceled || !filePath) return { path: null, count: 0 }
+
+    await writeFile(filePath, JSON.stringify(backup, null, 2) + '\n', 'utf8')
+    return {
+      path: filePath,
+      count:
+        backup.dictionary.length +
+        backup.snippets.length +
+        backup.notes.length +
+        backup.history.length,
+    }
+  })
+
+  ipc.handle('data.restorePreview', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      title: 'Choose a Murmur backup',
+      properties: ['openFile'],
+      filters: [{ name: 'Murmur backup', extensions: ['json'] }],
+    })
+    const path = filePaths[0]
+    if (canceled || !path) return null
+
+    const result = readBackup(JSON.parse(await readFile(path, 'utf8')))
+    // Refusing here rather than at restore time: the user should find out the
+    // file is wrong while they are still choosing it.
+    if (!result.ok) throw new Error(result.detail)
+    return { path, summary: summarizeBackup(result.backup) }
+  })
+
+  ipc.handle('data.restore', async ({ path }) => {
+    const result = readBackup(JSON.parse(await readFile(path, 'utf8')))
+    if (!result.ok) throw new Error(result.detail)
+    const backup = result.backup
+
+    // Every restore preserves the original ids, so applying the same backup
+    // twice is the same database — and anything the user has edited since is
+    // left as they edited it rather than being reverted by an older file.
+    let dictionaryCount = 0
+    for (const entry of backup.dictionary)
+      if (context.dictionary.restore(entry)) dictionaryCount += 1
+    let snippetCount = 0
+    for (const snippet of backup.snippets) if (context.snippets.restore(snippet)) snippetCount += 1
+    let noteCount = 0
+    for (const note of backup.notes) if (context.notes.restore(note)) noteCount += 1
+    let historyCount = 0
+    for (const record of backup.history) if (context.dictations.restore(record)) historyCount += 1
+
+    if (backup.settings) settings.set(backup.settings as SettingsPatch)
+
+    return {
+      dictionary: dictionaryCount,
+      snippets: snippetCount,
+      notes: noteCount,
+      history: historyCount,
+      settings: backup.settings !== null,
+    }
   })
 
   // -- insights ------------------------------------------------------------

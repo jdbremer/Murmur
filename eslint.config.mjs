@@ -97,6 +97,17 @@ export default tseslint.config(
   },
 
   // Repo tooling scripts (the agent driver, sidecar fetchers): plain Node ESM.
+  // The GitHub Pages landing page: plain browser JavaScript, no build step and
+  // no module system, so it is neither app source nor a Node script.
+  {
+    files: ['docs/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.browser },
+      sourceType: 'script',
+      ecmaVersion: 2022,
+    },
+  },
+
   {
     files: ['scripts/**/*.mjs'],
     languageOptions: { globals: { ...globals.node }, sourceType: 'module' },

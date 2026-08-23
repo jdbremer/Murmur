@@ -1,0 +1,985 @@
+/*
+ * Murmur — the landing page.
+ *
+ * The palette, the radii and the neutrals are lifted from the app's own theme
+ * (apps/desktop/src/renderer/theme.css) rather than invented, because the page
+ * is a preview: a site that looks like the product is doing part of the
+ * product's job before anyone downloads it. The one thing added on top is an
+ * editorial display face, which the app has no room for and a page does.
+ *
+ * Both themes are here for the same reason. Murmur follows the system
+ * appearance; a landing page for a theme-aware app that ignored the visitor's
+ * own setting would be advertising something it does not do.
+ */
+
+/* --------------------------------------------------------------------------
+   Fonts
+   --------------------------------------------------------------------------
+   Self-hosted rather than linked from Google. A page whose headline claim is
+   that nothing leaves your machine should not open a connection to a third
+   party to render its own headline — and two 15 KB files beat a DNS lookup,
+   a TLS handshake and a stylesheet round trip anyway. Instrument Serif is
+   SIL Open Font Licence 1.1; the licence ships beside the files.
+   -------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/instrument-serif-latin.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/instrument-serif-latin-italic.woff2') format('woff2');
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* --------------------------------------------------------------------------
+   Tokens
+   -------------------------------------------------------------------------- */
+
+:root {
+  color-scheme: light;
+
+  --cream: #f7f4ef;
+  --paper: #fffefb;
+  --sunken: #f1ece3;
+  --line: #e8e2d8;
+  --ink: #1c1a17;
+  --ink-muted: #59544d;
+  --ink-faint: #756f68;
+  --accent: #4338ca;
+  --accent-soft: #eef0fd;
+  --positive: #157f4a;
+
+  /* Warm-tinted, like the app's: a neutral grey shadow on a cream ground
+     reads as dirt rather than as depth. */
+  --shadow-1: 0 1px 2px rgba(28, 24, 16, 0.05), 0 1px 1px rgba(28, 24, 16, 0.04);
+  --shadow-2: 0 2px 4px rgba(28, 24, 16, 0.05), 0 6px 14px -4px rgba(28, 24, 16, 0.09);
+  --shadow-3: 0 18px 40px -12px rgba(28, 24, 16, 0.18), 0 40px 80px -24px rgba(28, 24, 16, 0.16);
+
+  --radius: 0.875rem;
+  --radius-lg: 1.25rem;
+
+  --display: 'Instrument Serif', ui-serif, Georgia, 'Times New Roman', serif;
+  --sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  --shell: 1180px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --cream: #0d0d10;
+    --paper: #16161b;
+    --sunken: #101014;
+    --line: #2a2a32;
+    --ink: #f2f0ee;
+    --ink-muted: #a09aa8;
+    --ink-faint: #868194;
+    --accent: #a5a0ff;
+    --accent-soft: #22212f;
+    --positive: #4ade80;
+
+    /* In dark there is nothing to cast onto, so depth comes from a lit top
+       edge and a much deeper black — the same trick the app uses. */
+    --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 4px 12px -2px rgba(0, 0, 0, 0.6);
+    --shadow-3: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 24px 60px -12px rgba(0, 0, 0, 0.8);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --cream: #0d0d10;
+  --paper: #16161b;
+  --sunken: #101014;
+  --line: #2a2a32;
+  --ink: #f2f0ee;
+  --ink-muted: #a09aa8;
+  --ink-faint: #868194;
+  --accent: #a5a0ff;
+  --accent-soft: #22212f;
+  --positive: #4ade80;
+  --shadow-1: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 4px 12px -2px rgba(0, 0, 0, 0.6);
+  --shadow-3: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 24px 60px -12px rgba(0, 0, 0, 0.8);
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 1rem;
+  line-height: 1.65;
+  color: var(--ink);
+  background: var(--cream);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+img,
+svg,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.04;
+  text-wrap: balance;
+}
+
+p {
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.shell {
+  width: 100%;
+  max-width: var(--shell);
+  margin-inline: auto;
+  padding-inline: clamp(1.25rem, 5vw, 3rem);
+}
+
+.eyebrow {
+  font-family: var(--sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.lead {
+  font-size: clamp(1.0625rem, 0.95rem + 0.5vw, 1.25rem);
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  color: var(--accent);
+}
+
+kbd {
+  font-family: var(--sans);
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0.15em 0.5em;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--cream) 82%, transparent);
+  backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 200ms ease;
+}
+
+.masthead[data-scrolled='true'] {
+  border-bottom-color: var(--line);
+}
+
+.masthead .shell {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  height: 60px;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 600;
+  font-size: 0.975rem;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.wordmark svg {
+  width: 17px;
+  height: 17px;
+  color: var(--accent);
+}
+
+.masthead nav {
+  display: flex;
+  gap: 1.5rem;
+  margin-left: auto;
+  font-size: 0.875rem;
+}
+
+.masthead nav a {
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+.masthead nav a:hover {
+  color: var(--ink);
+}
+
+@media (max-width: 720px) {
+  .masthead nav {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.15rem;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 0.9375rem;
+  font-weight: 550;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    box-shadow 180ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  /* `--paper` is near-white in light and near-black in dark, and the accent
+     inverts with it — so one declaration is legible on both grounds. */
+  color: var(--paper);
+  box-shadow: var(--shadow-2);
+}
+
+.button--primary:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-3);
+}
+
+.button--ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.button--ghost:hover {
+  border-color: var(--ink-faint);
+  background: var(--paper);
+}
+
+.button:active {
+  transform: translateY(0) scale(0.985);
+}
+
+/* --------------------------------------------------------------------------
+   Hero
+   -------------------------------------------------------------------------- */
+
+.hero {
+  padding-block: clamp(3.5rem, 9vw, 7rem) clamp(3rem, 7vw, 5.5rem);
+}
+
+.hero .shell {
+  display: grid;
+  gap: clamp(2.5rem, 6vw, 4.5rem);
+  align-items: center;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 940px) {
+  .hero .shell {
+    grid-template-columns: minmax(0, 1.02fr) minmax(0, 1fr);
+  }
+}
+
+.hero h1 {
+  font-size: clamp(2.9rem, 1.6rem + 5.4vw, 5.25rem);
+  line-height: 0.98;
+  margin-top: 1.1rem;
+}
+
+.hero h1 em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.hero .lead {
+  margin-top: 1.35rem;
+  max-width: 33rem;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.hero-meta {
+  margin-top: 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+.hero-meta strong {
+  font-weight: 550;
+  color: var(--ink-muted);
+}
+
+/* --------------------------------------------------------------------------
+   The live pill — a scene, not a screenshot
+   -------------------------------------------------------------------------- */
+
+.stage {
+  position: relative;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: linear-gradient(170deg, var(--paper), var(--sunken));
+  box-shadow: var(--shadow-3);
+  padding: 1.25rem;
+  overflow: hidden;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-app {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow-1);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.stage-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.stage-bar span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.stage-bar .stage-title {
+  width: auto;
+  height: auto;
+  background: none;
+  border-radius: 0;
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+}
+
+.stage-body {
+  padding: 1.1rem 1.15rem;
+  flex: 1;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.stage-to {
+  font-size: 0.75rem;
+  color: var(--ink-faint);
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.85rem;
+}
+
+/* The caret is the only thing that blinks; everything else is typed. */
+.stage-text::after {
+  content: '';
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.18em;
+  background: var(--accent);
+  animation: caret 1.05s steps(1) infinite;
+}
+
+.stage[data-state='idle'] .stage-text::after {
+  animation: none;
+  opacity: 0.35;
+}
+
+@keyframes caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The pill itself, at the bottom of the "screen" exactly as it sits on a Mac. */
+.stage-pill {
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem 0 0.9rem;
+}
+
+.pill {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 8px;
+  width: 44px;
+  border-radius: 9999px;
+  background: rgba(18, 18, 23, 0.86);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  transition:
+    width 180ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 180ms cubic-bezier(0.32, 0.72, 0, 1),
+    box-shadow 180ms ease;
+}
+
+.pill[data-state='listening'],
+.pill[data-state='processing'] {
+  width: 84px;
+  height: 12px;
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.05),
+    0 0 20px rgba(129, 140, 248, 0.24);
+}
+
+.pill[data-state='inserted'] {
+  width: 60px;
+  height: 12px;
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 20px rgba(110, 231, 168, 0.26);
+}
+
+.pill canvas {
+  width: 120px;
+  height: 12px;
+}
+
+.pill-halo {
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  transform: translateX(-50%);
+  width: 96px;
+  height: 28px;
+  border-radius: 9999px;
+  filter: blur(14px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.stage-pill[data-state='listening'] .pill-halo {
+  background: rgba(105, 110, 245, 0.4);
+  opacity: 0.75;
+}
+
+.stage-pill[data-state='inserted'] .pill-halo {
+  background: rgba(74, 222, 128, 0.44);
+  opacity: 0.75;
+}
+
+/* In the flow, under the pill. Absolutely positioned it landed on top of the
+   pill it was labelling. A fixed height stops the caption's changing length
+   from nudging the whole scene as the demo cycles. */
+.stage-caption {
+  min-height: 1.2em;
+  text-align: center;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--ink-faint);
+}
+
+/* Other platforms, under the primary button. */
+.alt-downloads {
+  margin-top: 1rem;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+.alt-downloads a {
+  color: var(--ink-muted);
+  text-underline-offset: 3px;
+  text-decoration-color: var(--line);
+  transition: color 150ms ease;
+}
+
+.alt-downloads a:hover {
+  color: var(--accent);
+}
+
+.alt-downloads .sep {
+  padding-inline: 0.5rem;
+  opacity: 0.5;
+}
+
+.download .alt-downloads {
+  margin-top: 1.25rem;
+}
+
+/* --------------------------------------------------------------------------
+   Sections
+   -------------------------------------------------------------------------- */
+
+section {
+  padding-block: clamp(3.5rem, 8vw, 6.5rem);
+}
+
+.section-head {
+  max-width: 42rem;
+}
+
+.section-head h2 {
+  font-size: clamp(2rem, 1.3rem + 2.6vw, 3.1rem);
+  margin-top: 0.75rem;
+}
+
+.section-head .lead {
+  margin-top: 1.05rem;
+}
+
+.rule {
+  height: 1px;
+  background: var(--line);
+  border: 0;
+  margin: 0;
+}
+
+/* Steps ------------------------------------------------------------------- */
+
+.steps {
+  display: grid;
+  gap: 1.75rem;
+  margin-top: 3rem;
+  /* An <ol> for the semantics; the markers are drawn by the counter below,
+     and the browser's own would otherwise number every step twice. */
+  list-style: none;
+  padding: 0;
+  counter-reset: step;
+}
+
+@media (min-width: 780px) {
+  .steps {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2.5rem;
+  }
+}
+
+.step {
+  position: relative;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.step::before {
+  counter-increment: step;
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  top: -0.85rem;
+  left: 0;
+  padding-right: 0.6rem;
+  background: var(--cream);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.step h3 {
+  font-size: 1.375rem;
+}
+
+.step p {
+  margin-top: 0.5rem;
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+}
+
+/* Screenshots ------------------------------------------------------------- */
+
+.shot {
+  margin: 0;
+}
+
+.shot-frame {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  background: var(--paper);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+
+.shot-chrome {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.85rem;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--line);
+}
+
+.shot-chrome span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.shot img {
+  width: 100%;
+  height: auto;
+}
+
+.shot figcaption {
+  margin-top: 1rem;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  max-width: 46rem;
+}
+
+.shot figcaption b {
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.shot-pair {
+  display: grid;
+  gap: 2rem;
+  margin-top: 3rem;
+}
+
+@media (min-width: 900px) {
+  .shot-pair {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* Feature grid ------------------------------------------------------------ */
+
+.features {
+  display: grid;
+  gap: 1px;
+  margin-top: 3rem;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+@media (min-width: 680px) {
+  .features {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1000px) {
+  .features {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.feature {
+  background: var(--paper);
+  padding: 1.6rem 1.4rem;
+}
+
+.feature svg {
+  width: 19px;
+  height: 19px;
+  color: var(--accent);
+  margin-bottom: 0.85rem;
+}
+
+.feature h3 {
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.4;
+}
+
+.feature p {
+  margin-top: 0.4rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--ink-muted);
+}
+
+/* --------------------------------------------------------------------------
+   The privacy band — always dark, in both themes
+   -------------------------------------------------------------------------- */
+
+.night {
+  --paper: #16161b;
+  --line: #2a2a32;
+  --ink: #f2f0ee;
+  --ink-muted: #a09aa8;
+  --ink-faint: #868194;
+  --accent: #a5a0ff;
+  --positive: #4ade80;
+
+  background: #0d0d10;
+  color: var(--ink);
+}
+
+.night h2 {
+  color: var(--ink);
+}
+
+.night .lead {
+  color: var(--ink-muted);
+}
+
+.night .eyebrow {
+  color: var(--ink-faint);
+}
+
+.claims {
+  display: grid;
+  gap: 1.5rem 2.5rem;
+  margin-top: 3rem;
+}
+
+@media (min-width: 820px) {
+  .claims {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.claim {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.claim svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  margin-top: 0.3rem;
+  color: var(--positive);
+}
+
+.claim h3 {
+  font-family: var(--sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.claim p {
+  margin-top: 0.3rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
+.night-note {
+  margin-top: 3rem;
+  padding: 1.35rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #1c1c23;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: var(--ink-muted);
+  max-width: 52rem;
+}
+
+.night-note strong {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+/* --------------------------------------------------------------------------
+   Download
+   -------------------------------------------------------------------------- */
+
+.download {
+  text-align: center;
+}
+
+.download .section-head {
+  margin-inline: auto;
+}
+
+.download .hero-actions {
+  justify-content: center;
+}
+
+.specs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem 1.75rem;
+  margin-top: 2.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+.specs span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+
+footer {
+  border-top: 1px solid var(--line);
+  padding-block: 2.5rem 3.5rem;
+  font-size: 0.8125rem;
+  color: var(--ink-faint);
+}
+
+footer .shell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: center;
+}
+
+footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin-left: auto;
+}
+
+footer a {
+  color: var(--ink-muted);
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+footer a:hover {
+  color: var(--ink);
+}
+
+/* --------------------------------------------------------------------------
+   Scroll reveal
+   -------------------------------------------------------------------------- */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition:
+    opacity 700ms cubic-bezier(0.2, 0.7, 0.3, 1),
+    transform 700ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.reveal[data-shown='true'] {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .stage-text::after,
+  .button,
+  .pill {
+    transition: none;
+    animation: none;
+  }
+}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { Note } from '@murmur/shared'
+import { errorMessage } from '../lib/errors'
 
 /**
  * The note list, kept in step across windows.
@@ -46,7 +47,7 @@ export function useNotes(search: string): {
       setError(null)
     } catch (cause) {
       if (!active.current) return
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorMessage(cause))
       setNotes([])
     }
   }, [])

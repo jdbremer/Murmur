@@ -13,6 +13,8 @@ no audio leaving the device.
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#platform-support)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+**[murmur website →](https://jdbremer.github.io/Murmur/)**
+
 </div>
 
 <!--
@@ -24,6 +26,9 @@ no audio leaving the device.
   watch the cleaned line appear in a note. Record with the corner orb visible.
   Commit it to docs/demo.gif and swap this comment for:
       <div align="center"><img src="docs/demo.gif" alt="Murmur in use" width="720"></div>
+
+  The same GIF belongs in the landing page's hero, where the live canvas pill
+  currently stands in for it (docs/index.html).
 -->
 
 ---

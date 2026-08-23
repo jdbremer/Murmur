@@ -8,12 +8,14 @@ import {
   Button,
   Card,
   InlineError,
-  LoadingState,
   Row,
   Section,
   Select,
   Toggle,
 } from '../../components/Section'
+import { Segmented } from '../../components/Segmented'
+import { SkeletonRows } from '../../components/Skeleton'
+import { DataCard } from './settings/DataCard'
 import { useAudioDevices, micOptions } from '../../hooks/useAudioDevices'
 import { useCaptureStatus } from '../../hooks/useCaptureStatus'
 import { useDevMode } from '../../hooks/useDevMode'
@@ -58,9 +60,13 @@ const LINUX_HOTKEYS: readonly { value: HotkeyKey; label: string }[] = [
   { value: 'custom', label: 'Custom key' },
 ]
 
+// One word each, because both are already spelled out in the row's hint —
+// "Hold is push-to-talk. Toggle suits long dictations…" — and a segmented
+// control repeating the sentence beside it is 335px of settings row spent
+// saying something twice.
 const ACTIVATIONS = [
-  { value: 'hold' as const, label: 'Hold to talk' },
-  { value: 'toggle' as const, label: 'Press to start and stop' },
+  { value: 'hold' as const, label: 'Hold', title: 'Hold the key down while you speak' },
+  { value: 'toggle' as const, label: 'Toggle', title: 'Press once to start, again to stop' },
 ]
 
 const BAR_VISIBILITY = [
@@ -120,7 +126,10 @@ export function SettingsSection(): React.JSX.Element {
         title="Settings"
         description="How dictation starts, which microphone it uses, and how long anything is kept."
       >
-        <LoadingState />
+        <div className="space-y-4">
+          <SkeletonRows label="Loading your settings…" rows={5} />
+          <SkeletonRows label="Loading your settings…" rows={3} />
+        </div>
       </Section>
     )
   }
@@ -169,10 +178,8 @@ export function SettingsSection(): React.JSX.Element {
         <Row
           label="Activation"
           hint="Hold is push-to-talk. Toggle suits long dictations and accessibility needs."
-          htmlFor="settings-activation"
         >
-          <Select
-            id="settings-activation"
+          <Segmented
             label="Activation"
             value={settings.hotkey.activation}
             options={ACTIVATIONS}
@@ -312,9 +319,11 @@ export function SettingsSection(): React.JSX.Element {
             onChange={(barFlourish) => void update({ barFlourish })}
           />
         </Row>
-        <Row label="Theme" htmlFor="settings-appearance">
-          <Select
-            id="settings-appearance"
+        {/* Three visible options instead of a dropdown that hides two of them.
+            No `htmlFor`: a radio group is labelled as a group, not by a label
+            pointing at one of its buttons. */}
+        <Row label="Theme">
+          <Segmented
             label="Theme"
             value={settings.appearance}
             options={APPEARANCE}
@@ -367,6 +376,9 @@ export function SettingsSection(): React.JSX.Element {
           />
         </Row>
       </Card>
+
+      <h2 className="mb-2 text-[13px] font-semibold text-ink">Your data</h2>
+      <DataCard />
 
       <h2 className="mb-2 text-[13px] font-semibold text-ink">What is kept</h2>
       <Card>

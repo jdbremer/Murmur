@@ -9,11 +9,12 @@ import {
   Card,
   EmptyState,
   ErrorCard,
-  LoadingState,
   Row,
   Section,
   Toggle,
 } from '../../components/Section'
+import { SkeletonList, SkeletonRows } from '../../components/Skeleton'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Meetings (PLAN §18.2) — record a call, transcribe it live, keep the file.
@@ -102,7 +103,10 @@ export function MeetingsSection(): React.JSX.Element {
   if (!settings || meetings === null) {
     return (
       <Section title="Meetings" description="Record a call and transcribe it as it happens.">
-        <LoadingState />
+        <div className="space-y-4">
+          <SkeletonRows label="Loading meetings…" rows={2} />
+          <SkeletonList label="Loading meetings…" rows={3} seed={9} />
+        </div>
       </Section>
     )
   }
@@ -177,10 +181,13 @@ export function MeetingsSection(): React.JSX.Element {
       ) : null}
 
       {meetings.length === 0 ? (
-        <EmptyState>
+        <EmptyState
+          icon="meetings"
+          title={enabled ? 'No meetings recorded yet' : 'Meeting capture is off'}
+        >
           {enabled
-            ? 'No meetings recorded yet. Hit Record meeting when you are on a call.'
-            : 'Meeting capture is off. Turn it on above to record and transcribe a call.'}
+            ? 'Hit Record meeting when you are on a call. Murmur captures both sides, transcribes as it goes, and writes a Markdown file you own.'
+            : 'Turn it on above to record and transcribe a call. Nothing is captured until you press Record.'}
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-2">
@@ -297,5 +304,5 @@ function formatClock(ms: number): string {
 }
 
 function describe(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
+  return errorMessage(cause)
 }

@@ -92,6 +92,32 @@ Left sidebar navigation, content pane right — Wispr Flow's layout, tracked clo
 5. **Settings** — hotkey config (default: hold `fn`, like Flow; alternatives Right-⌘/Right-⌥ for external keyboards), double-tap for hands-free, mic selection, language(s), dictation sounds, launch at login, audio retention toggle (default **off** — audio deleted after transcription), history retention window, appearance (system/dark/light).
 6. **Help** — permissions status panel (re-check/fix buttons), troubleshooting, logs export (local only).
 
+### 2.2.0 Dashboard
+
+What the Hub opens on. It used to open on History, which is a log — the right thing to have and the wrong thing to land on: it answers "what did I say" for a user who came to ask "is this working", and it has nothing at all to say to someone who has just installed the app and has no history yet.
+
+Four questions, in the order people actually ask them. **Can I dictate right now?** — a readiness hero, first and largest, computed in one place from permissions, engine state and the selected models, naming the one thing in the way and the button that fixes it. The distinction that carries the design is *blocked* versus *degraded*: a denied microphone means dictation cannot work at all, while a missing polishing model means it works and inserts the raw transcript, and rendering those identically trains people to ignore both. **Is it doing anything for me?** — three figures, each a link into the depth behind it. **What is it running?** — both model slots with live engine state, swappable in place among what is already installed (downloading stays in Models, where the size and the licence are on screen next to the button). **What did I just say?** — the last four dictations.
+
+The Dashboard owns no data of its own. Anything you can only do here is something the section it summarises is now missing.
+
+### 2.2.6 Design system
+
+The Hub's shared vocabulary, so that a card built in one section and a card built in another are the same card. Three parts carry it:
+
+**Elevation.** Three rungs — resting (cards and panes), lifted (a pointer target, a popover), overlay (toasts). The two themes reach elevation by different routes and this is the point: in light a surface casts onto the cream, with the shadow tinted warm toward the ink because a neutral grey shadow on a warm ground reads as dirt; in dark there is nothing to cast onto — a black shadow on a near-black canvas is invisible — so elevation is a lit top edge plus a lighter surface. Hence a *surface* scale (sunken / base / raised) alongside the shadow scale: before it existed the content pane and every card inside it were both `#16161b` in dark, and the cards disappeared into the pane. Declared as CSS variables rather than Tailwind `shadow-*` theme values, because Tailwind inlines those into the utility instead of referencing the variable and would freeze the light-theme shadow into both themes.
+
+**Loading and emptiness are different states and look different.** Loading is a skeleton in the shape of what is coming — a list of dictations, a grid of model cards — never a spinner, so the space is already the right size when the content lands. Line lengths vary but are deterministic, seeded off the row index: `Math.random()` in a render reshuffles every line on every re-render. Skeletons keep the announced `role="status"` and label the spinners had, so the swap is a visual upgrade and an accessibility no-op. An empty state is a glyph, a sentence saying what would fill the space, and a button that goes and does it — an empty state with no way out of it is a dead end dressed as an explanation.
+
+**Toasts stack, and some of them are reversible.** Anything can post one, so "Copied", "Saved" and "Removed" stop being invisible. Two identical messages coalesce into one with a count; two *undoable* ones never do, because two deletions are two different undos and merging them would silently discard one. Hovering pauses the countdown — a toast that vanishes while you are reaching for its Undo is worse than no undo. Undo is what replaced the confirmation dialogs on single-row deletes: a modal in front of every delete is the kind of safety that trains people to click through it. Restoring a dictation re-inserts the row and touches no counter, mirroring the delete that never moved them (§9).
+
+### 2.2.8 Command palette
+
+⌘K, and `/` or ⌘F for the search box in any section that has one. The Hub shipped with no keyboard shortcuts at all — not one — which is a strange thing for an app whose entire premise is that reaching for the mouse is the slow part.
+
+Scope is deliberately narrow: it goes places and runs the handful of actions that are one-shot and safe. It does not delete, download or dictate. A palette that can do everything is one you have to read before pressing Enter, and a palette you have to read is slower than the sidebar it replaced.
+
+Ranking is a tiered fuzzy match — prefix beats substring beats subsequence — with word-boundary credit so initials work ("vc" finds Vibe coding). A keyword match is worth exactly half a title match, which is a whole tier: "notes" finds Scratchpad, but never above a command actually called Notes.
+
 ### 2.3 Menu bar
 
 Template icon (mic glyph; subtle state change while listening). Menu: Open Hub · Start hands-free dictation · Mic picker · Language · Pause Murmur · Quit. No Dock icon by default (`LSUIElement`), toggleable.
@@ -338,6 +364,16 @@ Guardrail: if polish output diverges wildly in length from input (hallucination 
 7. Signed + notarized builds; SBOM generated in CI for supply-chain review.
 
 ---
+
+### 10.5 Getting your data out
+
+The local-first promise has a hole in it if your dictations cannot leave your machine *when you want them to*: data you can only read inside one app is not really yours. Export is the other half of the argument, not a nice-to-have.
+
+Four routes out. History as Markdown, CSV, JSON or plain text; notes as one Markdown file each with their dates in front matter, so the result is useful in Obsidian or a git repo; and a full backup — dictionary, snippets, notes, settings, and optionally the transcripts — as a single versioned JSON file. Restore is the fourth, and it is the only operation here that touches data already on the machine, so it is two steps: the file is read and summarised, and nothing is written until the user has seen what is in it.
+
+Every restore preserves the original ids, which makes it idempotent: the same backup applied twice is the same database, and anything the user has edited since is left as they edited it rather than being reverted by an older file. The lifetime Insights counters are deliberately *not* in a backup, and the UI says so.
+
+Two details that are easy to get wrong and were therefore tested first. CSV fields are RFC 4180 — dictated prose contains commas constantly, quotation marks often, and newlines whenever someone dictated a list — and a field beginning `=`, `+`, `-` or `@` is prefixed with an apostrophe, because a spreadsheet treats those as the start of a formula. Note filenames are sanitised for Windows, reserved device names (`con`, `lpt1`) included, and de-duplicated case-insensitively before anything is written.
 
 ## 11. Tech stack
 

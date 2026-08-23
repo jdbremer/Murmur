@@ -12,6 +12,7 @@ import {
 
 import { Card, ErrorCard, Row, Section, Select } from '../../components/Section'
 import { useSettings } from '../../hooks/useSettings'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Style (PLAN §2.2.3) — the global polishing level plus per-category tone.
@@ -81,7 +82,7 @@ export function StyleSection(): React.JSX.Element {
       })
       .catch((cause: unknown) => {
         if (!active.current) return
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(errorMessage(cause))
         setProfiles([])
       })
     return () => {
@@ -100,7 +101,7 @@ export function StyleSection(): React.JSX.Element {
         setError(null)
       }
     } catch (cause) {
-      if (active.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (active.current) setError(errorMessage(cause))
     }
   }
 
@@ -126,7 +127,7 @@ export function StyleSection(): React.JSX.Element {
       </Card>
 
       {polishingOff ? (
-        <Card className="mb-5 border-dashed">
+        <Card tone="dashed" className="mb-5">
           <p className="text-[13px] leading-relaxed text-ink-muted">
             Polishing is off, so these profiles are not used — the raw transcript is inserted as
             spoken. They are still editable, and take effect as soon as you turn polishing back on.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { Settings, SettingsPatch } from '@murmur/shared'
+import { errorMessage } from '../lib/errors'
 
 /**
  * Settings, read from the main-process store and kept in sync.
@@ -27,7 +28,7 @@ export function useSettings(): {
         if (active) setSettings(value)
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : String(cause))
+        if (active) setError(errorMessage(cause))
       })
 
     const unsubscribe = window.murmur.settings.subscribe((value) => {
@@ -45,7 +46,7 @@ export function useSettings(): {
       setSettings(await window.murmur.settings.set(patch))
       setError(null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorMessage(cause))
     }
   }, [])
 

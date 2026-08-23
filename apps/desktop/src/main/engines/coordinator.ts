@@ -135,7 +135,7 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
         state: 'unavailable',
         modelId: null,
         reason: 'no-model-selected',
-        detail: 'Choose a speech-to-text model in the Hub.',
+        detail: 'No speech-to-text model is selected.',
         warnings: [],
       })
       return
@@ -202,7 +202,7 @@ export class EngineCoordinator extends EventEmitter<EngineCoordinatorEvents> {
         detail:
           settings.polishingLevel === 'off'
             ? 'Polishing is off — the raw transcript is inserted.'
-            : 'Choose a polishing model in the Hub.',
+            : 'No polishing model is selected.',
         warnings: [],
       })
       return

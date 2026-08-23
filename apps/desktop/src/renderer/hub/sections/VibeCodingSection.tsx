@@ -1,15 +1,7 @@
 import { useState } from 'react'
 
-import {
-  Badge,
-  Banner,
-  Button,
-  Card,
-  LoadingState,
-  Row,
-  Section,
-  Toggle,
-} from '../../components/Section'
+import { Badge, Banner, Button, Card, Row, Section, Toggle } from '../../components/Section'
+import { SkeletonRows } from '../../components/Skeleton'
 import { useSettings } from '../../hooks/useSettings'
 import { isMacPlatform } from '../../lib/platform'
 
@@ -38,7 +30,7 @@ export function VibeCodingSection(): React.JSX.Element {
   if (!settings) {
     return (
       <Section title="Vibe coding" description="Dictation that knows the code you are looking at.">
-        <LoadingState />
+        <SkeletonRows label="Loading vibe coding settings…" rows={4} />
       </Section>
     )
   }

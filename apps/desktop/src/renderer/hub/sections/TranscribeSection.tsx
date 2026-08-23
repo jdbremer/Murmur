@@ -76,9 +76,9 @@ export function TranscribeSection(): React.JSX.Element {
       />
 
       {items.length === 0 ? (
-        <EmptyState>
-          Nothing transcribed yet. Drop a file above — MP3, MP4/M4A, WAV, FLAC, OGG/Opus, WebM, MOV
-          and AIFF all work.
+        <EmptyState icon="transcribe" title="Nothing transcribed yet">
+          Drop a file above — MP3, MP4/M4A, WAV, FLAC, OGG/Opus, WebM, MOV and AIFF all work. It is
+          decoded and transcribed on this machine; nothing is uploaded.
         </EmptyState>
       ) : (
         <div className="mt-4 flex flex-col gap-2">

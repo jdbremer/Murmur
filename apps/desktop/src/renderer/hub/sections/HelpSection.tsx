@@ -26,6 +26,7 @@ import { engineLabel } from '../../format'
 import { dataLocation, isMacPlatform } from '../../lib/platform'
 import { PERMISSIONS } from '../permissions'
 import { DevToolsCard } from './DevToolsCard'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Help (PLAN §2.2.6).
@@ -102,7 +103,7 @@ export function HelpSection(): React.JSX.Element {
       ) : null}
 
       {!mac ? (
-        <Card className="mb-5 border-dashed">
+        <Card tone="dashed" className="mb-5">
           <p className="text-[13px] leading-relaxed text-ink-muted">
             These permissions are macOS concepts. On this platform they read “not applicable”, the
             event tap never starts and text insertion refuses — the rest of the app still runs,
@@ -428,5 +429,5 @@ function EngineCard({
 }
 
 function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
+  return errorMessage(cause)
 }

@@ -22,6 +22,7 @@ import {
   NoteSchema,
 } from '../domain/note'
 import { SnippetDraftSchema, SnippetPatchSchema, SnippetSchema } from '../domain/snippet'
+import { BackupSummarySchema, HistoryExportFormatSchema } from '../domain/backup'
 import {
   TranscriptionEventSchema,
   TranscriptionExportFormatSchema,
@@ -106,6 +107,48 @@ export const ModelImportRequestSchema = z.object({
   ]),
 })
 export type ModelImportRequest = z.infer<typeof ModelImportRequestSchema>
+
+/**
+ * Getting your data out, and back in (PLAN §10.5).
+ *
+ * Every one of these opens a native file dialog in main and returns the path
+ * it wrote, or `null` when the user cancelled — cancelling is the normal case,
+ * not an error, and must never surface as one.
+ */
+export const HistoryExportRequestSchema = z.object({
+  format: HistoryExportFormatSchema,
+  /**
+   * Which dictations. Empty means everything the store holds, which is what
+   * "Export all" sends; a selection sends the ids it has on screen.
+   */
+  ids: z.array(z.string().min(1)).default([]),
+  /** Narrows an "everything" export the same way the list on screen is narrowed. */
+  search: z.string().default(''),
+})
+export type HistoryExportRequest = z.infer<typeof HistoryExportRequestSchema>
+
+export const ExportResultSchema = z.object({
+  /** Null when the user cancelled the dialog. */
+  path: z.string().nullable(),
+  /** How many records, notes or files were written. */
+  count: z.number().int().nonnegative().default(0),
+})
+export type ExportResult = z.infer<typeof ExportResultSchema>
+
+export const BackupPreviewSchema = z.object({
+  path: z.string(),
+  summary: BackupSummarySchema,
+})
+export type BackupPreview = z.infer<typeof BackupPreviewSchema>
+
+export const RestoreResultSchema = z.object({
+  dictionary: z.number().int().nonnegative(),
+  snippets: z.number().int().nonnegative(),
+  notes: z.number().int().nonnegative(),
+  history: z.number().int().nonnegative(),
+  settings: z.boolean(),
+})
+export type RestoreResult = z.infer<typeof RestoreResultSchema>
 
 export const HistoryQuerySchema = z.object({
   /** Full-text query against raw and polished text; empty = everything. */
@@ -286,8 +329,56 @@ export const invokeContract = {
   // --- history (PLAN §2.2.1) ---------------------------------------------
   'history.query': { request: HistoryQuerySchema, response: HistoryPageSchema },
   'history.delete': { request: IdRequestSchema, response: z.void() },
+  /**
+   * Put a deleted dictation back — the undo behind the toast.
+   *
+   * Takes the whole record rather than an id, because by the time undo is
+   * pressed the row is gone and only the renderer still has it. It is
+   * deliberately not `history.create`: restoring re-inserts the row and nothing
+   * else, where creating would also move the lifetime counters. Deleting a
+   * transcript never moved them, so undoing that delete must not either.
+   */
+  'history.restore': { request: DictationRecordSchema, response: z.void() },
+  /**
+   * Polish a transcript that is already in the history.
+   *
+   * For the dictations that went in raw — polishing off, model still
+   * downloading, or the hallucination guard rejecting the output. Rewrites only
+   * the polished column: the raw transcript is what was said, and the lifetime
+   * counters do not move because nothing new was dictated.
+   */
+  'history.repolish': { request: IdRequestSchema, response: DictationRecordSchema },
   'history.clear': { request: z.void(), response: z.void() },
   'history.stats': { request: z.void(), response: HistoryStatsSchema },
+
+  // --- export / backup (PLAN §10.5) --------------------------------------
+  /**
+   * Write the history to a file the user picks.
+   *
+   * The serialising happens in main rather than the renderer because the
+   * renderer only ever holds a page of history; "export everything" means
+   * everything, including the rows that were never fetched.
+   */
+  'data.exportHistory': { request: HistoryExportRequestSchema, response: ExportResultSchema },
+  /** Every note as its own Markdown file, into a folder the user picks. */
+  'data.exportNotes': { request: z.void(), response: ExportResultSchema },
+  /** One JSON file with everything. `includeHistory` is the user's choice. */
+  'data.backup': {
+    request: z.object({ includeHistory: z.boolean().default(true) }),
+    response: ExportResultSchema,
+  },
+  /**
+   * Pick a backup and read it, without changing anything.
+   *
+   * Split from the restore itself so the user can be shown what is about to
+   * happen and say no — a restore is the one operation here that writes over
+   * data that is already there.
+   */
+  'data.restorePreview': { request: z.void(), response: BackupPreviewSchema.nullable() },
+  'data.restore': {
+    request: z.object({ path: z.string().min(1) }),
+    response: RestoreResultSchema,
+  },
 
   // --- insights (PLAN §2.2.2) --------------------------------------------
   /**

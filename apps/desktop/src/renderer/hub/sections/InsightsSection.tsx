@@ -1,11 +1,14 @@
 import { monthOverMonthChange } from '@murmur/shared'
 
-import { Badge, Card, ErrorCard, LoadingState, Section } from '../../components/Section'
+import { Card, EmptyState, ErrorCard, Section } from '../../components/Section'
+import { SkeletonCards } from '../../components/Skeleton'
+import { StatTile } from '../../components/StatTile'
 import { formatNumber } from '../../format'
 import { useInsights } from '../../hooks/useInsights'
 import { AppBars } from './insights/AppBars'
 import { WpmGauge } from './insights/Gauge'
 import { StreakHeatmap } from './insights/HeatmapView'
+import { dailyWords } from './insights/series'
 
 /**
  * Insights (PLAN §2.2.2) — what you have actually been using Murmur for.
@@ -34,7 +37,7 @@ export function InsightsSection(): React.JSX.Element {
   if (!insights) {
     return (
       <Section title="Insights" description="What you have been dictating, and where.">
-        <LoadingState label="Adding it all up…" />
+        <SkeletonCards label="Adding it all up…" count={4} columns={2} />
       </Section>
     )
   }
@@ -51,12 +54,10 @@ export function InsightsSection(): React.JSX.Element {
   if (totals.words === 0 && streak.longest === 0) {
     return (
       <Section title="Insights" description="What you have been dictating, and where.">
-        <Card className="border-dashed">
-          <p className="mx-auto max-w-md py-6 text-center text-[13px] leading-relaxed text-ink-muted">
-            Nothing to show yet. Hold your dictation key and speak — your speaking rate, the words
-            you have saved yourself typing, and the apps you use Murmur in most all appear here.
-          </p>
-        </Card>
+        <EmptyState icon="history" title="Nothing to show yet">
+          Hold your dictation key and speak. Your speaking rate, the words you have saved yourself
+          typing, and the apps you use Murmur in most all appear here.
+        </EmptyState>
       </Section>
     )
   }
@@ -66,7 +67,7 @@ export function InsightsSection(): React.JSX.Element {
       title="Insights"
       description="What you have been dictating, and where. Computed on this machine; none of it leaves."
     >
-      <div className="mb-4 grid gap-4 sm:grid-cols-2">
+      <div className="mb-4 grid gap-4 @xl:grid-cols-2">
         <Card>
           <Heading>Speaking rate</Heading>
           <div className="pt-2">
@@ -75,28 +76,18 @@ export function InsightsSection(): React.JSX.Element {
         </Card>
 
         <div className="grid gap-4">
-          <Card>
-            <Heading>Words dictated</Heading>
-            <div className="mt-1.5 flex items-baseline gap-2">
-              <p className="font-serif text-[32px] tracking-tight tabular-nums text-ink">
-                {formatNumber(totals.words)}
-              </p>
-              {/* Hidden rather than shown as +100% when there is no previous
-                  month to compare against. */}
-              {change !== null ? (
-                <Badge
-                  tone={change >= 0 ? 'positive' : 'neutral'}
-                  title="This month so far, against all of last month"
-                >
-                  {change >= 0 ? '+' : ''}
-                  {change}% vs last month
-                </Badge>
-              ) : null}
-            </div>
-            <p className="mt-1 text-[12px] text-ink-muted">
-              across {formatNumber(totals.dictations)} dictations
-            </p>
-          </Card>
+          {/* The trend is hidden rather than shown as +100% when there is no
+              previous month to compare against, and the sparkline underneath
+              is the last fortnight zero-filled — a gap in dictation has to
+              read as a gap, not as evenly spaced use. */}
+          <StatTile
+            label="Words dictated"
+            value={formatNumber(totals.words)}
+            trend={change}
+            trendLabel="vs last month"
+            hint={`across ${formatNumber(totals.dictations)} dictations`}
+            series={dailyWords(days, today, 14)}
+          />
 
           <Card>
             <Heading>Fixed for you</Heading>

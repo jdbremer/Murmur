@@ -25,7 +25,7 @@
         }
       ],
       "recommended": true,
-      "notes": "OpenAI's Whisper large-v3-turbo, quantised to q5_0 and distributed as GGML by the whisper.cpp project's own model repo (ggerganov/whisper.cpp). Multilingual quality bar; recommended on 16 GB+ machines (PLAN §6.2)."
+      "notes": "OpenAI's Whisper large-v3-turbo, quantised to q5_0 and distributed as GGML by the whisper.cpp project's own model repo (ggerganov/whisper.cpp). The multilingual quality bar, and the recommended choice on 16 GB machines and above."
     },
     {
       "id": "whisper-small-en",
@@ -48,7 +48,7 @@
         }
       ],
       "recommended": true,
-      "notes": "English-only Whisper small. The 8 GB-tier default and the M1 bring-up model (PLAN §6.2). GGML conversion from the whisper.cpp model repo."
+      "notes": "English-only Whisper small — the default on 8 GB machines, and the model Murmur was first brought up on. GGML conversion from the whisper.cpp model repo."
     },
     {
       "id": "whisper-tiny-en",
@@ -70,7 +70,7 @@
           "filename": "ggml-tiny.en.bin"
         }
       ],
-      "notes": "Smallest Whisper. Intel-Mac / low-RAM fallback (PLAN §14 tier C)."
+      "notes": "The smallest Whisper. The fallback for Intel Macs and for machines short on memory."
     },
     {
       "id": "distil-whisper-large-v3.5",
@@ -92,7 +92,7 @@
           "filename": "ggml-model.bin"
         }
       ],
-      "notes": "First-party GGML release from the Distil-Whisper team (Hugging Face, New York). ~2x large-v3 speed at near-parity English accuracy. The repo ships one unquantised ggml-model.bin (1.4 GB), not the ~750 MB quantised estimate in PLAN §6.2."
+      "notes": "First-party GGML release from the Distil-Whisper team (Hugging Face, New York). Around twice the speed of large-v3 at near-parity English accuracy. Worth noting the size: the repo ships one unquantised 1.4 GB file rather than a smaller quantised build."
     },
     {
       "id": "moonshine-base-onnx",
@@ -207,7 +207,7 @@
         }
       ],
       "recommended": true,
-      "notes": "Google's quantisation-aware-trained Gemma 3 4B, GGUF-packaged by lmstudio-community. Google's own google/gemma-3-4b-it-qat-q4_0-gguf repo is licence-gated and returns 401 without a Hugging Face token, so it cannot be fetched by Murmur's anonymous downloader. Recommended polish default on 16 GB+ (PLAN §7.2)."
+      "notes": "Google's quantisation-aware-trained Gemma 3 4B, GGUF-packaged by lmstudio-community. Google's own GGUF repo is licence-gated and refuses anonymous downloads, so Murmur cannot fetch it directly. The recommended polishing model on 16 GB and above."
     },
     {
       "id": "gemma-3-1b-it-qat-q4_0",
@@ -229,7 +229,7 @@
           "filename": "gemma-3-1B-it-QAT-Q4_0.gguf"
         }
       ],
-      "notes": "No longer the low-RAM default (PLAN §7.2): measured by scripts/models/eval-polish.mjs, it answered 4 of 8 utterances that invite a reply instead of editing them — emitting Python for \"write me a function that parses the config file\" — against 1 of 8 for Granite 3.3 2B at the same 8 GB tier. Still selectable, and the polish guard catches the replies. Same provenance note as the 4B entry: lmstudio-community GGUF of Google's official QAT weights, because Google's own GGUF repo is licence-gated."
+      "notes": "No longer the low-memory default, on measured evidence: asked to polish eight utterances that invite a reply, it answered four of them instead of editing them — emitting Python for “write me a function that parses the config file” — against one in eight for Granite 3.3 2B at the same memory tier. Still selectable, and the polish guard catches the replies. Same provenance as the 4B entry: an lmstudio-community GGUF of Google's official QAT weights, because Google's own repo is licence-gated."
     },
     {
       "id": "phi-4-mini-instruct-q4_k_m",
@@ -251,7 +251,7 @@
           "filename": "Phi-4-mini-instruct-Q4_K_M.gguf"
         }
       ],
-      "notes": "MIT-licensed — the cleanest licence for strict environments (PLAN §7.2). Microsoft publishes ONNX but no first-party GGUF, so this is the lmstudio-community quantisation of microsoft/Phi-4-mini-instruct."
+      "notes": "MIT-licensed — the cleanest licence here for strict environments. Microsoft publishes ONNX but no first-party GGUF, so this is lmstudio-community's quantisation of microsoft/Phi-4-mini-instruct."
     },
     {
       "id": "llama-3.2-3b-instruct-q4_k_m",
@@ -317,7 +317,7 @@
           "filename": "olmo-2-1124-7B-instruct-Q4_K_M.gguf"
         }
       ],
-      "notes": "First-party GGUF from AI2. Fully open (data + weights) under Apache-2.0 — the easiest compliance story in the catalogue (PLAN §7.2)."
+      "notes": "First-party GGUF from AI2. Fully open — the training data as well as the weights — under Apache-2.0, which makes it the easiest model here to put in front of a legal team."
     },
     {
       "id": "granite-3.3-2b-instruct-q4_k_m",
@@ -340,7 +340,7 @@
         }
       ],
       "recommended": true,
-      "notes": "Low-RAM polish default (PLAN §7.2), on measured evidence rather than size: scripts/models/eval-polish.mjs scores it 1 failure in 8 utterances that invite a reply, against 4 in 8 for the Gemma 3 1B it replaces, with no regression on ordinary dictation. Same 8 GB tier. First-party GGUF from IBM, Apache-2.0, which is also the easiest licence here to put in front of a legal team."
+      "notes": "The low-memory polishing default, chosen on measured evidence rather than on size: one failure in eight utterances that invite a reply, against four in eight for the Gemma 3 1B it replaces, with no regression on ordinary dictation. Same memory tier. First-party GGUF from IBM under Apache-2.0."
     },
     {
       "id": "granite-4.1-3b-instruct-q4_k_m",
@@ -362,7 +362,7 @@
           "filename": "granite-4.1-3b-Q4_K_M.gguf"
         }
       ],
-      "notes": "First-party GGUF from IBM, Apache-2.0. Successor to the Granite 3.3 2B entry, which stays listed so an existing install is not orphaned. Granite is tuned for instruction-following over open-ended generation, which is what a polish pass wants: the failure that matters here is a model improving a sentence rather than cleaning it up (PLAN §7.2)."
+      "notes": "First-party GGUF from IBM, Apache-2.0. Successor to the Granite 3.3 2B entry, which stays listed so an existing install is not orphaned. Granite is tuned for following instructions rather than for open-ended generation, which is what a polish pass wants — the failure that matters here is a model improving your sentence instead of cleaning it up."
     },
     {
       "id": "gemma-4-e2b-it-qat-q4_0",
@@ -452,7 +452,7 @@
           "filename": "vocab.json"
         }
       ],
-      "notes": "Weights are NVIDIA's, unmodified, from nvidia/parakeet-tdt-0.6b-v3 (CC-BY-4.0). NVIDIA publishes .nemo, safetensors and a GGUF but no ONNX, so the conversion is Murmur's: exported by scripts/models/export_parakeet.py and hosted on this repo's own release rather than a third-party re-upload, so \"who converted this\" has an answer. Quantised per-channel — plain int8 scored 8/10 exact against the reference and turned \"Please add murmur\" into \"Plead murmur\"; per-channel scores 10/10 at the same size. A transducer stays silent through silence instead of inventing text, which matters most for meeting capture, where most of an hour is nobody speaking."
+      "notes": "Weights are NVIDIA's, unmodified, from nvidia/parakeet-tdt-0.6b-v3 (CC-BY-4.0). NVIDIA publishes .nemo, safetensors and a GGUF but no ONNX, so the conversion is Murmur's own: exported by scripts/models/export_parakeet.py in this repository and hosted on its own releases rather than a third-party re-upload, so “who converted this” has an answer you can go and check. Quantised per-channel: plain int8 scored 8 of 10 exact against the reference and turned “Please add murmur” into “Plead murmur”, where per-channel scores 10 of 10 at the same size. A transducer also stays silent through silence instead of inventing text, which matters most for meeting capture, where most of an hour is nobody speaking."
     }
   ]
 }

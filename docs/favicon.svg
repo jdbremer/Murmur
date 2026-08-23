@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!--
+    The pill's own waveform at rest, which is the app's mark everywhere else.
+    Currentcolor is no use in a favicon, so the accent is written out — and the
+    dark-scheme variant is a media query, because a near-black glyph vanishes
+    in a dark browser tab.
+  -->
+  <style>
+    path { stroke: #4338ca; }
+    @media (prefers-color-scheme: dark) { path { stroke: #a5a0ff; } }
+  </style>
+  <path
+    d="M4 10.5v3M8 8v8M12 5v14M16 8v8M20 10.5v3"
+    fill="none"
+    stroke-width="2.6"
+    stroke-linecap="round"
+  />
+</svg>

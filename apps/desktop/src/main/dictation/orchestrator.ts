@@ -827,6 +827,61 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
    * fires, so the engine's in-flight HTTP request is cancelled rather than left
    * to finish into a void.
    */
+  /**
+   * Polish a transcript that was already dictated (PLAN §2.2.1).
+   *
+   * The one thing History could not do: a dictation inserted raw — because
+   * polishing was off, or the model was still downloading, or the guard
+   * rejected the output — was raw for ever, and the only way to get a clean
+   * version was to say the whole thing again.
+   *
+   * Deliberately reuses the live pipeline's prompt, timeout and hallucination
+   * guard rather than reimplementing a simpler version: a second polish path
+   * that behaves differently from the first is a bug that only shows up in the
+   * output, weeks later, as "sometimes it rewrites things".
+   *
+   * Throws rather than returning null on failure. This runs because the user
+   * pressed a button, so silence is the wrong answer — unlike the live path,
+   * where a polish failure must never cost them the transcript.
+   */
+  async repolish(rawText: string, category: AppCategory): Promise<string> {
+    const engine = this.#deps.polish()
+    if (!engine) throw new Error('No polishing model is selected.')
+
+    const status = engine.status()
+    if (status.state !== 'ready') {
+      throw new Error(status.detail || 'The polishing engine is not running.')
+    }
+
+    const settings = this.#deps.settings()
+    const level = settings.polishingLevel === 'off' ? 'clean' : settings.polishingLevel
+
+    const prompt = buildPolishPrompt({
+      level,
+      profile: this.#deps.styleFor(category),
+      dictionary: this.#deps.dictionary(),
+      extraSpellings: [],
+      language: settings.language,
+    })
+
+    const result = await this.#withTimeout(
+      TIMEOUTS.polishMs,
+      'polishing',
+      engine.polish({
+        systemPrompt: prompt.systemPrompt,
+        examples: prompt.examples,
+        userText: rawText,
+        maxTokens: maxOutputTokens(rawText),
+      }),
+    )
+
+    const verdict = checkPolishOutput(rawText, result.text)
+    if (!verdict.ok) {
+      throw new Error(`The model rewrote that instead of tidying it (${verdict.reason}).`)
+    }
+    return result.text.trim()
+  }
+
   async #withTimeout<T>(ms: number, stage: string, work: Promise<T>): Promise<T> {
     let timer: NodeJS.Timeout | undefined
     const timeout = new Promise<never>((_resolve, reject) => {

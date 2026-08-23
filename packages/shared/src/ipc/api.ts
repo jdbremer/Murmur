@@ -148,10 +148,29 @@ export interface MurmurApi {
   readonly history: {
     query(request: Req<'history.query'>): Promise<Res<'history.query'>>
     remove(request: Req<'history.delete'>): Promise<void>
+    /** Undo a `remove`. Re-inserts the row; leaves every counter alone. */
+    restore(request: Req<'history.restore'>): Promise<void>
+    /** Run the polishing model over a transcript that was inserted raw. */
+    repolish(request: Req<'history.repolish'>): Promise<Res<'history.repolish'>>
     clear(): Promise<void>
     stats(): Promise<Res<'history.stats'>>
     /** Fires after every dictation, carrying the new lifetime totals. */
     subscribe(listener: (stats: Evt<'history.changed'>) => void): Unsubscribe
+  }
+
+  /**
+   * Getting your data out, and back in (PLAN §10.5).
+   *
+   * A `path` of `null` in any result means the user cancelled the file dialog,
+   * which is the ordinary outcome and never an error.
+   */
+  readonly data: {
+    exportHistory(request: Req<'data.exportHistory'>): Promise<Res<'data.exportHistory'>>
+    exportNotes(): Promise<Res<'data.exportNotes'>>
+    backup(request: Req<'data.backup'>): Promise<Res<'data.backup'>>
+    /** Read a backup without applying it, so the user can be shown what it holds. */
+    restorePreview(): Promise<Res<'data.restorePreview'>>
+    restore(request: Req<'data.restore'>): Promise<Res<'data.restore'>>
   }
 
   readonly insights: {

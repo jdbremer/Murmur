@@ -1,18 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { deriveNoteTitle, type Note } from '@murmur/shared'
 
-import {
-  Badge,
-  Button,
-  EmptyState,
-  ErrorCard,
-  LoadingState,
-  Section,
-  TextInput,
-} from '../../components/Section'
+import { Badge, Button, EmptyState, ErrorCard, Section, TextInput } from '../../components/Section'
+import { SkeletonList } from '../../components/Skeleton'
 import { formatTimestamp } from '../../format'
 import { useNotes } from '../../hooks/useNotes'
+import { useFocusShortcut } from '../../hooks/useFocusShortcut'
+import { useToast } from '../components/ToastHost'
 
 /**
  * Scratchpad (PLAN §2.2.7) — the floating window's other half.
@@ -29,15 +24,41 @@ import { useNotes } from '../../hooks/useNotes'
 export function NotesSection(): React.JSX.Element {
   const [search, setSearch] = useState('')
   const { notes, error, refresh } = useNotes(search)
+  const toast = useToast()
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  useFocusShortcut(searchRef)
 
   const open = (noteId: string | null): void => {
     void window.murmur.notes.openWindow({ noteId })
   }
 
+  /**
+   * Delete a note, reversibly.
+   *
+   * The confirmation dialog it replaces was the wrong instrument: notes are
+   * deleted often enough that a modal in the way becomes something you dismiss
+   * without reading, which is exactly when it stops protecting anything. Undo
+   * protects the case the dialog was for and costs nothing the rest of the
+   * time. Restoring re-creates rather than un-deletes, so the note comes back
+   * with a new id — invisible here, and the pin comes back with it.
+   */
   const remove = async (note: Note): Promise<void> => {
-    if (!window.confirm(`Delete “${deriveNoteTitle(note)}”? This cannot be undone.`)) return
     await window.murmur.notes.remove({ id: note.id })
     await refresh()
+    toast.show({
+      message: `Deleted “${deriveNoteTitle(note)}”`,
+      actionLabel: 'Undo',
+      onAction: () => {
+        void window.murmur.notes
+          .create({ title: note.title, body: note.body })
+          .then((restored) =>
+            note.pinned
+              ? window.murmur.notes.update({ id: restored.id, patch: { pinned: true } })
+              : restored,
+          )
+          .then(() => refresh())
+      },
+    })
   }
 
   const togglePin = async (note: Note): Promise<void> => {
@@ -54,27 +75,43 @@ export function NotesSection(): React.JSX.Element {
 
       <div className="mb-5">
         <TextInput
+          inputRef={searchRef}
           value={search}
           onChange={setSearch}
           ariaLabel="Search notes"
-          placeholder="Search your notes…"
+          placeholder="Search your notes…   /"
         />
       </div>
 
       {notes === null ? (
-        <LoadingState label="Loading your notes…" />
+        <SkeletonList label="Loading your notes…" rows={5} seed={5} />
+      ) : notes.length === 0 && search ? (
+        <EmptyState
+          icon="search"
+          title={`Nothing matches “${search}”`}
+          action={<Button onClick={() => setSearch('')}>Clear search</Button>}
+        >
+          Search looks through the title and the body of every note.
+        </EmptyState>
       ) : notes.length === 0 ? (
-        <EmptyState>
-          {search
-            ? `Nothing matches “${search}”.`
-            : 'No notes yet. Hover the pill and press the note button, or use New note above — then hold your dictation key and speak.'}
+        <EmptyState
+          icon="notes"
+          title="No notes yet"
+          action={
+            <Button variant="primary" onClick={() => open(null)}>
+              New note
+            </Button>
+          }
+        >
+          A scratchpad for the thoughts that have nowhere to go yet. Hover the pill and press the
+          note button, then hold your dictation key and speak.
         </EmptyState>
       ) : (
-        <div className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+        <div className="elev-1 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface-raised">
           {notes.map((note) => (
             <div
               key={note.id}
-              className="group flex items-start gap-4 px-4 py-3 transition-colors duration-150 hover:bg-canvas/60"
+              className="group flex items-start gap-4 px-4 py-3 transition-colors duration-150 hover:bg-surface-sunken/60"
             >
               <button
                 type="button"

@@ -8,11 +8,13 @@ import {
   Card,
   EmptyState,
   ErrorCard,
-  LoadingState,
   Section,
   TextInput,
   Toggle,
 } from '../../components/Section'
+import { SkeletonList } from '../../components/Skeleton'
+import { useToast } from '../components/ToastHost'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Dictionary (PLAN §2.2.2) — vocabulary boosts and replacement rules.
@@ -32,6 +34,7 @@ export function DictionarySection(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null)
   const [term, setTerm] = useState('')
   const [replacement, setReplacement] = useState('')
+  const toast = useToast()
 
   const active = useRef(true)
 
@@ -44,7 +47,7 @@ export function DictionarySection(): React.JSX.Element {
       })
       .catch((cause: unknown) => {
         if (!active.current) return
-        setError(cause instanceof Error ? cause.message : String(cause))
+        setError(errorMessage(cause))
         setEntries([])
       })
     return () => {
@@ -61,7 +64,7 @@ export function DictionarySection(): React.JSX.Element {
         setError(null)
       }
     } catch (cause) {
-      if (active.current) setError(cause instanceof Error ? cause.message : String(cause))
+      if (active.current) setError(errorMessage(cause))
     }
   }
 
@@ -126,11 +129,25 @@ export function DictionarySection(): React.JSX.Element {
       </Card>
 
       {entries === null ? (
-        <LoadingState label="Loading your dictionary…" />
+        <SkeletonList label="Loading your dictionary…" rows={4} />
       ) : entries.length === 0 ? (
-        <EmptyState>
-          Your dictionary is empty. Terms here feed both stages: the speech model’s prompt for
-          recognition, and the polish prompt for spelling and casing.
+        <EmptyState
+          icon="dictionary"
+          title="No terms yet"
+          action={
+            <Button
+              onClick={() => {
+                setTerm('Anthropic')
+                setReplacement('')
+              }}
+            >
+              Try an example
+            </Button>
+          }
+        >
+          Add the words Murmur keeps getting wrong — names, jargon, anything it has not heard
+          before. A term on its own steers recognition; a term with a replacement also fixes the
+          spelling afterwards.
         </EmptyState>
       ) : (
         <ul className="space-y-2">
@@ -167,7 +184,21 @@ export function DictionarySection(): React.JSX.Element {
                     <Button
                       variant="danger"
                       onClick={() =>
-                        void run(() => window.murmur.dictionary.remove({ id: entry.id }))
+                        void run(() => window.murmur.dictionary.remove({ id: entry.id })).then(() =>
+                          toast.show({
+                            message: `Removed “${entry.term}”`,
+                            actionLabel: 'Undo',
+                            onAction: () => {
+                              void run(() =>
+                                window.murmur.dictionary.create({
+                                  term: entry.term,
+                                  replacement: entry.replacement,
+                                  enabled: entry.enabled,
+                                }),
+                              )
+                            },
+                          }),
+                        )
                       }
                     >
                       Delete

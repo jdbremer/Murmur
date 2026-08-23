@@ -8,6 +8,7 @@ import {
   startOfWeek,
   type HeatmapCell,
 } from '../src/renderer/hub/sections/insights/heatmap'
+import { dailyWords } from '../src/renderer/hub/sections/insights/series'
 
 /**
  * The streak grid's layout (PLAN §2.2.2).
@@ -167,5 +168,36 @@ describe('buildHeatmap', () => {
 
     // Columns start 26 Jul, 2 Aug, 9 Aug — two distinct months.
     expect(monthLabels.map((label) => label.column)).toEqual([0, 1])
+  })
+})
+
+describe('dailyWords', () => {
+  const day = (d: string, words: number) => ({ day: d, words, dictations: 1 })
+
+  it('zero-fills the days that were never dictated on', () => {
+    // The payload only carries days with activity, so a gap has to be
+    // reconstructed — otherwise three dictations a fortnight apart plot as
+    // steady daily use.
+    const series = dailyWords([day('2026-08-20', 40), day('2026-08-23', 90)], '2026-08-23', 5)
+    expect(series).toEqual([0, 40, 0, 0, 90])
+  })
+
+  it('ends on today and runs oldest first', () => {
+    const series = dailyWords([day('2026-08-23', 7)], '2026-08-23', 3)
+    expect(series).toHaveLength(3)
+    expect(series[series.length - 1]).toBe(7)
+  })
+
+  it('ignores days after today and days outside the window', () => {
+    const series = dailyWords(
+      [day('2026-08-01', 5), day('2026-08-23', 3), day('2026-08-30', 100)],
+      '2026-08-23',
+      3,
+    )
+    expect(series).toEqual([0, 0, 3])
+  })
+
+  it('is all zeroes for a user who has never dictated', () => {
+    expect(dailyWords([], '2026-08-23', 4)).toEqual([0, 0, 0, 0])
   })
 })

@@ -284,6 +284,60 @@ export class DictationsRepository {
   }
 
   /**
+   * Put back a row that {@link delete} removed — the undo behind the toast.
+   *
+   * Deliberately *not* `insert`. Deleting a transcript leaves every counter
+   * standing (the dictation still happened; only the text is gone), so putting
+   * the text back must leave them standing too. Routing undo through `insert`
+   * would add the row's words to the lifetime total a second time, and nothing
+   * ever recomputes those counters to notice the drift.
+   *
+   * `OR IGNORE` rather than an existence check: a double-tapped Undo, or an
+   * undo racing a re-sync, should be a no-op rather than a constraint error
+   * surfacing as a failure toast for an operation that already succeeded.
+   */
+  restore(record: DictationRecord): boolean {
+    return (
+      this.#db
+        .prepare(
+          `INSERT OR IGNORE INTO dictations
+             (id, ts, raw_text, polished_text, app_bundle_id, app_name, app_category,
+              duration_ms, stt_model, polish_model, timings_json)
+           VALUES (@id, @ts, @rawText, @polishedText, @appBundleId, @appName, @appCategory,
+                   @durationMs, @sttModelId, @polishModelId, @timingsJson)`,
+        )
+        .run({
+          id: record.id,
+          ts: record.ts,
+          rawText: record.rawText,
+          polishedText: record.polishedText,
+          appBundleId: record.appBundleId,
+          appName: record.appName,
+          appCategory: record.appCategory,
+          durationMs: record.durationMs,
+          sttModelId: record.sttModelId,
+          polishModelId: record.polishModelId,
+          timingsJson: JSON.stringify(record.timings),
+        }).changes > 0
+    )
+  }
+
+  /**
+   * Replace a row's polished text — what re-polishing from History writes.
+   *
+   * Only that column moves. The raw transcript is what was actually said and is
+   * never rewritten, the timestamp is when it was said, and the lifetime
+   * counters stay put: polishing the same sentence a second time did not make
+   * the user say it twice.
+   */
+  setPolishedText(id: string, polishedText: string): DictationRecord | null {
+    const changed = this.#db
+      .prepare(`UPDATE dictations SET polished_text = ? WHERE id = ?`)
+      .run(polishedText, id).changes
+    return changed > 0 ? this.get(id) : null
+  }
+
+  /**
    * Delete everything, lifetime counters included.
    *
    * The one place the totals go backwards. "Delete all my dictations" is an
@@ -554,6 +608,24 @@ export class DictionaryRepository {
     return stored ? toDictionaryEntry(stored) : entry
   }
 
+  /**
+   * Put an entry back with its original id — the restore half of a backup.
+   *
+   * `OR IGNORE` on both the id and the term makes restoring idempotent: the
+   * same backup applied twice is the same database, and a term the user has
+   * since edited by hand is left as they edited it rather than being silently
+   * reverted by a file from last month.
+   */
+  restore(entry: DictionaryEntry): boolean {
+    return (
+      this.#db
+        .prepare(
+          `INSERT OR IGNORE INTO dictionary (id, term, replacement, enabled) VALUES (?, ?, ?, ?)`,
+        )
+        .run(entry.id, entry.term, entry.replacement, entry.enabled ? 1 : 0).changes > 0
+    )
+  }
+
   update(id: string, patch: DictionaryEntryPatch): DictionaryEntry {
     const existing = this.#db.prepare(`SELECT * FROM dictionary WHERE id = ?`).get(id) as
       DictionaryRow | undefined
@@ -685,6 +757,24 @@ export class NotesRepository {
     return note
   }
 
+  /**
+   * Put a note back exactly as it was, timestamps and pin included.
+   *
+   * Not `create`, which stamps a fresh id and a fresh `createdAt` — restoring a
+   * backup must not rewrite the day every note was written.
+   */
+  restore(note: Note): boolean {
+    return (
+      this.#db
+        .prepare(
+          `INSERT OR IGNORE INTO notes (id, title, body, created_at, updated_at, pinned)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(note.id, note.title, note.body, note.createdAt, note.updatedAt, note.pinned ? 1 : 0)
+        .changes > 0
+    )
+  }
+
   update(id: string, patch: NotePatch): Note {
     const existing = this.#db.prepare(`SELECT * FROM notes WHERE id = ?`).get(id) as
       NoteRow | undefined
@@ -778,6 +868,17 @@ export class SnippetsRepository {
       .prepare(`SELECT * FROM snippets WHERE trigger = ? COLLATE NOCASE`)
       .get(snippet.trigger) as SnippetRow | undefined
     return stored ? toSnippet(stored) : snippet
+  }
+
+  /** Put a snippet back with its original id. See the dictionary's `restore`. */
+  restore(snippet: Snippet): boolean {
+    return (
+      this.#db
+        .prepare(
+          `INSERT OR IGNORE INTO snippets (id, trigger, expansion, enabled) VALUES (?, ?, ?, ?)`,
+        )
+        .run(snippet.id, snippet.trigger, snippet.expansion, snippet.enabled ? 1 : 0).changes > 0
+    )
   }
 
   update(id: string, patch: SnippetPatch): Snippet {

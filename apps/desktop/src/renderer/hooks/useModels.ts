@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { EnginesStatus, ModelDownloadProgress, ModelsList } from '@murmur/shared'
+import { errorMessage } from '../lib/errors'
 
 /**
  * Everything the Models section reads and writes (PLAN §8).
@@ -55,7 +56,7 @@ export function useModels(): UseModels {
       setEngines(nextEngines)
       setError(null)
     } catch (cause) {
-      if (active.current) setError(messageOf(cause))
+      if (active.current) setError(errorMessage(cause))
     }
   }, [])
 
@@ -74,7 +75,7 @@ export function useModels(): UseModels {
         setError(null)
       })
       .catch((cause: unknown) => {
-        if (active.current) setError(messageOf(cause))
+        if (active.current) setError(errorMessage(cause))
       })
 
     const unsubscribeProgress = window.murmur.models.onDownloadProgress((progress) => {
@@ -105,7 +106,7 @@ export function useModels(): UseModels {
         setError(null)
         await refresh()
       } catch (cause) {
-        if (active.current) setError(messageOf(cause))
+        if (active.current) setError(errorMessage(cause))
       } finally {
         if (active.current) setBusyModelId(null)
       }
@@ -124,7 +125,7 @@ export function useModels(): UseModels {
       await window.murmur.models.downloadStart({ modelId })
       setError(null)
     } catch (cause) {
-      setError(messageOf(cause))
+      setError(errorMessage(cause))
     }
   }, [])
 
@@ -135,7 +136,7 @@ export function useModels(): UseModels {
       try {
         await window.murmur.models.downloadCancel({ downloadId: progress.downloadId })
       } catch (cause) {
-        setError(messageOf(cause))
+        setError(errorMessage(cause))
       }
     },
     [downloads],
@@ -186,8 +187,4 @@ export function useModels(): UseModels {
     remove,
     importFile,
   }
-}
-
-function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause)
 }

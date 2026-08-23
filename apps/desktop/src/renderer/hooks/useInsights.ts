@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { Insights } from '@murmur/shared'
+import { errorMessage } from '../lib/errors'
 
 /**
  * The Insights payload, refreshed whenever a dictation lands.
@@ -25,7 +26,7 @@ export function useInsights(): {
       setInsights(await window.murmur.insights.get())
       setError(null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorMessage(cause))
     }
   }, [])
 
@@ -39,7 +40,7 @@ export function useInsights(): {
           if (active) setInsights(value)
         })
         .catch((cause: unknown) => {
-          if (active) setError(cause instanceof Error ? cause.message : String(cause))
+          if (active) setError(errorMessage(cause))
         })
     }
 
@@ -57,7 +58,7 @@ export function useInsights(): {
       setInsights(await window.murmur.insights.reset())
       setError(null)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorMessage(cause))
     }
   }, [])
 

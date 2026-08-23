@@ -36,6 +36,31 @@ export const HotkeyKeySchema = z.enum([
 ])
 export type HotkeyKey = z.infer<typeof HotkeyKeySchema>
 
+/**
+ * How a dictation key reads when the UI names it — "hold **fn** and speak".
+ *
+ * `null` for `custom`, which is the honest answer: the app knows the user bound
+ * something but not what it prints as, and inventing a label for it would be
+ * worse than leaving the sentence to work around its absence.
+ *
+ * Shared because four surfaces show this key — the pill's tooltip, the
+ * Scratchpad's hint, Settings, and the Dashboard — and three of them had grown
+ * their own copy of the same map.
+ */
+const HOTKEY_LABELS: Partial<Record<HotkeyKey, string>> = {
+  fn: 'fn',
+  rightCmd: '⌘',
+  rightOpt: '⌥',
+  rightCtrl: 'ctrl',
+  ctrlSpace: 'ctrl + space',
+  altSpace: 'alt + space',
+  capsLock: 'caps lock',
+}
+
+export function hotkeyLabel(key: HotkeyKey): string | null {
+  return HOTKEY_LABELS[key] ?? null
+}
+
 /** Presets shown on macOS (no Windows chords). */
 export const MAC_HOTKEY_KEYS = [
   'fn',

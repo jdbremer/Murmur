@@ -1,12 +1,18 @@
-import { BrowserWindow, nativeTheme, shell } from 'electron'
+import { join } from 'node:path'
+
+import { app, BrowserWindow, nativeTheme, screen, shell } from 'electron'
 
 import { loadRenderer, PRELOAD_PATH } from './renderer'
+import { readWindowState, restoreBounds, writeWindowState } from './window-state'
 
 /** PLAN §2.2 — sidebar + content pane, sized for the reference layout. */
 const HUB_WIDTH = 1040
 const HUB_HEIGHT = 700
 const HUB_MIN_WIDTH = 860
 const HUB_MIN_HEIGHT = 560
+
+/** Long enough that a drag is one write, short enough to survive a hard quit. */
+const SAVE_DEBOUNCE_MS = 400
 
 /**
  * `--color-canvas` from theme.css, in both themes.
@@ -31,10 +37,22 @@ function canvasColour(): string {
   return nativeTheme.shouldUseDarkColors ? CANVAS.dark : CANVAS.light
 }
 
+/** Beside the settings file, not inside it: geometry is not a preference. */
+function statePath(): string {
+  return join(app.getPath('userData'), 'window-state.json')
+}
+
 export function createHubWindow(): BrowserWindow {
+  const path = statePath()
+  const restored = restoreBounds(readWindowState(path), screen.getAllDisplays(), {
+    minWidth: HUB_MIN_WIDTH,
+    minHeight: HUB_MIN_HEIGHT,
+    defaultWidth: HUB_WIDTH,
+    defaultHeight: HUB_HEIGHT,
+  })
+
   const window = new BrowserWindow({
-    width: HUB_WIDTH,
-    height: HUB_HEIGHT,
+    ...restored.bounds,
     minWidth: HUB_MIN_WIDTH,
     minHeight: HUB_MIN_HEIGHT,
     show: false,
@@ -54,7 +72,42 @@ export function createHubWindow(): BrowserWindow {
   })
 
   // Avoid the white flash before React paints.
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => {
+    if (restored.maximized) window.maximize()
+    window.show()
+  })
+
+  /**
+   * Save on a debounce rather than on every resize event.
+   *
+   * A live drag fires `resize` continuously; writing the file each time would
+   * be hundreds of disk writes for one gesture. Normal bounds only — a
+   * maximized window reports the screen as its size, and saving that would
+   * mean un-maximizing gave you a full-screen-sized window instead of the one
+   * you had before.
+   */
+  let saveTimer: NodeJS.Timeout | undefined
+  const save = (): void => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      if (window.isDestroyed()) return
+      const bounds = window.getNormalBounds()
+      writeWindowState(path, { ...bounds, maximized: window.isMaximized() })
+    }, SAVE_DEBOUNCE_MS)
+    saveTimer.unref?.()
+  }
+
+  window.on('resize', save)
+  window.on('move', save)
+  window.on('maximize', save)
+  window.on('unmaximize', save)
+  // The debounce would otherwise be cancelled by the process exiting first.
+  window.on('close', () => {
+    if (saveTimer) clearTimeout(saveTimer)
+    if (window.isDestroyed()) return
+    const bounds = window.getNormalBounds()
+    writeWindowState(path, { ...bounds, maximized: window.isMaximized() })
+  })
 
   // Keep it in step with a theme change (the OS preference flipping, or the
   // user picking a different Appearance), for as long as this window lives.

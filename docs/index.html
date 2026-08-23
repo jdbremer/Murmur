@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Murmur — dictation that never leaves your Mac</title>
+    <meta
+      name="description"
+      content="Hold a key, speak, and the words land in whatever you were typing into. Murmur transcribes and polishes on your own machine — no account, no server, no upload."
+    />
+    <meta name="theme-color" content="#f7f4ef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0d10" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Murmur — dictation that never leaves your Mac" />
+    <meta
+      property="og:description"
+      content="Hold a key, speak, and the words land in whatever you were typing into. Transcribed and polished on your own machine."
+    />
+    <meta property="og:image" content="https://jdbremer.github.io/Murmur/shots/dashboard.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link
+      rel="preload"
+      href="fonts/instrument-serif-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <header class="masthead">
+      <div class="shell">
+        <a class="wordmark" href="#top">
+          <!-- The pill's own waveform, at rest — the app's mark. -->
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+          >
+            <path d="M4 10.5v3M8 8v8M12 5v14M16 8v8M20 10.5v3" />
+          </svg>
+          Murmur
+        </a>
+        <nav aria-label="Sections">
+          <a href="#how">How it works</a>
+          <a href="#features">Features</a>
+          <a href="#privacy">Privacy</a>
+          <a href="#download">Download</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- ================================================================ -->
+      <section class="hero">
+        <div class="shell">
+          <div>
+            <p class="eyebrow">Local dictation for <span data-platform-name>macOS</span></p>
+            <h1>Speak. The words <em>are just there.</em></h1>
+            <p class="lead">
+              Hold one key anywhere on your <span data-device>Mac</span> and talk. Murmur
+              transcribes what you said, tidies it up, and types it into whatever you were already
+              working in — a message, an email, an editor, a search box.
+            </p>
+            <p class="lead" style="margin-top: 0.85rem">
+              All of it runs on your machine. There is no account, no server and nothing to upload.
+            </p>
+
+            <!-- The label, the link and the line beneath are all rewritten by
+                 murmur.js once it knows which platform is asking. What is in the
+                 markup is the answer that is right without JavaScript: the
+                 releases page, which lists every build. -->
+            <div class="hero-actions">
+              <a
+                class="button button--primary"
+                data-download
+                href="https://github.com/jdbremer/Murmur/releases/latest"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="17"
+                  height="17"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.9"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M12 4v12M7 11l5 5 5-5M5 20h14" />
+                </svg>
+                <span data-download-label>Download</span>
+              </a>
+              <a class="button button--ghost" href="https://github.com/jdbremer/Murmur">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="17"
+                  height="17"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13" />
+                </svg>
+                Read the source
+              </a>
+            </div>
+
+            <p class="alt-downloads" data-alt-downloads hidden></p>
+
+            <p class="hero-meta" data-requirements>
+              <strong>macOS 13 Ventura or later</strong> · Free and <strong>MIT licensed</strong>
+            </p>
+          </div>
+
+          <!-- The hero is the product demonstrating itself: this is the app's own
+               waveform maths and its own timings, not a video. -->
+          <div class="stage" data-pill-stage data-state="idle">
+            <div class="stage-app">
+              <div class="stage-bar">
+                <span></span><span></span><span></span>
+                <span class="stage-title">Messages</span>
+              </div>
+              <div class="stage-body">
+                <p class="stage-to">To: Priya</p>
+                <p class="stage-text" data-stage-text></p>
+              </div>
+            </div>
+            <div class="stage-pill" data-state="idle">
+              <div class="pill" data-pill data-state="idle">
+                <canvas data-pill-canvas width="120" height="12" aria-hidden="true"></canvas>
+              </div>
+              <span class="pill-halo" aria-hidden="true"></span>
+            </div>
+            <p class="stage-caption" data-stage-caption>Resting — 44 × 8 pixels</p>
+          </div>
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <!-- ================================================================ -->
+      <section id="how">
+        <div class="shell">
+          <div class="section-head reveal">
+            <p class="eyebrow">How it works</p>
+            <h2>Three seconds, start to finish.</h2>
+            <p class="lead">
+              No window to open, no button to find, nothing to paste. The only thing that changes on
+              your screen is a sliver of a pill at the bottom, and then your words.
+            </p>
+          </div>
+
+          <ol class="steps reveal">
+            <li class="step">
+              <h3>Hold your key</h3>
+              <p data-hotkey-copy>
+                <kbd>fn</kbd> by default — or right <kbd>⌘</kbd>, right <kbd>⌥</kbd>, or one you
+                pick. It works in every app, including the ones with no dictation of their own.
+              </p>
+            </li>
+            <li class="step">
+              <h3>Say it normally</h3>
+              <p>
+                Ums, false starts and second thoughts are fine. A small language model cleans the
+                transcript into the sentence you meant, in the tone that suits the app you are in.
+              </p>
+            </li>
+            <li class="step">
+              <h3>Let go</h3>
+              <p>
+                The text is typed in where your cursor already was. A copy lands in your history in
+                case you want it again.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section style="padding-top: 0">
+        <div class="shell">
+          <figure class="shot reveal">
+            <div class="shot-frame">
+              <div class="shot-chrome"><span></span><span></span><span></span></div>
+              <img
+                src="shots/dashboard.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                decoding="async"
+                alt='Murmur&apos;s dashboard: a green status line reading "Murmur is ready — hold fn anywhere on your Mac and speak", three statistics with a sparkline, the most recent dictations, and the two models currently loaded.'
+              />
+            </div>
+            <figcaption>
+              <b>The dashboard answers the only question that matters first:</b> can you dictate
+              right now? If something is missing — a permission, a model — it says which, and the
+              button next to it goes there.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section id="features">
+        <div class="shell">
+          <div class="section-head reveal">
+            <p class="eyebrow">What it does</p>
+            <h2>A dictation app that learned your vocabulary.</h2>
+            <p class="lead">
+              The transcript is the beginning, not the end. Murmur knows the names you use, expands
+              the phrases you repeat, and writes differently in Slack than it does in email.
+            </p>
+          </div>
+
+          <div class="features reveal">
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2zm2 0v12h11" />
+              </svg>
+              <h3>A dictionary that sticks</h3>
+              <p>
+                Teach it the names, jargon and acronyms it keeps getting wrong. They steer the
+                speech model and the polishing pass, so the spelling holds.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M13 3 5 14h6l-1 7 8-11h-6z" />
+              </svg>
+              <h3>Snippets</h3>
+              <p>
+                Say a short phrase, get a stored block of text — a calendar link, an address, a
+                standard reply. Expanded after polishing, so it lands exactly as written.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M12 4c4.4 0 8 3.1 8 7 0 3.3-2.7 5-5 5h-1.5a1.5 1.5 0 0 0 0 3H14c0 .6-.9 1-2 1-4.4 0-8-3.6-8-8s3.6-8 8-8z"
+                />
+              </svg>
+              <h3>Tone per app</h3>
+              <p>
+                Punctuation, formality and emoji set separately for work, email, personal and
+                everything else — picked from whichever app is in front.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13" />
+              </svg>
+              <h3>Vibe coding</h3>
+              <p>
+                In VS Code, Cursor and Windsurf it reads the identifiers and filenames in front of
+                you, so <code>useNotes.ts</code> comes out spelled that way.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM8 10v4M12 8v8M16 11v2"
+                />
+              </svg>
+              <h3>Meetings</h3>
+              <p>
+                Record a call and transcribe it as it happens — both sides — straight to a Markdown
+                file you own. Audio only; your screen is never captured.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M6 4h8l4 4v12H6zM14 4v4h4M9 14v2.5M12 12.5v5.5M15 14v2.5" />
+              </svg>
+              <h3>Transcribe a file</h3>
+              <p>
+                Drop in a voice memo, a podcast or a video. MP3, MP4, WAV, FLAC, Opus, MOV and more,
+                decoded and transcribed without leaving the machine.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M6 4h8l4 4v12H6zM14 4v4h4M9 13h6M9 16.5h4" />
+              </svg>
+              <h3>Scratchpad</h3>
+              <p>
+                A floating window one click from the pill, for the thoughts that have nowhere to go
+                yet. Searchable, pinnable, and untouched by the history retention window.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM16 16l5 5" />
+              </svg>
+              <h3>Everything on ⌘K</h3>
+              <p>
+                A command palette that goes anywhere in the app, and full-text search across
+                everything you have ever dictated.
+              </p>
+            </article>
+          </div>
+
+          <div class="shot-pair">
+            <figure class="shot reveal">
+              <div class="shot-frame">
+                <div class="shot-chrome"><span></span><span></span><span></span></div>
+                <img
+                  src="shots/history.webp"
+                  width="2880"
+                  height="1800"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The history screen: dictations grouped under date headings with the time in a left gutter, a search box, and per-row actions for copying, polishing again, saving to the scratchpad and deleting."
+                />
+              </div>
+              <figcaption>
+                <b>Everything you have said, searchable.</b> Export it as Markdown, CSV, JSON or
+                plain text whenever you like — it is your writing.
+              </figcaption>
+            </figure>
+
+            <figure class="shot reveal">
+              <div class="shot-frame">
+                <div class="shot-chrome"><span></span><span></span><span></span></div>
+                <img
+                  src="shots/insights.webp"
+                  width="2880"
+                  height="1800"
+                  loading="lazy"
+                  decoding="async"
+                  alt="The insights screen: a speaking-rate dial reading 138 words per minute, a lifetime word count with a sparkline, counts of what the polishing pass fixed, a daily streak heatmap, and a breakdown of which apps were dictated into."
+                />
+              </div>
+              <figcaption>
+                <b>Numbers computed on your machine, from your machine.</b> The speaking rate is
+                compared against published typing speeds — never against other people, because there
+                is no one else to compare you to.
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section id="privacy" class="night">
+        <div class="shell">
+          <div class="section-head reveal">
+            <p class="eyebrow">Privacy</p>
+            <h2>Nothing you say leaves this <span data-device>Mac</span>.</h2>
+            <p class="lead">
+              Not as a policy — as an architecture. There is no account to make, no server to talk
+              to and no network call in the dictation path at all. You can read the code that proves
+              it.
+            </p>
+          </div>
+
+          <div class="claims reveal">
+            <div class="claim">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <div>
+                <h3>The models run here</h3>
+                <p>
+                  Speech recognition and polishing both happen on your own hardware, through
+                  whisper.cpp, llama.cpp and ONNX Runtime. Murmur talks to them over loopback, and
+                  to nothing else.
+                </p>
+              </div>
+            </div>
+
+            <div class="claim">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <div>
+                <h3>Audio is never written to disk</h3>
+                <p>
+                  Not by default. The microphone stays warm for a few minutes around a dictation so
+                  the first syllable is never clipped; that audio lives in a rolling buffer of about
+                  300 milliseconds and is continuously overwritten.
+                </p>
+              </div>
+            </div>
+
+            <div class="claim">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <div>
+                <h3>The key listener matches one key</h3>
+                <p>
+                  Input Monitoring lets Murmur notice your dictation key being held anywhere on the
+                  system. The tap is listen-only and matches the one key you chose. No other
+                  keystroke is read, stored or sent anywhere.
+                </p>
+              </div>
+            </div>
+
+            <div class="claim">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <div>
+                <h3>Your screen is not read</h3>
+                <p>
+                  Accessibility is used to type the finished text where your cursor is. Murmur looks
+                  up which app is frontmost — the bundle id, nothing else — to pick a tone.
+                </p>
+              </div>
+            </div>
+
+            <div class="claim">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <div>
+                <h3>Every model is pinned and checksummed</h3>
+                <p>
+                  The catalog ships with the app. Each download is pinned to an immutable revision
+                  and verified against a published SHA-256; a moved file is a failed download, not a
+                  silent swap.
+                </p>
+              </div>
+            </div>
+
+            <div class="claim">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <div>
+                <h3>You can take it all with you</h3>
+                <p>
+                  History as Markdown, CSV, JSON or text. Notes as Markdown files with their dates
+                  in front matter. Or one backup file holding the lot, restorable anywhere.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <p class="night-note reveal">
+            <strong>The two exceptions, stated plainly.</strong> Checking for an update contacts
+            GitHub, because that is where the update is — you can switch it off. And if you turn on
+            meeting capture, Murmur records the other side of a call; it asks first, captures audio
+            only, and writes the transcript to a file you choose.
+          </p>
+
+          <figure class="shot reveal" style="margin-top: 3rem">
+            <div class="shot-frame">
+              <div class="shot-chrome"><span></span><span></span><span></span></div>
+              <img
+                src="shots/export-dark.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                decoding="async"
+                alt="The Your data section of Murmur's settings in dark mode, offering exports of dictations and notes, a full backup, and a restore."
+              />
+            </div>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ================================================================ -->
+      <section>
+        <div class="shell">
+          <div class="section-head reveal">
+            <p class="eyebrow">Models</p>
+            <h2>It picks one for your Mac. You can pick another.</h2>
+            <p class="lead">
+              Seventeen models across speech and polishing, every one of them running locally.
+              Murmur opens with a single recommendation sized to your actual memory, and the rest
+              are one search away — filterable by publisher and by licence, which is what people
+              actually filter by.
+            </p>
+          </div>
+
+          <figure class="shot reveal" style="margin-top: 3rem">
+            <div class="shot-frame">
+              <div class="shot-chrome"><span></span><span></span><span></span></div>
+              <img
+                src="shots/models.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                decoding="async"
+                alt="Murmur's models screen: a Best for this Mac panel recommending Whisper large-v3-turbo and Gemma 3 4B for a 32 GB Apple Silicon machine, above a searchable two-column catalog with hardware-fit badges."
+              />
+            </div>
+            <figcaption>
+              <b>Every entry states where its weights came from</b> — the organisation, the country
+              of origin and the licence — because that is the claim the whole product rests on.
+            </figcaption>
+          </figure>
+
+          <figure class="shot reveal" style="margin-top: 3.5rem">
+            <div class="shot-frame">
+              <div class="shot-chrome"><span></span><span></span><span></span></div>
+              <img
+                src="shots/palette.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                decoding="async"
+                alt="The command palette open over the dashboard, filtered to entries matching the letters t-r-a."
+              />
+            </div>
+            <figcaption>
+              <b>⌘K goes anywhere.</b> Type two or three letters — even just the initials — and
+              press return.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <hr class="rule" />
+
+      <!-- ================================================================ -->
+      <section id="download" class="download">
+        <div class="shell">
+          <div class="section-head reveal">
+            <p class="eyebrow">Download</p>
+            <h2>Free, open source, and yours.</h2>
+            <p class="lead" data-install-copy>
+              Grab the disk image, drag it to Applications, and hold your key. First run walks you
+              through the permissions and downloads a model sized for your machine.
+            </p>
+          </div>
+
+          <div class="hero-actions reveal">
+            <a
+              class="button button--primary"
+              data-download
+              href="https://github.com/jdbremer/Murmur/releases/latest"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="17"
+                height="17"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.9"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 4v12M7 11l5 5 5-5M5 20h14" />
+              </svg>
+              <span data-download-label>Download the latest release</span>
+            </a>
+            <a class="button button--ghost" href="https://github.com/jdbremer/Murmur#readme">
+              Read the documentation
+            </a>
+          </div>
+
+          <p class="alt-downloads reveal" data-alt-downloads hidden></p>
+
+          <div class="specs reveal" data-specs>
+            <span>macOS 13 Ventura or later</span>
+            <span>Windows 10 &amp; 11</span>
+            <span>Linux (X11)</span>
+            <span>MIT licence</span>
+            <span>No account, ever</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="shell">
+        <span>© 2026 Jordan Bremer · MIT</span>
+        <nav aria-label="Elsewhere">
+          <a href="https://github.com/jdbremer/Murmur">GitHub</a>
+          <a href="https://github.com/jdbremer/Murmur/releases">Releases</a>
+          <a href="https://github.com/jdbremer/Murmur/issues">Report a problem</a>
+          <a href="https://github.com/jdbremer/Murmur/blob/main/LICENSE">Licence</a>
+        </nav>
+      </div>
+    </footer>
+
+    <script src="murmur.js"></script>
+  </body>
+</html>
