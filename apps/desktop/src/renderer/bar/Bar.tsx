@@ -11,7 +11,7 @@ import type {
 
 import { useReducedMotion } from '../hooks/useReducedMotion'
 import { BarCanvas, CheckPulse } from './BarCanvas'
-import { barHeights } from './level'
+import { LevelEnvelope, waveOffsets } from './level'
 import { Nub } from './Nub'
 import {
   BAR,
@@ -695,12 +695,24 @@ function Halo({
   useEffect(() => {
     if (!live) return
     let frame = 0
-    let shown = 0
-    const tick = (): void => {
+    let previous = 0
+    // The same envelope the canvas smooths the wave with, for two reasons.
+    //
+    // It is frame-rate independent — `1 - e^(-dt/τ)` rather than a fixed
+    // fraction per frame. A constant lerp makes the light converge twice as
+    // fast on a 120 Hz display as on a 60 Hz one, so the same voice would look
+    // different on the laptop and the external monitor.
+    //
+    // And it is the *same* curve, so the halo and the line rise and fall
+    // together. Two hand-tuned smoothings drifting apart is how a glow starts
+    // lagging the waveform it is supposed to belong to.
+    const envelope = new LevelEnvelope()
+    const tick = (timestamp: number): void => {
       frame = requestAnimationFrame(tick)
-      const target = Math.min(1, Math.max(0, levelRef.current ?? 0))
-      shown += (target - shown) * 0.18
-      ref.current?.style.setProperty('--bar-voice', shown.toFixed(3))
+      const dt = previous === 0 ? 16 : Math.min(100, timestamp - previous)
+      previous = timestamp
+      envelope.push(levelRef.current ?? 0)
+      ref.current?.style.setProperty('--bar-voice', envelope.advance(dt).toFixed(3))
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
@@ -1001,11 +1013,17 @@ function BarInterior({
 }
 
 /**
- * Reduce Motion: static level dots instead of dancing bars (PLAN §15.5).
+ * Reduce Motion: the same wave, held still (PLAN §15.5).
  *
- * They still show *something* — a dictation tool that gives no sign it can hear
- * you is worse than one that animates — but they repaint a few times a second,
- * not sixty, and nothing scrolls.
+ * It still shows *something* — a dictation tool that gives no sign it can hear
+ * you is worse than one that animates — but it repaints a few times a second,
+ * not sixty, and the phase never advances, so the line bends with your voice
+ * without ever travelling.
+ *
+ * Drawn as the wave rather than as a row of bars because Reduce Motion is a
+ * motion preference, not a *different product*: someone who turns it on should
+ * recognise the same instrument, quieted. The bars this used to draw were left
+ * over from when the pill itself drew bars.
  */
 function StaticLevel({
   shape,
@@ -1022,24 +1040,42 @@ function StaticLevel({
     return () => clearInterval(timer)
   }, [shape, levelRef])
 
-  const count = shape === 'waveform' ? 7 : 5
-  const heights = barHeights(
-    Array.from({ length: count }, () => (shape === 'waveform' ? level : 0)),
-  )
+  // `dots` keeps its dots — that is the resting hint, and it is already still.
+  if (shape === 'dots') {
+    return (
+      <div className="flex items-center gap-[5px]" aria-hidden="true">
+        {Array.from({ length: 5 }, (_, index) => (
+          <span key={index} className="size-[2px] rounded-full bg-white opacity-[0.34]" />
+        ))}
+      </div>
+    )
+  }
+
+  const width = BAR.waveWidth
+  const height = BAR.activeHeight
+  const middle = height / 2
+  // Phase fixed at 0: the shape answers to the voice, never to the clock.
+  const offsets = shape === 'waveform' ? waveOffsets(level, 0, 28) : null
+  const points = offsets
+    ? offsets
+        .map(
+          (y, index) =>
+            `${((index / (offsets.length - 1)) * width).toFixed(2)},${(middle + y).toFixed(2)}`,
+        )
+        .join(' ')
+    : `0,${middle} ${width},${middle}`
 
   return (
-    <div className="flex items-center gap-[3px]" aria-hidden="true">
-      {heights.map((height, index) => (
-        <span
-          key={index}
-          className="w-[2px] rounded-full bg-white"
-          style={{
-            height: shape === 'shimmer' ? 2 : height,
-            opacity: shape === 'dots' ? 0.34 : 0.9,
-          }}
-        />
-      ))}
-    </div>
+    <svg width={width} height={height} aria-hidden="true" style={{ display: 'block' }}>
+      <polyline
+        points={points}
+        fill="none"
+        stroke="rgba(255,255,255,0.9)"
+        strokeWidth={BAR.waveLineWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 

@@ -84,20 +84,28 @@ export const BAR = {
   /** Error auto-dismiss (PLAN §2.1) — likewise shared. */
   errorHoldMs: MOMENTARY_HOLD_MS.error,
   /**
-   * Waveform: 12 bars, 2 px wide, with a 3 px gap (PLAN §2.1).
+   * The live wave (PLAN §2.1) — see `waveOffsets` for the shape itself.
    *
-   * Twelve, down from sixteen and originally twenty-eight. A level meter does
-   * not become more truthful with more bars — past about a dozen it becomes
-   * texture, and texture at the bottom of the screen is noise. Twelve is
-   * enough to read as a voice and few enough to look drawn rather than
-   * generated.
+   * `waveWidth` is the drawn span inside the 84 px capsule, leaving even
+   * margins; `waveAmplitude` is the peak deviation from the centreline at full
+   * voice, which at 3.2 px keeps the crests clear of a 12 px capsule's rim.
+   * The period is long on purpose: this should read as a slow swell, not a
+   * signal. Anything under about a second starts to look like a readout.
+   */
+  waveSamples: 56,
+  waveWidth: 60,
+  waveAmplitude: 3.2,
+  waveCycles: 1.6,
+  wavePeriodMs: 2600,
+  waveLineWidth: 1.6,
+  /**
+   * Discrete bar defaults, kept for the two places that still draw bars: the
+   * corner orb's rays (which pass their own min/max) and the Reduce Motion
+   * fallback, where a static row of bars is right precisely because nothing is
+   * allowed to move. The pill's own live drawing is the wave above.
    */
   waveformBars: 12,
-  waveformBarWidth: 2,
-  waveformBarGap: 3,
-  /** Bar heights inside the capsule. */
   waveformMinHeight: 2,
-  /** Leaves 2.5 px of dark either side inside a 12 px capsule. */
   waveformMaxHeight: 7,
   /**
    * The ambient halo's box, relative to the capsule it sits behind: this much
@@ -147,21 +155,22 @@ export const BAR_IDLE_BACKGROUND = 'rgba(18,18,23,0.60)'
 export const BAR_LISTENING_BORDER = 'rgba(190,199,255,0.34)'
 export const BAR_ERROR_BORDER = 'rgba(255,148,132,0.35)'
 /**
- * The capsule's shadow stack — the half of the material that sells it.
+ * The capsule's edge treatment — a contact shadow and two inset lights.
  *
- * Four layers now, not five. The one removed was `0 18px 44px rgba(0,0,0,0.42)`
- * — a 44 px ambient offset 18 px *downward*, which on a transparent window over
- * the desktop is not "depth" but a dark smear hanging below the pill. It was
- * written for a 22 px capsule and survived the pill shrinking to 12, by which
- * point the shadow was nearly four times the height of the thing casting it.
+ * There is deliberately **no ambient drop shadow left**. This started as five
+ * layers, lost `0 18px 44px` for hanging a dark smear under the pill, and then
+ * lost `0 4px 10px` for the same reason: measured on the running app, that one
+ * layer *was* the haze visible around the capsule on a white background. A
+ * blurred shadow over a transparent window is not depth — the window has
+ * nothing to cast onto, so it lands directly on whatever the user is reading.
  *
- * What is left does the actual work: a 1 px contact shadow that seats the
- * capsule on the screen, a short mid shadow that gives it body, an inset top
- * light (the glass highlight), and a half-pixel inner ring that reads as the
- * polished edge of the glass.
+ * What is left cannot smear: a hairline contact shadow that stops the capsule
+ * looking pasted on, an inset top light (the glass highlight), and a
+ * half-pixel inner ring that reads as the polished edge of the glass. Every
+ * one is 1 px or less, so on white there is an edge and nothing more.
  */
 export const BAR_SHADOW =
-  '0 1px 2px rgba(0,0,0,0.32), 0 4px 10px rgba(0,0,0,0.26), ' +
+  '0 1px 1px rgba(0,0,0,0.22), ' +
   'inset 0 1px 0 rgba(255,255,255,0.09), inset 0 0 0 0.5px rgba(255,255,255,0.05)'
 
 /** The cluster buttons' lighter stack — a 30 px chip does not cast a 44 px shadow. */

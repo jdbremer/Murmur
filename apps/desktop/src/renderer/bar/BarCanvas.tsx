@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 
-import { checkPulseScale, LevelEnvelope, meterHeights, shimmerPosition } from './level'
+import { checkPulseScale, LevelEnvelope, shimmerPosition, waveOffsets } from './level'
 import { BAR, type BarShape } from './visual'
 
 /**
@@ -115,32 +115,33 @@ export function BarCanvas({ shape, levelRef, epoch }: BarCanvasProps): React.JSX
 }
 
 function paintWaveform(context: CanvasRenderingContext2D, level: number, elapsedMs: number): void {
-  const heights = meterHeights(level, BAR.waveformBars, elapsedMs)
-  const pitch = BAR.waveformBarWidth + BAR.waveformBarGap
-  const totalWidth = heights.length * pitch - BAR.waveformBarGap
-  const left = (CANVAS_WIDTH - totalWidth) / 2
+  const offsets = waveOffsets(level, elapsedMs)
+  const left = (CANVAS_WIDTH - BAR.waveWidth) / 2
   const middle = CANVAS_HEIGHT / 2
+  const step = BAR.waveWidth / (offsets.length - 1)
 
-  // A cool cast at the tips fading to pure white at the centreline gives the
-  // bars a lit-from-within depth that flat white lacks.
-  const gradient = context.createLinearGradient(
-    0,
-    middle - BAR.waveformMaxHeight / 2,
-    0,
-    middle + BAR.waveformMaxHeight / 2,
-  )
-  gradient.addColorStop(0, 'rgba(205,213,255,0.9)')
+  // Fades to nothing at both ends, so the line has no visible start or stop —
+  // the envelope in `waveOffsets` flattens it there and this makes it vanish.
+  const gradient = context.createLinearGradient(left, 0, left + BAR.waveWidth, 0)
+  gradient.addColorStop(0, 'rgba(255,255,255,0)')
+  gradient.addColorStop(0.18, 'rgba(226,231,255,0.92)')
   gradient.addColorStop(0.5, 'rgba(255,255,255,1)')
-  gradient.addColorStop(1, 'rgba(205,213,255,0.9)')
-  context.fillStyle = gradient
+  gradient.addColorStop(0.82, 'rgba(226,231,255,0.92)')
+  gradient.addColorStop(1, 'rgba(255,255,255,0)')
 
-  // No per-bar alpha ramp. The old one faded older bars to mark which way the
-  // history scrolled; with a symmetric meter there is no "older", and the ramp
-  // only read as a stripe pattern laid over the voice.
-  for (let index = 0; index < heights.length; index += 1) {
-    const height = heights[index] ?? BAR.waveformMinHeight
-    roundedBar(context, left + index * pitch, middle - height / 2, BAR.waveformBarWidth, height)
+  context.strokeStyle = gradient
+  context.lineWidth = BAR.waveLineWidth
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  context.beginPath()
+  for (let index = 0; index < offsets.length; index += 1) {
+    const x = left + index * step
+    const y = middle + (offsets[index] ?? 0)
+    if (index === 0) context.moveTo(x, y)
+    else context.lineTo(x, y)
   }
+  context.stroke()
 }
 
 /**

@@ -9,9 +9,9 @@ import {
   checkPulseScale,
   DECAY_MS,
   LevelEnvelope,
-  meterHeights,
   shimmerPosition,
   WaveformHistory,
+  waveOffsets,
 } from '../src/renderer/bar/level'
 import { BAR } from '../src/renderer/bar/visual'
 
@@ -183,62 +183,44 @@ describe('checkPulseScale', () => {
   })
 })
 
-describe("meterHeights — the pill's redesigned meter", () => {
-  it('is perfectly still in silence, at exactly the resting dot height', () => {
-    // The whole continuity trick: at level 0 the meter *is* the resting row of
-    // dots, so a quiet moment mid-dictation costs no motion at all. The time
-    // argument must not be able to change that.
-    for (const t of [0, 250, 1_000, 7_777]) {
-      const heights = meterHeights(0, 12, t)
-      expect(heights).toHaveLength(12)
-      for (const h of heights) expect(h).toBeCloseTo(BAR.waveformMinHeight, 6)
+describe("waveOffsets — the pill's live wave", () => {
+  it('is a dead-flat line in silence, whatever the clock says', () => {
+    // Silence must cost no motion at all: the resting sliver is a hairline,
+    // and at level 0 the wave is exactly that hairline, perfectly still.
+    for (const t of [0, 300, 1_500, 9_999]) {
+      for (const y of waveOffsets(0, t, 24)) expect(y).toBe(0)
     }
   })
 
-  it('is symmetric about the centre', () => {
-    // No direction, so nothing to mistake for progress. Compared without the
-    // wobble, which is deliberately not symmetric.
-    const heights = meterHeights(0.8, 12, 0, { min: 0, max: 1 })
-    const noWobble = meterHeights(0.8, 12, 0)
-    expect(noWobble).toHaveLength(12)
-    const shape = (i: number): number => {
-      const last = 11
-      const d = Math.abs(i / last - 0.5) * 2
-      return 1 - 0.55 * Math.pow(d, 1.6)
-    }
-    for (let i = 0; i < 6; i += 1) {
-      expect(shape(i)).toBeCloseTo(shape(11 - i), 10)
-    }
-    expect(heights.length).toBe(12)
+  it('pins both ends to the centreline so it fades into the glass', () => {
+    const offsets = waveOffsets(1, 400, 24)
+    expect(offsets[0]).toBeCloseTo(0, 6)
+    expect(offsets[offsets.length - 1]).toBeCloseTo(0, 6)
   })
 
-  it('is tallest in the middle and shortest at the edges', () => {
-    const heights = meterHeights(1, 12, 0)
-    const middle = heights[5] ?? 0
-    expect(middle).toBeGreaterThan(heights[0] ?? 0)
-    expect(middle).toBeGreaterThan(heights[11] ?? 0)
-  })
-
-  it('never leaves the capsule at any level', () => {
-    for (const level of [0, 0.15, 0.4, 0.75, 1, 1.5, -3, Number.NaN]) {
-      for (const h of meterHeights(level, 12, 400)) {
-        expect(h).toBeGreaterThanOrEqual(BAR.waveformMinHeight - 1e-9)
-        expect(h).toBeLessThanOrEqual(BAR.waveformMaxHeight + 1e-9)
+  it('stays well inside the capsule at every level', () => {
+    for (const level of [0, 0.3, 0.7, 1, 4, -2, Number.NaN]) {
+      for (const y of waveOffsets(level, 700, 40)) {
+        expect(Math.abs(y)).toBeLessThanOrEqual(BAR.waveAmplitude + 1e-9)
+        // Never touching the rim of a 12 px capsule.
+        expect(Math.abs(y)).toBeLessThan(BAR.activeHeight / 2)
       }
     }
   })
 
-  it('rises with the level', () => {
-    const quiet = meterHeights(0.2, 12, 0)[5] ?? 0
-    const loud = meterHeights(0.9, 12, 0)[5] ?? 0
-    expect(loud).toBeGreaterThan(quiet)
+  it('swells with the voice', () => {
+    const peak = (level: number): number => Math.max(...waveOffsets(level, 500, 40).map(Math.abs))
+    expect(peak(0.9)).toBeGreaterThan(peak(0.3))
+    expect(peak(0.3)).toBeGreaterThan(0)
   })
 
-  it('undulates over time while speech is present', () => {
-    // Bars must not rise as one block; a per-bar phase is what makes it read
-    // as a voice rather than a single pulsing shape.
-    const a = meterHeights(0.8, 12, 0)
-    const b = meterHeights(0.8, 12, 500)
-    expect(a).not.toEqual(b)
+  it('travels: the same voice draws a different curve a moment later', () => {
+    expect(waveOffsets(0.8, 0, 24)).not.toEqual(waveOffsets(0.8, 600, 24))
+  })
+
+  it('never simply repeats, so the crests do not read as a test signal', () => {
+    const a = waveOffsets(0.8, 0, 32)
+    const b = waveOffsets(0.8, BAR.wavePeriodMs, 32)
+    expect(a.every((y, i) => Math.abs(y - (b[i] ?? 0)) < 1e-9)).toBe(false)
   })
 })

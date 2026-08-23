@@ -147,49 +147,59 @@ export function barHeights(
 }
 
 /**
- * Bar heights for the pill's live meter — the redesigned waveform.
+ * The pill's live wave — one continuous line that undulates with the voice.
  *
- * The scrolling history this replaced (still used by the corner orb, which is
- * a different shape with different needs) read as a log being written: bars
- * marched right-to-left under an alpha ramp, and at a glance it looked like a
- * progress indicator rather than a voice. Three properties fix that:
+ * This replaced a row of discrete bars, which replaced a scrolling history.
+ * Bars are the obvious way to draw a level meter and they were the wrong shape
+ * for this pill: twelve hard-edged rectangles jittering in a 12 px capsule
+ * read as *activity*, and the capsule at rest is a single hairline. A line
+ * that bends is the same object moving, which is the whole design rule the
+ * rest of the Bar already follows.
  *
- *  - **Symmetric.** Heights depend on distance from the centre, so the meter
- *    has an axis and blooms outward from it. Nothing travels, so there is no
- *    implied direction and nothing to mistake for progress.
- *  - **Silence is perfectly still.** At `level` 0 every bar sits at `min`,
- *    which is exactly the resting sliver's row of dots — so the idle dots
- *    *become* the meter rather than being replaced by it, and a quiet moment
- *    mid-dictation costs no motion at all.
- *  - **Alive, not mechanical.** A slow per-bar phase offset means the bars
- *    undulate against each other instead of rising as one block. The wobble is
- *    scaled by level, so it cannot animate silence.
+ * Three properties earn their keep:
  *
- * Pure and clock-injected, like everything else here.
+ *  - **Silence is a straight line.** At `level` 0 every offset is exactly 0,
+ *    so a quiet moment is the resting sliver's own hairline, perfectly still.
+ *    No easing, no drift, nothing to catch the eye.
+ *  - **It fades into the glass.** A half-sine envelope pins both ends to the
+ *    centreline, so the wave emerges from the capsule rather than being
+ *    clipped by it.
+ *  - **It travels slowly, and not too evenly.** The phase advances on a long
+ *    period, and a quieter second harmonic rides on top at a different rate,
+ *    so the crests never quite repeat. One sine alone reads as a test signal.
+ *
+ * Pure and clock-injected. Offsets are in pixels, centred on 0.
  */
-export function meterHeights(
+export function waveOffsets(
   level: number,
-  count: number = BAR.waveformBars,
-  elapsedMs = 0,
-  options: { min?: number; max?: number } = {},
+  elapsedMs: number,
+  samples: number = BAR.waveSamples,
+  options: { amplitude?: number; cycles?: number; periodMs?: number } = {},
 ): number[] {
-  const min = options.min ?? BAR.waveformMinHeight
-  const max = options.max ?? BAR.waveformMaxHeight
-  const bars = Math.max(1, Math.floor(count))
-  const last = Math.max(1, bars - 1)
-  // Quiet speech should still move the meter; a raw level barely lifts it.
-  const eased = Math.pow(clamp01(level), 0.7)
+  const amplitude = options.amplitude ?? BAR.waveAmplitude
+  const cycles = options.cycles ?? BAR.waveCycles
+  const periodMs = Math.max(1, options.periodMs ?? BAR.wavePeriodMs)
+  const count = Math.max(2, Math.floor(samples))
 
-  const heights: number[] = []
-  for (let index = 0; index < bars; index += 1) {
-    const distance = Math.abs(index / last - 0.5) * 2
-    // Centre-weighted: edges reach ~45% of the middle, so the row reads as one
-    // shape rather than a picket fence.
-    const shape = 1 - 0.55 * Math.pow(distance, 1.6)
-    const wobble = 0.86 + 0.14 * Math.sin(elapsedMs / 320 + index * 0.9)
-    heights.push(min + (max - min) * eased * shape * wobble)
+  // Quiet speech should still bend the line; a raw level barely moves it.
+  const eased = Math.pow(clamp01(level), 0.7) * amplitude
+  const phase = (elapsedMs / periodMs) * Math.PI * 2
+
+  const out: number[] = []
+  for (let index = 0; index < count; index += 1) {
+    const t = index / (count - 1)
+    if (eased === 0) {
+      out.push(0)
+      continue
+    }
+    // Pinned to the centreline at both ends, fullest in the middle.
+    const envelope = Math.pow(Math.sin(Math.PI * t), 0.7)
+    const primary = Math.sin(Math.PI * 2 * cycles * t - phase)
+    // A second, faster, quieter crest drifting at its own rate.
+    const secondary = Math.sin(Math.PI * 2 * cycles * 1.9 * t - phase * 0.62)
+    out.push(eased * envelope * (primary * 0.78 + secondary * 0.22))
   }
-  return heights
+  return out
 }
 
 /**

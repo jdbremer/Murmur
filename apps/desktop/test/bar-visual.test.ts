@@ -239,13 +239,12 @@ describe('isBarVisible', () => {
 })
 
 describe('the spec numbers themselves', () => {
-  it('keeps the waveform sparse — PLAN §2.1, 10–14 bars at 2 px + 3 px', () => {
-    // The range is the design intent, not an arbitrary fence: below ~10 bars a
-    // level meter stops reading as a voice, and above ~14 it becomes texture.
-    expect(BAR.waveformBars).toBeGreaterThanOrEqual(10)
-    expect(BAR.waveformBars).toBeLessThanOrEqual(14)
-    expect(BAR.waveformBarWidth).toBe(2)
-    expect(BAR.waveformBarGap).toBe(3)
+  it('keeps the wave a slow swell rather than a signal', () => {
+    // Under about a second of period it stops reading as a swell and starts
+    // reading as a readout; more than a couple of crests is busy in 84 px.
+    expect(BAR.wavePeriodMs).toBeGreaterThanOrEqual(1_500)
+    expect(BAR.waveCycles).toBeLessThanOrEqual(2.5)
+    expect(BAR.waveLineWidth).toBeLessThanOrEqual(2)
   })
 
   it('morphs quickly but without a snap, and dismisses errors in ~2.5 s', () => {
@@ -256,11 +255,12 @@ describe('the spec numbers themselves', () => {
     expect(BAR.errorHoldMs).toBe(2500)
   })
 
-  it('fits the waveform inside the capsule with room at both ends', () => {
-    const waveform = BAR.waveformBars * (BAR.waveformBarWidth + BAR.waveformBarGap)
-    // Not merely "fits": a capsule with bars touching its rounded ends looks
-    // like a progress bar. Insist on real padding either side.
-    expect(BAR.activeWidth - waveform).toBeGreaterThanOrEqual(16)
+  it('fits the wave inside the capsule with room at both ends', () => {
+    // Not merely "fits": a line reaching the capsule's rounded ends looks like
+    // a progress bar. Insist on real margin either side.
+    expect(BAR.activeWidth - BAR.waveWidth).toBeGreaterThanOrEqual(16)
+    // And clear of the rim, top and bottom.
+    expect(BAR.waveAmplitude * 2 + BAR.waveLineWidth).toBeLessThan(BAR.activeHeight)
   })
 
   it('holds one size through the working states', () => {
@@ -274,7 +274,8 @@ describe('the spec numbers themselves', () => {
     expect(describeBar(inserted).width).toBeLessThan(BAR.activeWidth)
   })
 
-  it('keeps the waveform inside the thinner capsule', () => {
+  it('keeps the fallback bars inside the thinner capsule', () => {
+    // Reduce Motion and the corner orb still draw discrete bars.
     expect(BAR.waveformMaxHeight).toBeLessThan(BAR.activeHeight)
   })
 
