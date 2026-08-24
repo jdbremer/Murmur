@@ -316,6 +316,14 @@
       /** Matches the DMG for a given architecture. */
       match: { arm64: /-arm64\.dmg$/i, x64: /^(?!.*arm64).*\.dmg$/i },
       device: 'Mac',
+      paletteKey: '⌘K',
+      claimKey:
+        'Input Monitoring lets Murmur notice your dictation key being held anywhere on the ' +
+        'system. The tap is listen-only and matches the one key you chose. No other keystroke is ' +
+        'read, stored or sent anywhere.',
+      claimInsert:
+        'Accessibility is used to type the finished text where your cursor is. Murmur looks up ' +
+        'which app is frontmost — the bundle id, nothing else — to pick a tone.',
       hotkey:
         '<kbd>fn</kbd> by default — or right <kbd>⌘</kbd>, right <kbd>⌥</kbd>, or one you pick. ' +
         'It works in every app, including the ones with no dictation of their own.',
@@ -328,6 +336,15 @@
       requirement: '<strong>Windows 10 or 11</strong>, 64-bit',
       match: { x64: /\.exe$/i },
       device: 'PC',
+      paletteKey: 'Ctrl K',
+      claimKey:
+        'A low-level keyboard hook lets Murmur notice your dictation key being held anywhere on ' +
+        'the system — Windows asks for no permission to do it. The hook matches the one key you ' +
+        'chose. No other keystroke is read, stored or sent anywhere.',
+      claimInsert:
+        'The text is typed the way you would type it: the clipboard is swapped, Ctrl+V is sent, ' +
+        'and the clipboard is put back. Murmur looks up which app is in front — the process name, ' +
+        'nothing else — to pick a tone.',
       hotkey:
         'Right <kbd>Ctrl</kbd> by default — or <kbd>Caps Lock</kbd>, or one you pick. It works ' +
         'in every app, including the ones with no dictation of their own.',
@@ -340,6 +357,15 @@
       requirement: '<strong>X11</strong> · AppImage or .deb, 64-bit',
       match: { appimage: /\.AppImage$/i, deb: /\.deb$/i },
       device: 'machine',
+      paletteKey: 'Ctrl K',
+      claimKey:
+        'XRecord lets Murmur notice your dictation key being held anywhere in the session, and no ' +
+        'permission is involved. It observes the key rather than taking it, so right Ctrl still ' +
+        'works everywhere else. No other keystroke is read, stored or sent anywhere.',
+      claimInsert:
+        'The text is typed the way you would type it, over XTEST: the clipboard is swapped, ' +
+        'Ctrl+V is sent, and the clipboard is put back. Murmur looks up which window is active — ' +
+        'its name, nothing else — to pick a tone.',
       hotkey:
         'Right <kbd>Ctrl</kbd> by default — or right <kbd>Alt</kbd>, or one you pick. Wayland is ' +
         'not supported yet; the global key needs X11.',
@@ -439,6 +465,28 @@
     for (const node of document.querySelectorAll('[data-device]')) node.textContent = spec.device
     for (const node of document.querySelectorAll('[data-platform-name]')) {
       node.textContent = spec.name
+    }
+    // The browser tab too. `og:title` cannot follow — a scraper reads the
+    // markup before any of this runs — so the social card stays Mac-first,
+    // which is the product's positioning rather than an oversight.
+    document.title = `Murmur — dictation that never leaves your ${spec.device}`
+
+    // The command palette is ⌘K on a Mac and Ctrl K everywhere else — the app
+    // binds both, but the page should name the one this visitor would press.
+    for (const node of document.querySelectorAll('[data-palette-key]')) {
+      node.textContent = spec.paletteKey
+    }
+
+    // Input Monitoring and Accessibility are macOS permissions and do not
+    // exist on the other two. Windows uses a keyboard hook and SendInput,
+    // Linux uses XRecord and XTEST, and neither asks the user for anything —
+    // so the privacy claims have to be per-platform or they are simply untrue
+    // for two thirds of the people reading them.
+    for (const node of document.querySelectorAll('[data-claim-key]')) {
+      node.textContent = spec.claimKey
+    }
+    for (const node of document.querySelectorAll('[data-claim-insert]')) {
+      node.textContent = spec.claimInsert
     }
 
     // Everything this visitor was not offered, so a wrong guess is one click to
