@@ -549,9 +549,31 @@ Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
   // the flag set here is how a stuck ⌘ ends up wedged in the target app.
   CGEventSetFlags(commandUp, static_cast<CGEventFlags>(0));
 
+  // **Spaced out, the way a real keypress is.** Posting all four back to back
+  // is the remaining way this still types a bare `v`. The events arrive in
+  // order and carry the right flags, but an app that decides whether Command
+  // is down by asking the system *now* — rather than reading the flags on the
+  // event it was handed — asks when it dequeues the `v`, and an unspaced chord
+  // has already put ⌘ back up by then. The whole thing lands inside a
+  // millisecond, so almost all of that window is lost.
+  //
+  // It survived the event-source fix above because it is a different failure
+  // with the same symptom, and it is load-dependent, which is what makes it
+  // look like a bug in whichever model happens to be running: a machine busy
+  // transcribing is exactly one whose foreground app drains its event queue
+  // late. A gap between the transitions removes the race rather than narrowing
+  // it — the app can ask at any point during the `v` and still see ⌘ held.
+  //
+  // The cost is ~30 ms on the main thread, once, at the end of a pipeline that
+  // has already spent seconds in a speech model.
+  constexpr auto kKeystrokeGap = std::chrono::milliseconds(10);
+
   // kCGHIDEventTap so the event enters at the lowest level and every app sees
   // it, including ones that install their own session taps.
+  bool first = true;
   for (CGEventRef event : {commandDown, keyDown, keyUp, commandUp}) {
+    if (!first) std::this_thread::sleep_for(kKeystrokeGap);
+    first = false;
     MarkSynthetic(event);
     CGEventPost(kCGHIDEventTap, event);
   }

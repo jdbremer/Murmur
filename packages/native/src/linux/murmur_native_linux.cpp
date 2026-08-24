@@ -530,6 +530,28 @@ Napi::Value HotkeyPhysicallyDown(const Napi::CallbackInfo& info) {
 // Paste — Ctrl+V via XTEST (the clipboard save/set/restore dance lives in main)
 // ---------------------------------------------------------------------------
 
+/**
+ * The gap between one transition of a synthetic chord and the next.
+ *
+ * Queued together, the four events reach the server in one batch and are
+ * processed back to back, so the whole Ctrl+V lasts less than a millisecond. A
+ * client that decides whether Ctrl is down by asking the server *now* — rather
+ * than reading the state on the event it was handed — asks when it dequeues the
+ * `v`, and by then Ctrl has already gone back up: it types a bare `v` into the
+ * document. Same failure, and same fix, as the macOS path.
+ *
+ * The flush is the load-bearing half. Sleeping without it just delays the
+ * batch: the requests sit in the client-side queue and still arrive together.
+ *
+ * XTEST has its own `delay` argument, which looks like the obvious way to do
+ * this and is not: the wait happens inside the X server, which stalls every
+ * other client for the duration. Better to block only ourselves.
+ */
+void PaceKeystroke() {
+  XFlush(gDisplay);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+}
+
 Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   if (!HaveDisplay()) return MakeResult(env, false, gUnavailableReason.c_str());
@@ -544,10 +566,20 @@ Napi::Value SendPasteShortcut(const Napi::CallbackInfo& info) {
     return MakeResult(env, false, "keyboard layout has no Ctrl+V to synthesize");
   }
 
+  // The chord is paced rather than sent as one burst — see PaceKeystroke. The
+  // cost is that gInjecting stays up for ~30 ms instead of almost no time,
+  // which widens the window in which a *real* Ctrl or V press by a user who
+  // bound one as their custom hotkey is ignored. Accepted for the same reason
+  // the flag is a window and not a tag: the paste lands immediately after the
+  // hotkey was released, so pressing it again inside 30 ms means starting a new
+  // dictation in the same breath as the last one ended.
   gInjecting.store(true);
   XTestFakeKeyEvent(gDisplay, ctrl, True, 0);
+  PaceKeystroke();
   XTestFakeKeyEvent(gDisplay, v, True, 0);
+  PaceKeystroke();
   XTestFakeKeyEvent(gDisplay, v, False, 0);
+  PaceKeystroke();
   XTestFakeKeyEvent(gDisplay, ctrl, False, 0);
   XSync(gDisplay, False);
   gInjecting.store(false);
