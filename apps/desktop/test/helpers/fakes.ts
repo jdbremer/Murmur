@@ -192,6 +192,11 @@ export function createHarness(overrides: Partial<OrchestratorSettings> = {}): Or
     snippets: () => snippets,
     styleFor: () => profile,
     frontmostApp: () => ({ bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' }),
+    // An empty field, which is what "a dictation" means in most of these
+    // tests. Left absent it reads as `null` — "the platform cannot see the
+    // cursor" — which is a real state worth testing, but a different one, and
+    // it drags the spacing fallback into every unrelated assertion.
+    textBeforeCursor: () => '',
     persist: (record, fixes) => {
       if (persistThrows.current) throw new Error('disk full')
       persisted.push(record)

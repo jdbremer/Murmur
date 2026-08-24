@@ -101,9 +101,27 @@ describe('happy path', () => {
     expectSettledIdle()
   })
 
+  it('separates a burst of dictations instead of welding them together', async () => {
+    // Stop, go, stop, go: the cursor sits hard against the previous sentence,
+    // so the insertion has to bring its own space (spacing.ts).
+    harness.deps.textBeforeCursor = () => 'Wednesday.'
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.insertedText).toEqual([' Hello world, this is a test.'])
+    expectSettledIdle()
+  })
+
   it('keeps the capital when the cursor context cannot be read', async () => {
-    // The unknown case must never change the text — this is the guard that
+    // The unknown case must never change the *casing* — this is the guard that
     // keeps a platform without the API from mangling every dictation.
+    //
+    // It does gain a trailing space: with no way to see what precedes the
+    // cursor, that is the one edit that keeps the next dictation from welding
+    // itself onto this one (spacing.ts).
     harness.deps.textBeforeCursor = () => null
 
     orchestrator.begin()
@@ -111,7 +129,7 @@ describe('happy path', () => {
     orchestrator.end()
     await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
 
-    expect(harness.insertedText).toEqual(['Hello world, this is a test.'])
+    expect(harness.insertedText).toEqual(['Hello world, this is a test. '])
     expectSettledIdle()
   })
 

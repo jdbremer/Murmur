@@ -31,6 +31,7 @@ import { wordsRemovedByPolish } from '../store/stats'
 import { categoryForBundleId, isMessagingApp } from './app-category'
 import { applyFileTags } from './code-context'
 import { applySentenceCase } from './sentence-case'
+import { padForCursor } from './spacing'
 import { stripTrailingPeriod } from './trailing-period'
 import type { InjectionResult, TextInjector } from './injector'
 import type { DictationStateMachine } from './state-machine'
@@ -616,7 +617,8 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       injection = await this.#withTimeout(
         TIMEOUTS.insertMs,
         'inserting',
-        Promise.resolve(this.#deps.injector.insert(finalText)),
+        // Spaced only here, so the history row keeps the sentence as said.
+        Promise.resolve(this.#deps.injector.insert(padForCursor(finalText, context.textBefore))),
       )
     } catch (error) {
       if (this.#runId !== runId) return
