@@ -405,6 +405,28 @@ describe('checkPolishOutput — answering, not editing', () => {
       ).ok,
     ).toBe(true)
   })
+
+  it("rejects a reply that answers in the speaker's own words", () => {
+    // The hole a grounding ratio cannot see: the model agrees and then repeats
+    // the instruction back. Nearly every content word is accounted for, so the
+    // output scores as a faithful edit — and it is still a reply. The only
+    // part that gives it away is the one word nobody spoke.
+    const verdict = checkPolishOutput(
+      'make the changes minimal and keep the original spec',
+      "Sure. I'll make the changes minimal and keep the original spec.",
+    )
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) expect(verdict.reason).toBe('answered')
+  })
+
+  it('rejects an echoed reply whichever opener it wears', () => {
+    // Not a property of "Sure": the same reply is the same reply.
+    const raw = 'we should keep the original behaviour and only change the parser'
+    for (const opener of ['Certainly', 'Of course', 'Got it']) {
+      const polished = `${opener}. We should keep the original behaviour and only change the parser.`
+      expect(checkPolishOutput(raw, polished).ok).toBe(false)
+    }
+  })
 })
 
 describe('checkPolishOutput — what the guard must never reject', () => {
@@ -441,5 +463,28 @@ describe('checkPolishOutput — what the guard must never reject', () => {
         "I understand. Let's focus on that. Please provide the specific changes you'd like.",
       ).ok,
     ).toBe(false)
+  })
+
+  it('keeps an opener the speaker actually dictated', () => {
+    // "Sure" is an assistant opener and also the first word of the transcript.
+    // Which of those it is, is the whole question.
+    expect(
+      checkPolishOutput(
+        'sure i can take a look at the deploy logs this afternoon',
+        'Sure, I can take a look at the deploy logs this afternoon.',
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('keeps a question that happens to open like an offer', () => {
+    // "Would you like" is all function words, so there is nothing to check it
+    // against. That case falls back to the grounding ratio rather than
+    // guessing, and this output is made of its own transcript.
+    expect(
+      checkPolishOutput(
+        'would you like to join us for the retro on friday afternoon',
+        'Would you like to join us for the retro on Friday afternoon?',
+      ).ok,
+    ).toBe(true)
   })
 })

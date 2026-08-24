@@ -363,9 +363,9 @@ export type GuardVerdict =
  *
  * Anchored to the beginning, because these are how an assistant answers, not
  * how a transcript starts. Someone genuinely dictating "I understand the
- * problem" is caught by the grounding check below rather than here — the
- * phrase has to open the output *and* the output has to be largely ungrounded
- * before anything is rejected.
+ * problem" is not caught here: an opener only counts against the output when
+ * the speaker never said it ({@link inventedOpener}), and when they did say
+ * it, it merely raises the grounding floor rather than deciding.
  */
 const ANSWER_OPENERS: readonly RegExp[] = [
   /^(sure|certainly|absolutely|of course|got it|understood)\b/i,
@@ -502,6 +502,38 @@ function contentWords(text: string): string[] {
  */
 const MIN_GROUNDED_RATIO = 0.5
 
+/**
+ * The assistant opener the model added, when the speaker never said it.
+ *
+ * This is the reply the grounding ratio cannot see. The ratio measures *new
+ * subject matter*, so it catches an answer that changes the subject — but a
+ * small model asked to polish an instruction often answers in the speaker's
+ * own words: it echoes their nouns back, prefaced with "I understand." and
+ * closed with "Please provide the specific changes you'd like to make." Almost
+ * every content word is grounded, the output scores as a faithful edit, and it
+ * is still a reply.
+ *
+ * Requiring the opener itself to have been spoken separates the two, and it is
+ * the one part of an answer that is never ambiguous: a speaker who opens with
+ * "Sure," said "sure".
+ *
+ * Returns the matched phrase, so the log names what was rejected, or `null`
+ * when no opener matched, when the speaker did say it, or when the phrase is
+ * all function words and there is nothing to check — "Would you like to join
+ * us on Friday?" is an ordinary dictation, so that last case goes back to the
+ * grounding floor rather than guessing.
+ */
+function inventedOpener(source: ReadonlySet<string>, polished: string): string | null {
+  for (const pattern of ANSWER_OPENERS) {
+    const match = pattern.exec(polished)
+    if (!match) continue
+    const words = contentWords(match[0])
+    if (words.length === 0) continue
+    if (words.some((word) => !source.has(word))) return match[0]
+  }
+  return null
+}
+
 function detectAnswer(raw: string, polished: string): string | null {
   const source = new Set(contentWords(raw))
   const words = contentWords(polished)
@@ -511,6 +543,13 @@ function detectAnswer(raw: string, polished: string): string | null {
 
   const grounded = words.filter((word) => source.has(word)).length
   const ratio = grounded / words.length
+  const share = `${Math.round(ratio * 100)}% of the output came from the transcript`
+
+  // Decisive, unlike everything below it: an opener the speaker never said is
+  // the model prefacing a reply, and no ratio redeems that.
+  const invented = inventedOpener(source, polished)
+  if (invented !== null) return `the model prefaced its reply with "${invented}" (${share})`
+
   const opener = ANSWER_OPENERS.some((pattern) => pattern.test(polished))
   // "A question stays a question" is already a rule in the system prompt, so
   // losing the question mark is a sign the model treated it as something to
@@ -526,7 +565,6 @@ function detectAnswer(raw: string, polished: string): string | null {
   const floor = opener || questionDropped ? 0.75 : MIN_GROUNDED_RATIO
   if (ratio >= floor) return null
 
-  const share = `${Math.round(ratio * 100)}% of the output came from the transcript`
   if (opener) return `the model replied instead of editing (${share})`
   if (questionDropped) return `a question came back as a statement (${share})`
   return `${share} (minimum ${Math.round(floor * 100)}%)`
