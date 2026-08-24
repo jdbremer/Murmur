@@ -23,7 +23,7 @@ import {
   type SttOptions,
   type UtteranceOptions,
 } from '../types'
-import { normaliseTranscript } from './transcript'
+import { normaliseTranscript, stripHallucinatedTail } from './transcript'
 import { encodeWav } from './wav'
 
 /**
@@ -219,10 +219,28 @@ export class WhisperCppEngine implements SttEngine {
     }
 
     const payload = (await response.json()) as WhisperResponse
+
+    // Whisper invents a short agreeable sentence when an utterance ends in
+    // near-silence — "Okay." "Yeah." "Thank you." The guard needs the segments
+    // to see it, so the text is rebuilt from them rather than taken from
+    // `payload.text`, which has already flattened them together.
+    const segments = (payload.segments ?? []).map((segment) => ({
+      text: segment.text,
+      avgLogProb: segment.avg_logprob,
+    }))
+    const stripped = stripHallucinatedTail(segments)
+    if (stripped.dropped) {
+      this.#log.debug(`dropped a hallucinated tail → ${redact(stripped.dropped)}`)
+    }
+
     // Not `.trim()`: whisper.cpp joins its segments with newlines and a segment
     // boundary is a pause, so trimming the ends leaves a line break wherever
     // the speaker drew breath. See transcript.ts.
-    const text = normaliseTranscript(payload.text ?? '')
+    const joined =
+      stripped.segments.length > 0
+        ? stripped.segments.map((segment) => segment.text ?? '').join(' ')
+        : (payload.text ?? '')
+    const text = normaliseTranscript(joined)
     const durationMs = Date.now() - started
     this.#log.debug(`transcribed in ${durationMs} ms →`, redact(text))
 

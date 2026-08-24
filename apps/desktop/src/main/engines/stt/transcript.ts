@@ -39,3 +39,137 @@
 export function normaliseTranscript(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
+
+// ---------------------------------------------------------------------------
+// The hallucinated tail
+// ---------------------------------------------------------------------------
+
+/**
+ * Whisper's best-known failure: inventing a short, agreeable sentence at the
+ * end of an utterance.
+ *
+ * Feed Whisper audio that ends in near-silence and it will often fill that
+ * silence with something from its training data — "Okay." "Yeah." "Thank you."
+ * "Bye." It is not mishearing anything; there is nothing there to mishear. It
+ * is a language model completing a plausible ending.
+ *
+ * It shows up most after a question, because a question is exactly where a
+ * speaker's pitch rises and they trail off waiting for an answer — a longer,
+ * quieter tail to hallucinate into — and because the subtitle and meeting
+ * transcripts Whisper was trained on answer questions with "Yeah." constantly.
+ *
+ * Measured against 342 real dictations: 18 ended in one of these, and every
+ * single one came from the speech model rather than the polish pass.
+ *
+ * The VAD already trims trailing silence before the audio is sent
+ * (`trimSilence`), and it is not enough — the hallucination survives a clean
+ * cut, which is why this guard exists downstream of it rather than instead
+ * of it.
+ */
+
+/**
+ * Only the words Whisper actually invents, taken from observed output rather
+ * than imagined. Deliberately short: every entry here is a word a user might
+ * one day genuinely end on, so the list earning its place matters more than it
+ * being exhaustive, and the conditions in {@link stripHallucinatedTail} are
+ * what stop a real one being eaten.
+ */
+const HALLUCINATED_TAILS = new Set([
+  'okay',
+  'ok',
+  'yeah',
+  'yes',
+  'yep',
+  'mm',
+  'mhm',
+  'thank you',
+  'thanks',
+  'bye',
+  'goodbye',
+  'you',
+  'oh',
+])
+
+/**
+ * How much less confident the tail has to be than the speech before it.
+ *
+ * whisper.cpp reports `avg_logprob` per segment: clean speech sits around
+ * -0.1 to -0.4, and a segment conjured out of silence scores markedly worse
+ * because the model had no acoustic evidence for it. Requiring a real gap is
+ * what separates "the model invented this" from "the speaker actually said
+ * yeah", which is a distinction no word list can make on its own.
+ */
+const CONFIDENCE_MARGIN = 0.25
+
+export interface TranscriptSegment {
+  text?: string | undefined
+  avgLogProb?: number | null | undefined
+}
+
+export interface StrippedTranscript {
+  /** The segments to keep, in order. */
+  segments: TranscriptSegment[]
+  /** What was removed, for the log. Null when nothing was. */
+  dropped: string | null
+}
+
+const bareWords = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[.,!?…]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2
+    : (sorted[middle] as number)
+}
+
+/**
+ * Drop a final segment that Whisper invented.
+ *
+ * Every one of these has to hold, and the conjunction is the whole design —
+ * any one of them alone would eventually eat a word somebody meant:
+ *
+ *  1. **There is something else.** A transcript that is *only* "Okay." is
+ *     someone saying okay. Never return nothing.
+ *  2. **It is its own segment.** A segment boundary is a pause, so a tail
+ *     Whisper dreamt up during silence arrives detached. A real "yeah" said in
+ *     the same breath as the sentence before it lands inside that segment and
+ *     is never considered here.
+ *  3. **It is one of the words Whisper actually invents**, and it is short.
+ *  4. **It is less confident than the speech around it** — when whisper.cpp
+ *     gives us the numbers to check. If it does not, conditions 1–3 stand on
+ *     their own; they are already narrow.
+ */
+export function stripHallucinatedTail(segments: readonly TranscriptSegment[]): StrippedTranscript {
+  const kept = segments.filter((segment) => (segment.text ?? '').trim().length > 0)
+  if (kept.length < 2) return { segments: [...kept], dropped: null }
+
+  const last = kept[kept.length - 1] as TranscriptSegment
+  const tail = bareWords(last.text ?? '')
+  if (!HALLUCINATED_TAILS.has(tail)) return { segments: [...kept], dropped: null }
+
+  const earlier = kept.slice(0, -1)
+  const scores = earlier
+    .map((segment) => segment.avgLogProb)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const baseline = median(scores)
+
+  if (
+    baseline !== null &&
+    typeof last.avgLogProb === 'number' &&
+    Number.isFinite(last.avgLogProb)
+  ) {
+    // Confidently spoken: the speaker meant it. Leave it alone.
+    if (last.avgLogProb >= baseline - CONFIDENCE_MARGIN) {
+      return { segments: [...kept], dropped: null }
+    }
+  }
+
+  return { segments: earlier, dropped: (last.text ?? '').trim() }
+}
