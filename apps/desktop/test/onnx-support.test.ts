@@ -111,6 +111,27 @@ describe('detectFamily', () => {
     ).toBe('parakeet-tdt')
   })
 
+  it('recognises a single-graph CTC bundle', () => {
+    expect(detectFamily(['model.int8.onnx', 'tokenizer.json'])).toBe('granite-ctc')
+    expect(detectFamily(['model.onnx', 'tokenizer.json'])).toBe('granite-ctc')
+  })
+
+  it('does not let the CTC shape swallow the other two', () => {
+    // "has a model.onnx and a tokenizer" is the weakest signal of the three,
+    // and a Moonshine or transducer bundle shipping an extra `model.onnx`
+    // must still be recognised for what it is.
+    expect(detectFamily(['model.onnx', 'decoder_model_merged.onnx', 'tokenizer.json'])).toBe(
+      'moonshine',
+    )
+    expect(detectFamily(['model.onnx', 'joint.onnx', 'tokenizer.json'])).toBe('parakeet-tdt')
+  })
+
+  it('will not call a graph with no vocabulary a CTC model', () => {
+    // Without the vocabulary the logits cannot be turned into text at all, so
+    // loading it would only fail later and less clearly.
+    expect(detectFamily(['model.onnx'])).toBeNull()
+  })
+
   it('returns null for anything it does not know', () => {
     expect(detectFamily(['model.gguf'])).toBeNull()
     expect(detectFamily([])).toBeNull()

@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { ctcAverageLogProb, decodeByteLevelTokens, decodeCtcGreedy } from './ctc-decode'
 import { computeLogMel, PARAKEET_MEL } from './featurizer'
+import { computeGraniteFeatures } from './granite-features'
 import { decodeMoonshineGreedy, encodeMoonshine, MOONSHINE_DEFAULTS } from './moonshine-decode'
-import type { OnnxRequest, OnnxResponse } from './protocol'
+import type { OnnxFamily, OnnxRequest, OnnxResponse } from './protocol'
 import { loadOnnxRuntime, type SessionFactory } from './runtime'
 import type { InferenceSessionLike, TensorFactory, TensorLike } from './session'
 import { decodeTdtGreedy, type PredictorState } from './tdt-decode'
@@ -28,9 +30,10 @@ import { decodeTokens, loadTokenizer, type Tokenizer } from './tokenizer'
 
 interface LoadedModel {
   modelId: string
-  family: 'moonshine' | 'parakeet-tdt'
+  family: OnnxFamily
   encoder: InferenceSessionLike
-  decoder: InferenceSessionLike
+  /** Null for a single-graph CTC model, which has nothing to decode with. */
+  decoder: InferenceSessionLike | null
   /** Transducers only: the joint network, run once per (frame, label) step. */
   joint: InferenceSessionLike | null
   tokenizer: Tokenizer
@@ -166,6 +169,51 @@ async function loadParakeet(
   reply({ type: 'ok', id: request.id })
 }
 
+/**
+ * Load a single-graph CTC model.
+ *
+ * Two files and no config: the graph and its vocabulary. Prefers the int8 build
+ * when both are present, which is what the catalog ships — the fp32 graph is
+ * 1.9 GB against 544 MB and, on the reference clip, transcribes identically.
+ */
+async function loadGraniteCtc(
+  request: Extract<OnnxRequest, { type: 'load' }>,
+  createSession: SessionFactory,
+): Promise<void> {
+  const graph =
+    request.files.find((file) => file === 'model.int8.onnx') ??
+    request.files.find((file) => file === 'model.onnx')
+  const vocabFile = request.files.find((file) => file === 'tokenizer.json')
+
+  if (!graph || !vocabFile) {
+    reply({
+      type: 'error',
+      id: request.id,
+      reason: 'model-missing',
+      message:
+        `Model "${request.modelId}" is incomplete: need model.onnx and tokenizer.json, ` +
+        `found [${request.files.join(', ')}].`,
+    })
+    return
+  }
+
+  model = {
+    modelId: request.modelId,
+    family: 'granite-ctc',
+    encoder: await createSession(join(request.directory, graph)),
+    decoder: null,
+    joint: null,
+    tokenizer: loadTokenizer(
+      'tokenizer.json',
+      readFileSync(join(request.directory, vocabFile), 'utf8'),
+    ),
+    config: { decoderStartTokenId: 0, eosTokenId: 0, padTokenId: 0, maxLength: 0 },
+    tdt: null,
+  }
+
+  reply({ type: 'ok', id: request.id })
+}
+
 async function handleLoad(
   request: Extract<OnnxRequest, { type: 'load' }>,
   createSession: SessionFactory,
@@ -174,6 +222,11 @@ async function handleLoad(
 
   if (request.family === 'parakeet-tdt') {
     await loadParakeet(request, createSession)
+    return
+  }
+
+  if (request.family === 'granite-ctc') {
+    await loadGraniteCtc(request, createSession)
     return
   }
 
@@ -265,7 +318,8 @@ async function transcribeParakeet(
 ): Promise<void> {
   const tdt = current.tdt
   const joint = current.joint
-  if (!tdt || !joint) {
+  const decoder = current.decoder
+  if (!tdt || !joint || !decoder) {
     reply({ type: 'error', id, reason: 'model-missing', message: 'Parakeet model is not loaded' })
     return
   }
@@ -293,7 +347,7 @@ async function transcribeParakeet(
       predictor: async (label, state) => {
         // `null` means start-of-sequence, which for a transducer is the blank.
         const token = BigInt(label ?? tdt.blankTokenId)
-        const out = await current.decoder.run({
+        const out = await decoder.run({
           token: tensors.int64(BigInt64Array.from([token]), [1, 1]),
           h_in: state?.['h'] ?? zeros(),
           c_in: state?.['c'] ?? zeros(),
@@ -348,9 +402,19 @@ async function handleTranscribe(
     return
   }
 
+  if (current.family === 'granite-ctc') {
+    await transcribeGraniteCtc(current, pcm, tensors, started, request.id)
+    return
+  }
+
   // Moonshine takes the raw waveform — no mel front-end (see moonshine-decode.ts).
+  const moonshineDecoder = current.decoder
+  if (!moonshineDecoder) {
+    reply({ type: 'error', id: request.id, reason: 'model-missing', message: 'No decoder loaded' })
+    return
+  }
   const encoderStates = await encodeMoonshine(current.encoder, pcm, tensors)
-  const decoded = await decodeMoonshineGreedy(current.decoder, encoderStates, {
+  const decoded = await decodeMoonshineGreedy(moonshineDecoder, encoderStates, {
     tensors,
     config: current.config,
   })
@@ -364,12 +428,58 @@ async function handleTranscribe(
   })
 }
 
+/**
+ * Transcribe with a single-graph CTC model (Granite Speech 5.0).
+ *
+ * The whole path is three steps with no loop: stacked log-mel + delta features
+ * in, one encoder pass, greedy collapse out. There is no prediction network to
+ * step, no state to carry and no second graph to run per symbol, which is why
+ * this is a fraction of the size of `transcribeParakeet`.
+ *
+ * The front end has to match IBM's extractor exactly — see
+ * `granite-features.ts` and the parity test that pins it — because getting it
+ * wrong costs accuracy silently rather than failing.
+ */
+async function transcribeGraniteCtc(
+  current: LoadedModel,
+  pcm: Float32Array,
+  tensors: TensorFactory,
+  started: number,
+  id: number,
+): Promise<void> {
+  const features = computeGraniteFeatures(pcm)
+  const output = await current.encoder.run({
+    input_features: tensors.float32(features.data, [1, features.frames, features.dim]),
+  })
+  const logits = output[current.encoder.outputNames[0] ?? 'logits']
+  if (!logits) {
+    reply({ type: 'error', id, reason: 'unknown', message: 'CTC graph produced no logits' })
+    return
+  }
+
+  // `[1, frames, vocab]` — the vocabulary width is read from the tensor rather
+  // than assumed, so a re-export with a different head does not decode as noise.
+  const dims = logits.dims
+  const frames = Number(dims[dims.length - 2] ?? 0)
+  const vocabSize = Number(dims[dims.length - 1] ?? 0)
+  const data = logits.data as Float32Array
+
+  const tokens = decodeCtcGreedy(data, frames, vocabSize)
+  reply({
+    type: 'transcribed',
+    id,
+    text: decodeByteLevelTokens(tokens, current.tokenizer),
+    avgLogProb: ctcAverageLogProb(data, frames, vocabSize),
+    durationMs: Date.now() - started,
+  })
+}
+
 async function disposeModel(): Promise<void> {
   const current = model
   model = null
   if (!current) return
   await current.encoder.release?.()
-  await current.decoder.release?.()
+  await current.decoder?.release?.()
 }
 
 function main(): void {

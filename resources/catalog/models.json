@@ -475,6 +475,34 @@
         }
       ],
       "notes": "Weights are NVIDIA's, unmodified, from nvidia/parakeet-tdt-0.6b-v3 (CC-BY-4.0). NVIDIA publishes .nemo, safetensors and a GGUF but no ONNX, so the conversion is Murmur's own: exported by scripts/models/export_parakeet.py in this repository and hosted on its own releases rather than a third-party re-upload, so \u201cwho converted this\u201d has an answer you can go and check. Quantised per-channel: plain int8 scored 8 of 10 exact against the reference and turned \u201cPlease add murmur\u201d into \u201cPlead murmur\u201d, where per-channel scores 10 of 10 at the same size. A transducer also stays silent through silence instead of inventing text, which matters most for meeting capture, where most of an hour is nobody speaking."
+    },
+    {
+      "id": "granite-speech-5.0-470m-turboctc-int8",
+      "kind": "stt",
+      "engine": "onnx-runtime",
+      "displayName": "Granite Speech 5.0 470M",
+      "org": "IBM",
+      "origin": "US",
+      "license": "Apache-2.0",
+      "sizeBytes": 545501337,
+      "ramTierGb": 8,
+      "languages": ["en"],
+      "quant": "int8",
+      "files": [
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-granite-speech-5.0-470m/model.int8.onnx",
+          "sha256": "a7295abf050375fc76f0f48e1a17a7fbbcb016804f779a7644e7d3aa837518a7",
+          "bytes": 544363845,
+          "filename": "model.int8.onnx"
+        },
+        {
+          "url": "https://github.com/jdbremer/Murmur/releases/download/models-granite-speech-5.0-470m/tokenizer.json",
+          "sha256": "3ee80b02f0119a040a70eb909c20fac8271c173d7e71d195a3b35f77780061e6",
+          "bytes": 1137492,
+          "filename": "tokenizer.json"
+        }
+      ],
+      "notes": "Weights are IBM's, unmodified, from ibm-granite/granite-speech-5.0-470m-turboctc (Apache-2.0). IBM publishes safetensors with a custom architecture and no ONNX, so the conversion is Murmur's own: exported by scripts/models/export_granite_speech.py in this repository and hosted on its own release rather than a third-party re-upload, so \"who converted this\" has an answer you can go and check. One graph edit was needed and is asserted bit-identical before every export; the result was verified against PyTorch from 1.28s to 18s of audio, worst logit difference 0.00056, same transcript character for character. English only, and non-autoregressive \u2014 it emits one distribution per frame rather than predicting the next word, so it cannot drift into inventing a sentence."
     }
   ]
 }

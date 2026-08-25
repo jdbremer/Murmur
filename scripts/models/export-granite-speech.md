@@ -1,7 +1,8 @@
 # Exporting Granite Speech 5.0 TurboCTC to ONNX, first-party
 
-**Status: exported and verified. Not yet integrated — see "What is still
-missing".**
+**Status: shipped.** `resources/catalog/models.json` lists
+`granite-speech-5.0-470m-turboctc-int8`, hosted on the
+`models-granite-speech-5.0-470m` release.
 
 ## Why we convert it ourselves
 
@@ -116,22 +117,43 @@ argmax over vocab → collapse runs of equal ids → drop blank
 That is the whole decoder — considerably simpler than the TDT loop Parakeet
 needs, which has to carry duration skips and LSTM state.
 
-## What is still missing
+## The integration
 
-The conversion is done. The integration is not:
+The conversion is half of it. The other half is a front end that reproduces
+IBM's extractor exactly, because a wrong one does not crash — it transcribes a
+little worse, forever.
 
-1. **Featurizer**: 80 mels, delta coefficients, frame stacking — the STFT
-   constants already match.
-2. **CTC greedy decode** in TypeScript, and detokenisation from the 16,384-BPE
-   `tokenizer.json`.
-3. **Engine wiring** so `onnx-runtime` can route a single-graph CTC model; it
-   currently expects a transducer's encoder/decoder/joint trio.
-4. **Parity fixtures**, in the style of the Parakeet ones, so the TypeScript
-   front end is checked against this Python reference rather than trusted.
-5. **Hosting and a catalog entry** — a `models-granite-speech-5.0-470m` release
-   with SHA-256 pins, as `models-parakeet-tdt-0.6b-v3` already does.
+- **`onnx/granite-features.ts`** — the 320-value layout above. Kept separate
+  from `computeLogMel` rather than adding flags to it: the two share an STFT and
+  a filterbank and then agree on nothing. Parakeet pre-emphasises, zero-pads,
+  uses a symmetric window and Slaney-normalised filters, takes a natural log
+  with an additive guard and normalises each band; Granite does none of those.
+  Pinned by `test/granite-featurizer-parity.test.ts` against IBM's own output.
+- **`onnx/ctc-decode.ts`** — greedy collapse and byte-level detokenisation.
+  Checked in `test/granite-decode.test.ts` against the argmax of real logits, so
+  it reproduces the reference transcript rather than my idea of CTC.
+- **`onnx/protocol.ts`** — `detectFamily` gained `granite-ctc`, recognised by
+  exclusion: "one graph and a vocabulary" is the weakest signal of the three and
+  would otherwise swallow the other two.
+- **`onnx/host.ts`** — a loader and a transcribe path. `LoadedModel.decoder` is
+  now nullable, because a CTC model genuinely has no decoder to step.
 
-Until 2–5 exist, there is no catalog entry, and Murmur cannot load this model.
+Writing the featurizer found a real defect in the shared code: `melFilterbank`
+called `hzToMel` without passing a scale, so it silently placed every filter on
+Slaney's curve whatever the config said. `MelConfig` now carries `melScale`
+explicitly and Parakeet states the Slaney value it always had — which the
+Parakeet parity fixture confirms is unchanged.
+
+## End to end
+
+Downloaded through the app's own downloader (which verifies the SHA-256),
+selected as the STT engine, and run against a real recording through the file
+transcription path:
+
+> the quick brown fox jumps over the lazy dog this recording was made to test
+> file transcription and murmur
+
+Character for character what PyTorch produces.
 
 ## Running it
 

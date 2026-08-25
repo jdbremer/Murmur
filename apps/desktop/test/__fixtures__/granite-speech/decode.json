@@ -1,0 +1,39 @@
+{
+  "source": "ibm-granite/granite-speech-5.0-470m-turboctc, greedy CTC over model logits",
+  "revision": "a74432b93fd93ae0a5cafce1676dbb25ba89ee6d",
+  "blankId": 0,
+  "rawArgmax": [
+    406, 0, 0, 0, 1731, 0, 0, 0, 2855, 0, 0, 0, 5723, 0, 0, 0, 0, 373, 0, 10927, 0, 618, 0, 0, 262,
+    0, 12931, 0, 0, 0, 2093, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 396, 0, 0, 0, 12022, 0, 0, 0, 334,
+    0, 712, 0, 284, 0, 2176, 0, 0, 0, 5378, 0, 0, 0, 1381, 0, 0, 9824, 0, 0, 288, 0, 8811, 0, 0, 0,
+    0, 0
+  ],
+  "collapsedIds": [
+    406, 1731, 2855, 5723, 373, 10927, 618, 262, 12931, 2093, 396, 12022, 334, 712, 284, 2176, 5378,
+    1381, 9824, 288, 8811
+  ],
+  "pieces": [
+    "the",
+    "\u0120quick",
+    "\u0120brown",
+    "\u0120fox",
+    "\u0120j",
+    "umps",
+    "\u0120over",
+    "\u0120the",
+    "\u0120lazy",
+    "\u0120dog",
+    "\u0120this",
+    "\u0120recording",
+    "\u0120was",
+    "\u0120made",
+    "\u0120to",
+    "\u0120test",
+    "\u0120file",
+    "\u0120trans",
+    "cription",
+    "\u0120and",
+    "\u0120murmur"
+  ],
+  "text": "the quick brown fox jumps over the lazy dog this recording was made to test file transcription and murmur"
+}

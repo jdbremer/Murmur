@@ -154,7 +154,8 @@ describe('resources/catalog/models.json', () => {
       'llama-cpp': (model) =>
         model.kind === 'polish' &&
         model.files.filter((file) => file.filename.endsWith('.gguf')).length === 1,
-      // The ONNX host needs an encoder, a decoder and a tokenizer.
+      // The ONNX host loads one of three shapes, and `detectFamily` has to be
+      // able to tell which from the filenames alone.
       'onnx-runtime': (model) => {
         const names = model.files.map((file) => file.filename)
         // A transducer is three graphs plus its vocabulary and the export's own
@@ -169,7 +170,13 @@ describe('resources/catalog/models.json', () => {
           names.some((name) => name.includes('encoder_model')) &&
           names.some((name) => name.includes('decoder_model')) &&
           names.includes('tokenizer.json')
-        return transducer || encoderDecoder
+        // A CTC model is a single graph and a vocabulary — it has no decoder to
+        // step and no joint network, which is the whole reason its decode is a
+        // collapse rather than a loop.
+        const ctc =
+          names.some((name) => name === 'model.onnx' || name === 'model.int8.onnx') &&
+          names.includes('tokenizer.json')
+        return transducer || encoderDecoder || ctc
       },
     }
 

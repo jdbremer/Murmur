@@ -73,6 +73,17 @@ export interface MelConfig {
    * entry may enter the catalog.
    */
   melNorm: 'slaney' | 'none'
+  /**
+   * Which mel *curve* the filter edges sit on — a different axis entirely from
+   * {@link melNorm}, which only rescales triangles already placed.
+   *
+   * Slaney is linear below 1 kHz then logarithmic; HTK is
+   * `2595 · log10(1 + hz/700)` throughout. They diverge by tens of hertz in the
+   * middle of the range, which moves every filter. `torchaudio` defaults to
+   * `htk`, librosa and NeMo to `slaney`, and picking the wrong one is silent:
+   * the features are simply a little wrong, forever.
+   */
+  melScale: 'slaney' | 'htk'
 }
 
 /**
@@ -95,6 +106,9 @@ export const PARAKEET_MEL: MelConfig = Object.freeze({
   preEmphasis: 0.97,
   normalize: 'per_feature',
   melNorm: 'slaney',
+  // Unchanged behaviour, now stated: `hzToMel` defaulted to Slaney, so this is
+  // the curve Parakeet's parity fixture was captured against.
+  melScale: 'slaney',
   window: 'symmetric',
   padMode: 'constant',
 })
@@ -148,12 +162,15 @@ export function melFilterbank(config: MelConfig): Float32Array {
   const bins = Math.floor(config.nFft / 2) + 1
   const filters = new Float32Array(config.nMels * bins)
 
-  const melMin = hzToMel(config.fMin)
-  const melMax = hzToMel(config.fMax)
+  const melMin = hzToMel(config.fMin, config.melScale)
+  const melMax = hzToMel(config.fMax, config.melScale)
   // nMels + 2 edges: each filter spans [edge i, edge i+2] peaking at edge i+1.
   const edges = new Float64Array(config.nMels + 2)
   for (let index = 0; index < edges.length; index += 1) {
-    edges[index] = melToHz(melMin + ((melMax - melMin) * index) / (config.nMels + 1))
+    edges[index] = melToHz(
+      melMin + ((melMax - melMin) * index) / (config.nMels + 1),
+      config.melScale,
+    )
   }
 
   const binToHz = config.sampleRate / config.nFft
