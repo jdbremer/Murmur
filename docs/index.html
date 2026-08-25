@@ -234,6 +234,28 @@
                 stroke-linecap="round"
                 stroke-linejoin="round"
               >
+                <path
+                  d="M12 20a8 7 0 1 0-6.9-3.9L4 20l4.1-.8A8 7 0 0 0 12 20zM10.3 9.6a1.8 1.8 0 1 1 2.4 1.7c-.4.2-.7.6-.7 1.1v.2M12 15.2h.01"
+                />
+              </svg>
+              <h3>Ask your own archive</h3>
+              <p>
+                Put a question to everything you have dictated, written and recorded. Answers are
+                built from your own words, each one cited back to the note, transcript or dictation
+                it came from — by the same model that polishes your speech, on this machine.
+              </p>
+            </article>
+
+            <article class="feature">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
                 <path d="M5 4h11a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2zm2 0v12h11" />
               </svg>
               <h3>A dictionary that sticks</h3>
@@ -381,6 +403,26 @@
             </article>
           </div>
 
+          <figure class="shot reveal" style="margin-top: 2.5rem">
+            <div class="shot-frame">
+              <div class="shot-chrome"><span></span><span></span><span></span></div>
+              <img
+                src="shots/ask.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                decoding="async"
+                alt="The Ask screen: a question about a beta demo answered in prose with a numbered citation, above a source card quoting the meeting transcript it came from; a follow-up question is answered from a note. A list of past conversations sits on the left."
+              />
+            </div>
+            <figcaption>
+              <b>It answers from what you actually said.</b> Ask reads your dictations, notes and
+              meeting transcripts together, and when the answer is not in them it says so rather
+              than inventing one. Conversations are saved, searchable by what was said in them, and
+              pick up where you left them.
+            </figcaption>
+          </figure>
+
           <div class="shot-pair">
             <figure class="shot reveal">
               <div class="shot-frame">
@@ -451,9 +493,9 @@
               <div>
                 <h3>The models run here</h3>
                 <p>
-                  Speech recognition and polishing both happen on your own hardware, through
+                  Speech recognition, polishing and Ask all happen on your own hardware, through
                   whisper.cpp, llama.cpp and ONNX Runtime. Murmur talks to them over loopback, and
-                  to nothing else.
+                  to nothing else — asking a question about your archive sends it nowhere.
                 </p>
               </div>
             </div>
