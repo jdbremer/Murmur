@@ -594,6 +594,100 @@ describe('RetrievalRepository', () => {
     })
   })
 
+  describe('enumerate', () => {
+    const today = { from: NOW - 12 * 3600_000, to: NOW + 3600_000, label: 'today' }
+
+    it('returns everything in the window, not the best matches', () => {
+      // The failure the recap path exists to fix: a dozen dictations in a day,
+      // and relevance ranking hands the model one of them.
+      for (let i = 0; i < 12; i += 1) {
+        addDictation(`thing number ${i}`, { ts: NOW - i * 1800_000 })
+      }
+      expect(retrieval.enumerate(today)).toHaveLength(12)
+    })
+
+    it('orders one chronological stream across all three sources', () => {
+      // A recap should read as a day, not as three lists stapled together.
+      addDictation('spoke at nine', { ts: NOW - 6 * 3600_000 })
+      addNote('Midday note', 'wrote this at noon', NOW - 3 * 3600_000)
+      writeTranscript('late.md', '- **[00:01] You:** met in the afternoon\n', NOW - 3600_000)
+      retrieval.syncMeetings()
+
+      const stream = retrieval.enumerate(today)
+      expect(stream.map((p) => p.source)).toEqual(['dictation', 'note', 'meeting'])
+      for (let i = 1; i < stream.length; i += 1) {
+        expect(stream[i]!.timestamp).toBeGreaterThanOrEqual(stream[i - 1]!.timestamp)
+      }
+    })
+
+    it('excludes anything outside the window', () => {
+      addDictation('inside the window', { ts: NOW - 3600_000 })
+      addDictation('long ago', { ts: NOW - 40 * DAY })
+      const stream = retrieval.enumerate(today)
+      expect(stream).toHaveLength(1)
+      expect(stream[0]?.text).toContain('inside')
+    })
+
+    it('can be limited to one kind of source', () => {
+      addDictation('a dictation', { ts: NOW - 3600_000 })
+      addNote('A note', 'body text', NOW - 3600_000)
+      const stream = retrieval.enumerate(today, { sources: ['note'] })
+      expect(stream.every((p) => p.source === 'note')).toBe(true)
+    })
+
+    it('returns nothing for an empty period', () => {
+      expect(retrieval.enumerate({ from: NOW - DAY, to: NOW, label: 'x' })).toEqual([])
+    })
+  })
+
+  describe('digest', () => {
+    it('counts what exists rather than what matches', () => {
+      // "Do I have any meetings transcribed?" used to be answered by searching
+      // transcript text, which can never establish that a transcript exists.
+      addDictation('one', { ts: NOW - 3600_000 })
+      addDictation('two', { ts: NOW - 40 * DAY })
+      addNote('A note', 'body', NOW - 3600_000)
+      writeTranscript('standup.md', TRANSCRIPT, NOW - 3600_000)
+
+      const digest = retrieval.digest(NOW)
+      expect(digest.dictations.total).toBe(2)
+      expect(digest.meetings.total).toBe(1)
+      expect(digest.notes.total).toBe(1)
+    })
+
+    it('separates today and the last week from the lifetime total', () => {
+      addDictation('today', { ts: NOW - 3600_000 })
+      addDictation('three days ago', { ts: NOW - 3 * DAY })
+      addDictation('long ago', { ts: NOW - 90 * DAY })
+
+      const digest = retrieval.digest(NOW)
+      expect(digest.dictations.total).toBe(3)
+      expect(digest.dictations.today).toBe(1)
+      expect(digest.dictations.week).toBe(2)
+    })
+
+    it('names recent meetings so they can be listed back', () => {
+      writeTranscript('design-review.md', TRANSCRIPT, NOW - 3600_000)
+      const digest = retrieval.digest(NOW)
+      expect(digest.meetings.recent[0]?.title).toBe('design-review')
+      expect(digest.meetings.totalMs).toBeGreaterThan(0)
+    })
+
+    it('marks a meeting whose transcript is no longer indexed', () => {
+      writeTranscript('gone.md', TRANSCRIPT, NOW - 3600_000)
+      expect(retrieval.digest(NOW).meetings.recent[0]?.indexed).toBe(false)
+      retrieval.syncMeetings()
+      expect(retrieval.digest(NOW).meetings.recent[0]?.indexed).toBe(true)
+    })
+
+    it('reports an empty archive without inventing dates', () => {
+      const digest = retrieval.digest(NOW)
+      expect(digest.dictations.total).toBe(0)
+      expect(digest.dictations.firstAt).toBeNull()
+      expect(digest.meetings.lastAt).toBeNull()
+    })
+  })
+
   it('counts what there is to search', () => {
     addDictation('one')
     notes.create({ title: 'n', body: 'b' })

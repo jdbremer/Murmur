@@ -3,15 +3,21 @@ import { describe, expect, it } from 'vitest'
 import {
   ASK_BUDGET,
   ASK_TITLE_MAX,
+  RECAP_RECORD_TOKENS,
+  batchRecords,
   ASK_SYSTEM_PROMPT,
   AskEventSchema,
   buildAskPrompt,
+  describeCoverage,
   deriveConversationTitle,
   estimateTokens,
   fitPassages,
+  formatCorpusDigest,
+  formatRecapRecord,
   isRefusal,
   parseTimeWindow,
   passageBudgetTokens,
+  planAsk,
   relativeDay,
   trimHistory,
   truncateToTokens,
@@ -423,5 +429,258 @@ describe('parseTimeWindow', () => {
       expect(window).not.toBeNull()
       expect(window?.to).toBeGreaterThan(window?.from ?? 0)
     }
+  })
+})
+
+describe('planAsk', () => {
+  // A Wednesday afternoon, so "today" has room on both sides of it.
+  const now = new Date('2026-08-19T15:30:00').getTime()
+  const plan = (question: string): ReturnType<typeof planAsk> => planAsk(question, now)
+
+  describe('recap', () => {
+    it('routes a summary of a period away from keyword search', () => {
+      // The bug this whole router exists for. "Summarize everything I dictated
+      // today" is made *entirely* of instruction words, so ranking records by
+      // how well they match those words is close to random — and the model
+      // then faithfully summarises the one record it was handed.
+      for (const question of [
+        'Summarize everything I dictated today',
+        'summarise my day',
+        'give me a recap of this week',
+        'What did I work on today?',
+        'what did I talk about yesterday',
+        'what have I been up to lately',
+        'rundown of last week',
+      ]) {
+        expect(plan(question).intent, question).toBe('recap')
+      }
+    })
+
+    it('always carries a window, even when the question names none', () => {
+      // A recap with no period would enumerate the entire archive.
+      const bare = plan('give me a recap')
+      expect(bare.intent).toBe('recap')
+      expect(bare.window?.label).toBe('today')
+    })
+
+    it('uses the period the question actually named', () => {
+      expect(plan('summarise this week').window?.label).toBe('this week')
+      expect(plan('what did I do yesterday').window?.label).toBe('yesterday')
+    })
+
+    it('stays a lookup when the question still has a subject', () => {
+      // "Summarise what I said about the migration" has a topic, and the
+      // ordinary retrieval path — find the migration, let the model summarise
+      // it — is a far better answer than dumping the whole day on the model.
+      const scoped = plan('summarise what I said about the migration')
+      expect(scoped.intent).toBe('lookup')
+      expect(scoped.topic).toContain('migration')
+    })
+
+    it('keeps a topic question scoped by time as a lookup', () => {
+      // Both a recap verb and a window, but a real subject: the user wants the
+      // deadline, filtered to today — not a summary of the whole day.
+      const scoped = plan('what did I say about the deadline today?')
+      expect(scoped.intent).toBe('lookup')
+      expect(scoped.window?.label).toBe('today')
+    })
+  })
+
+  describe('catalog', () => {
+    it('routes questions about what exists away from content search', () => {
+      // Searching transcript *text* can never establish whether a transcript
+      // *exists*; the answer lives in counts and dates.
+      for (const question of [
+        'Do I have any meetings that have been transcribed?',
+        'how many dictations do I have',
+        'are there any notes about this',
+        'when did I last record a meeting',
+        'list my meetings',
+        'what meetings do I have',
+        'how long have I recorded in total',
+      ]) {
+        expect(plan(question).intent, question).toBe('catalog')
+      }
+    })
+
+    it('notices which kind of thing was asked about', () => {
+      expect(plan('do I have any meetings transcribed?').focus).toBe('meeting')
+      expect(plan('how many notes do I have').focus).toBe('note')
+      expect(plan('how many dictations do I have').focus).toBe('dictation')
+    })
+
+    it('leaves focus unset when the question names no kind', () => {
+      expect(plan('how many do I have').focus).toBeNull()
+    })
+
+    it('wins over recap when a question satisfies both', () => {
+      // "How many meetings did I record this week" reads as a recap by its
+      // shape, but the answer is a number, not a summary.
+      expect(plan('how many meetings did I record this week').intent).toBe('catalog')
+    })
+  })
+
+  describe('lookup', () => {
+    it('stays the default for an ordinary question', () => {
+      for (const question of [
+        'what is blocking the beta launch?',
+        'who owns the rollback plan',
+        'where are we holding the offsite',
+      ]) {
+        expect(plan(question).intent, question).toBe('lookup')
+      }
+    })
+
+    it('keeps the window a topic question named', () => {
+      expect(plan('what did I say about the offsite this week').window?.label).toBe('this week')
+    })
+  })
+})
+
+describe('batchRecords', () => {
+  const now = 1_700_000_000_000
+
+  function record(i: number, words = 20): AskPassage {
+    return {
+      id: `d${i}`,
+      source: 'dictation',
+      title: 'dictated in Slack',
+      text: `record ${i} ${'word '.repeat(words)}`,
+      timestamp: now - i * 60_000,
+      score: 0,
+    }
+  }
+
+  it('keeps a normal day in a single pass', () => {
+    expect(batchRecords(Array.from({ length: 12 }, (_, i) => record(i)), now)).toHaveLength(1)
+  })
+
+  it('splits a period too large for the context', () => {
+    const batches = batchRecords(Array.from({ length: 400 }, (_, i) => record(i)), now)
+    expect(batches.length).toBeGreaterThan(1)
+  })
+
+  it('never loses a record', () => {
+    // The property the whole map-reduce exists for. Dropping the tail is
+    // indistinguishable from a confident, complete-looking, wrong answer.
+    const records = Array.from({ length: 400 }, (_, i) => record(i))
+    const batched = batchRecords(records, now).flat()
+    expect(batched).toHaveLength(records.length)
+    expect(batched.map((r) => r.id)).toEqual(records.map((r) => r.id))
+  })
+
+  it('keeps each batch inside the context budget', () => {
+    for (const batch of batchRecords(Array.from({ length: 400 }, (_, i) => record(i)), now)) {
+      const tokens = batch.reduce((sum, r) => sum + estimateTokens(formatRecapRecord(r, now)), 0)
+      expect(tokens).toBeLessThanOrEqual(passageBudgetTokens())
+    }
+  })
+
+  it('keeps batches contiguous, never sampled', () => {
+    // A batch that skips the middle of the afternoon produces a summary with a
+    // hole in it that nothing downstream can detect.
+    const records = Array.from({ length: 400 }, (_, i) => record(i))
+    let cursor = 0
+    for (const batch of batchRecords(records, now)) {
+      for (const item of batch) expect(item.id).toBe(`d${cursor++}`)
+    }
+  })
+
+  it('handles an empty period', () => {
+    expect(batchRecords([], now)).toEqual([])
+  })
+})
+
+describe('formatRecapRecord', () => {
+  const now = 1_700_000_000_000
+
+  it('leads with the time of day, which is what locates a record in a period', () => {
+    const at = new Date('2026-08-19T14:05:00').getTime()
+    const line = formatRecapRecord(
+      { id: 'd', source: 'dictation', title: 'Slack', text: 'shipped it', timestamp: at, score: 0 },
+      now,
+    )
+    expect(line).toContain('[14:05]')
+    expect(line).toContain('shipped it')
+  })
+
+  it('compresses hard, because coverage beats fidelity in a recap', () => {
+    const line = formatRecapRecord(
+      { id: 'd', source: 'note', title: 'n', text: 'word '.repeat(500), timestamp: now, score: 0 },
+      now,
+    )
+    expect(estimateTokens(line)).toBeLessThan(RECAP_RECORD_TOKENS + 24)
+  })
+})
+
+describe('describeCoverage', () => {
+  const now = 1_700_000_000_000
+  const p = (source: AskPassage['source']): AskPassage => ({
+    id: Math.random().toString(),
+    source,
+    title: 't',
+    text: 'x',
+    timestamp: now,
+    score: 0,
+  })
+
+  it('says what an answer was actually built from', () => {
+    expect(describeCoverage([p('dictation'), p('dictation'), p('meeting')], 'today')).toBe(
+      '2 dictations and 1 meeting from today',
+    )
+  })
+
+  it('lists all three sources readably', () => {
+    expect(describeCoverage([p('dictation'), p('note'), p('meeting')], 'this week')).toBe(
+      '1 dictation, 1 note and 1 meeting from this week',
+    )
+  })
+
+  it('is honest about an empty period', () => {
+    expect(describeCoverage([], 'yesterday')).toBe('nothing from yesterday')
+  })
+})
+
+describe('formatCorpusDigest', () => {
+  const now = new Date('2026-08-19T15:30:00').getTime()
+  const digest = {
+    dictations: { total: 350, today: 12, week: 47, firstAt: now - 120 * 86_400_000, lastAt: now, words: 11_247 },
+    notes: { total: 2, lastAt: now, recent: [{ title: 'Q3 launch plan', at: now }] },
+    meetings: {
+      total: 1,
+      lastAt: now,
+      totalMs: 600_000,
+      recent: [{ title: 'Design standup', at: now, durationMs: 600_000, indexed: true }],
+    },
+  }
+
+  it('hands the model exact numbers rather than records to count', () => {
+    // A small model given 350 records and asked how many there are will guess.
+    // Given the number, it answers correctly every time.
+    const text = formatCorpusDigest(digest, now)
+    expect(text).toContain('350')
+    expect(text).toContain('12 today')
+    expect(text).toContain('11,247 words')
+  })
+
+  it('names the meetings, so "what meetings do I have" is answerable', () => {
+    expect(formatCorpusDigest(digest, now)).toContain('Design standup')
+  })
+
+  it('flags a meeting whose transcript has gone missing', () => {
+    const broken = {
+      ...digest,
+      meetings: { ...digest.meetings, recent: [{ ...digest.meetings.recent[0]!, indexed: false }] },
+    }
+    expect(formatCorpusDigest(broken, now)).toContain('transcript file missing')
+  })
+
+  it('says "never" rather than inventing a date for an empty archive', () => {
+    const empty = {
+      dictations: { total: 0, today: 0, week: 0, firstAt: null, lastAt: null, words: 0 },
+      notes: { total: 0, lastAt: null, recent: [] },
+      meetings: { total: 0, lastAt: null, totalMs: 0, recent: [] },
+    }
+    expect(formatCorpusDigest(empty, now)).toContain('never')
   })
 })

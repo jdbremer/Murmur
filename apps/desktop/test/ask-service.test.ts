@@ -450,6 +450,134 @@ describe('AskService', () => {
     expect(service.state().status).toBe('error')
   })
 
+  describe('routing by question type', () => {
+    /** Everything the model was shown on the last call. */
+    const prompt = (): string => (engine?.lastMessages ?? []).map((m) => m.content).join('\n')
+
+    it('summarises the whole day rather than one dictation', () => {
+      // The reported bug, as a test. Twelve dictations today; the old path
+      // ranked them by keyword against a question made only of instruction
+      // words and handed the model whichever one happened to match.
+      const day: string[] = []
+      for (let i = 0; i < 12; i += 1) {
+        const text = `thing number ${i} happened`
+        day.push(text)
+        dictations.insert({
+          ts: NOW - i * 1800_000,
+          rawText: text,
+          polishedText: null,
+          appBundleId: null,
+          appName: 'Slack',
+          appCategory: 'work',
+          durationMs: 1000,
+          sttModelId: 'whisper-small',
+          polishModelId: null,
+          timings: { sttMs: 200, polishMs: 0, totalMs: 400 },
+        })
+      }
+
+      return service
+        .ask({ question: 'Summarize everything I dictated today', conversationId: null, sources: [] })
+        .then(() => {
+          const shown = prompt()
+          for (const text of day) expect(shown).toContain(text)
+        })
+    })
+
+    it('tells the reader how much the recap actually read', () => {
+      // A recap has no per-claim citations, so this line is the only thing
+      // between the reader and taking its completeness on faith.
+      dictations.insert({
+        ts: NOW - 3600_000,
+        rawText: 'something today',
+        polishedText: null,
+        appBundleId: null,
+        appName: null,
+        appCategory: 'work',
+        durationMs: 1000,
+        sttModelId: 'whisper-small',
+        polishModelId: null,
+        timings: { sttMs: 200, polishMs: 0, totalMs: 400 },
+      })
+
+      return service
+        .ask({ question: 'summarise my day', conversationId: null, sources: [] })
+        .then(() => {
+          const sources = events.find((e) => e.type === 'sources')
+          expect(sources).toMatchObject({ coverage: expect.stringContaining('from today') })
+        })
+    })
+
+    it('says so plainly when a period is empty', () => {
+      // "last week" here means 13–6 days back, and the only seeded record is
+      // from yesterday — so the period really is empty.
+      return service
+        .ask({ question: 'what did I do last week', conversationId: null, sources: [] })
+        .then(() => {
+          expect(activeTurns().at(-1)?.content).toMatch(/nothing recorded from last week/i)
+        })
+    })
+
+    it('answers a catalogue question from counts, not from passages', () => {
+      // The other reported bug: "do I have any meetings transcribed?" refused,
+      // because it was searched as though it were a topic.
+      return service
+        .ask({
+          question: 'Do I have any meetings that have been transcribed?',
+          conversationId: null,
+          sources: [],
+        })
+        .then(() => {
+          const shown = prompt()
+          expect(shown).toContain('Inventory:')
+          expect(shown).toContain('Meetings:')
+          // The whole dictation corpus is summarised as a count, not pasted in.
+          expect(shown).toContain('Dictations: 1')
+        })
+    })
+
+    it('still uses keyword retrieval for an ordinary question', () => {
+      return service
+        .ask({ question: 'what is blocking the migration?', conversationId: null, sources: [] })
+        .then(() => {
+          expect(prompt()).toContain('Sources:')
+          expect(prompt()).not.toContain('Inventory:')
+        })
+    })
+
+    it('does not stream the working passes of a long recap', async () => {
+      // A recap too large for one context is summarised in batches. Streaming
+      // those partials would read as the answer restarting several times.
+      for (let i = 0; i < 220; i += 1) {
+        dictations.insert({
+          ts: NOW - (i % 20) * 1800_000,
+          rawText: `record ${i} ${'word '.repeat(40)}`,
+          polishedText: null,
+          appBundleId: null,
+          appName: null,
+          appCategory: 'work',
+          durationMs: 1000,
+          sttModelId: 'whisper-small',
+          polishModelId: null,
+          timings: { sttMs: 200, polishMs: 0, totalMs: 400 },
+        })
+      }
+
+      let call = 0
+      engine = new FakeEngine(() => {
+        call += 1
+        return say(`summary ${call}`)
+      })
+      service = build()
+      await service.ask({ question: 'summarise my day', conversationId: null, sources: [] })
+
+      // Several passes ran, but only the final merge reached the renderer.
+      expect(call).toBeGreaterThan(1)
+      expect(deltas()).toBe(`summary ${call}`)
+      expect(activeTurns().at(-1)?.content).toBe(`summary ${call}`)
+    })
+  })
+
   describe('turn storage', () => {
     /** A conversation to hang turns on, independent of the service. */
     const thread = (): string => store.create('fixture', NOW).id
@@ -461,8 +589,8 @@ describe('AskService', () => {
       // time the thread renders the answer above the question that prompted it.
       for (let i = 0; i < 30; i += 1) {
         const id = thread()
-        store.append(id, { role: 'user', content: `q${i}`, citations: [], createdAt: NOW })
-        store.append(id, { role: 'assistant', content: `a${i}`, citations: [], createdAt: NOW })
+        store.append(id, { role: 'user', content: `q${i}`, citations: [], coverage: '', createdAt: NOW })
+        store.append(id, { role: 'assistant', content: `a${i}`, citations: [], coverage: '', createdAt: NOW })
         expect(store.turns(id).map((t) => t.role)).toEqual(['user', 'assistant'])
       }
     })
@@ -470,7 +598,7 @@ describe('AskService', () => {
     it('keeps the end of a long conversation, not its beginning', () => {
       const id = thread()
       for (let i = 0; i < 20; i += 1) {
-        store.append(id, { role: 'user', content: `q${i}`, citations: [], createdAt: NOW + i })
+        store.append(id, { role: 'user', content: `q${i}`, citations: [], coverage: '', createdAt: NOW + i })
       }
       const kept = store.turns(id, 5)
       expect(kept).toHaveLength(5)
@@ -486,6 +614,7 @@ describe('AskService', () => {
         role: 'assistant',
         content: 'still readable',
         citations: [],
+        coverage: '',
         createdAt: NOW,
       })
       db.prepare(`UPDATE ask_turns SET citations = '{oops' WHERE id = ?`).run(turn.id)
@@ -496,13 +625,13 @@ describe('AskService', () => {
       // A thread that answered you and then sank to the bottom of the list is
       // the bug this guards: the list sorts on `updated_at`.
       const id = store.create('fixture', NOW).id
-      store.append(id, { role: 'user', content: 'q', citations: [], createdAt: NOW + 5_000 })
+      store.append(id, { role: 'user', content: 'q', citations: [], coverage: '', createdAt: NOW + 5_000 })
       expect(store.get(id)?.updatedAt).toBe(NOW + 5_000)
     })
 
     it('deletes a conversation together with its turns', () => {
       const id = thread()
-      store.append(id, { role: 'user', content: 'q', citations: [], createdAt: NOW })
+      store.append(id, { role: 'user', content: 'q', citations: [], coverage: '', createdAt: NOW })
       store.delete(id)
       expect(store.turns(id)).toEqual([])
       expect((db.prepare(`SELECT COUNT(*) AS n FROM ask_turns`).get() as { n: number }).n).toBe(0)
@@ -523,8 +652,8 @@ describe('AskService', () => {
       // Coming back to the Hub should land where you left off.
       const older = store.create('older', NOW - 10_000)
       const newer = store.create('newer', NOW)
-      store.append(older.id, { role: 'user', content: 'a', citations: [], createdAt: NOW - 10_000 })
-      store.append(newer.id, { role: 'user', content: 'b', citations: [], createdAt: NOW })
+      store.append(older.id, { role: 'user', content: 'a', citations: [], coverage: '', createdAt: NOW - 10_000 })
+      store.append(newer.id, { role: 'user', content: 'b', citations: [], coverage: '', createdAt: NOW })
 
       expect(build().state().activeId).toBe(newer.id)
     })
@@ -532,7 +661,7 @@ describe('AskService', () => {
     it('orders the list by when each was last used, not when it was made', () => {
       const older = store.create('older', NOW - 100_000)
       store.create('newer', NOW - 50_000)
-      store.append(older.id, { role: 'user', content: 'revived', citations: [], createdAt: NOW })
+      store.append(older.id, { role: 'user', content: 'revived', citations: [], coverage: '', createdAt: NOW })
 
       expect(service.state().conversations[0]?.id).toBe(older.id)
     })
@@ -649,6 +778,7 @@ describe('AskService', () => {
           role: 'user',
           content: `rollback question ${i}`,
           citations: [],
+          coverage: '',
           createdAt: NOW + i,
         })
       }

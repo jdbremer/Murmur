@@ -568,6 +568,20 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       `)
     },
   },
+  {
+    version: 8,
+    name: 'ask-coverage',
+    up(db) {
+      // What a recap read, kept with the answer.
+      //
+      // A recap has no per-claim citations — the model was shown everything in
+      // the period rather than a handful of passages — so this line is the only
+      // thing telling the reader whether a summary covered twelve records or
+      // one. Held in view state it survived until the answer finished
+      // streaming and then vanished, which is precisely when it matters.
+      db.exec(`ALTER TABLE ask_turns ADD COLUMN coverage TEXT NOT NULL DEFAULT ''`)
+    },
+  },
 ])
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

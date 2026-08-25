@@ -458,9 +458,12 @@ kbd {
   top: 0;
   left: 0;
   right: 0;
-  height: 44px;
+  /* Tall enough to have finished dissolving a line before it reaches the
+     floating New button's row — an opaque pill sitting on half-faded text
+     reads as an overlap rather than as chrome above a scroll. */
+  height: 60px;
   pointer-events: none;
-  background: linear-gradient(to bottom, var(--color-surface) 18%, transparent);
+  background: linear-gradient(to bottom, var(--color-surface) 40%, transparent);
   opacity: 0;
   animation: ask-top-fade-in linear both;
   animation-timeline: --ask-thread;

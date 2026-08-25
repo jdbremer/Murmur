@@ -33,6 +33,8 @@ export interface ThreadState {
   citations: AskCitation[]
   /** How many candidates retrieval found before the budget cut them down. */
   searched: number
+  /** What the in-flight answer was built from; see the `sources` event. */
+  coverage: string
   /** The period the question named, if any — "this week". */
   window: string
   error: string | null
@@ -49,6 +51,7 @@ export const INITIAL_THREAD: ThreadState = {
   status: 'idle',
   citations: [],
   searched: 0,
+  coverage: '',
   window: '',
   error: null,
   unavailable: null,
@@ -75,6 +78,7 @@ export function threadReducer(state: ThreadState, action: ThreadAction): ThreadS
         streaming: '',
         citations: [],
         searched: 0,
+        coverage: '',
         window: '',
         error: null,
       }
@@ -114,6 +118,7 @@ function applyEvent(state: ThreadState, event: AskEvent): ThreadState {
         streaming: '',
         citations: [],
         searched: 0,
+        coverage: '',
         error: null,
       }
 
@@ -128,7 +133,12 @@ function applyEvent(state: ThreadState, event: AskEvent): ThreadState {
       }
 
     case 'sources':
-      return { ...state, citations: event.citations, searched: event.searched }
+      return {
+        ...state,
+        citations: event.citations,
+        searched: event.searched,
+        coverage: event.coverage,
+      }
 
     case 'delta':
       return { ...state, streaming: state.streaming + event.text }
@@ -287,4 +297,47 @@ function takeLastWord(parts: AnswerPart[]): string {
   if (head) last.value = head
   else parts.pop()
   return word
+}
+
+/**
+ * Split an answer into paragraphs and bullet runs.
+ *
+ * A recap is asked for as "- " lines and, rendered as one `pre-wrap` block,
+ * arrives as a wall of hyphens with wrapped continuation lines flush against
+ * the margin — the reader has to find the item boundaries by eye. Detecting the
+ * runs and rendering a real list is the difference between a list and text that
+ * happens to contain hyphens.
+ *
+ * Deliberately not a Markdown parser. The only structure the prompts ask for is
+ * a bullet, and a parser would bring emphasis, headings and links along with
+ * it — every one of them a way for a small model's stray asterisk to eat half
+ * an answer.
+ */
+export interface AnswerBlock {
+  kind: 'text' | 'list'
+  /** One string for `text`; one per item for `list`. */
+  lines: string[]
+}
+
+export function splitBlocks(text: string): AnswerBlock[] {
+  const blocks: AnswerBlock[] = []
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trimEnd()
+    // `- ` or `• `, and a lone `-` is a hyphen rather than an empty bullet.
+    const bullet = /^\s*[-•*]\s+(.*)$/.exec(line)
+    const last = blocks.at(-1)
+
+    if (bullet?.[1]) {
+      if (last?.kind === 'list') last.lines.push(bullet[1])
+      else blocks.push({ kind: 'list', lines: [bullet[1]] })
+      continue
+    }
+
+    if (!line.trim()) continue
+    if (last?.kind === 'text') last.lines.push(line)
+    else blocks.push({ kind: 'text', lines: [line] })
+  }
+
+  return blocks
 }

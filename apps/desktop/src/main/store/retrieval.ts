@@ -1,7 +1,12 @@
 import { readFileSync, statSync } from 'node:fs'
 
 import type { Database } from 'better-sqlite3'
-import { type AskPassage, type AskSource, type TimeWindow } from '@murmur/shared'
+import {
+  type AskPassage,
+  type AskSource,
+  type CorpusDigest,
+  type TimeWindow,
+} from '@murmur/shared'
 
 import { createLogger, type Logger } from '../logging'
 
@@ -558,6 +563,196 @@ export class RetrievalRepository {
       text: row.text,
       timestamp: row.started_at,
     }))
+  }
+
+  /**
+   * Everything in a window, oldest first — the recap's retrieval.
+   *
+   * Deliberately *not* ranked. A recap asks "what happened", and relevance
+   * ranking answers "what best matches these words", which for a question made
+   * entirely of instruction words ("summarise my day") is close to random. The
+   * only sensible ordering for a period is the order it happened in, and the
+   * only sensible selection is all of it.
+   *
+   * `cap` is a runaway guard, not a budget: the budget is applied downstream by
+   * batching, which summarises in several passes rather than dropping the tail.
+   * It is high enough that a real day never reaches it.
+   */
+  enumerate(
+    window: TimeWindow,
+    options: { sources?: readonly AskSource[] | undefined; cap?: number } = {},
+  ): AskPassage[] {
+    const wanted = new Set(options.sources ?? ALL_SOURCES)
+    const cap = options.cap ?? 400
+    const passages: AskPassage[] = []
+
+    if (wanted.has('dictation')) {
+      const rows = this.#db
+        .prepare(
+          `SELECT d.id, d.ts, d.raw_text, d.polished_text, d.app_name
+             FROM dictations d
+            WHERE d.ts >= ? AND d.ts < ?
+            ORDER BY d.ts ASC
+            LIMIT ?`,
+        )
+        .all(window.from, window.to, cap) as DictationHitRow[]
+      for (const row of rows) {
+        passages.push({
+          id: row.id,
+          source: 'dictation',
+          title: row.app_name ? `dictated in ${row.app_name}` : 'dictation',
+          text: row.polished_text?.trim() || row.raw_text,
+          timestamp: row.ts,
+          score: 0,
+        })
+      }
+    }
+
+    if (wanted.has('note')) {
+      const rows = this.#db
+        .prepare(
+          `SELECT n.id, n.title, n.body, n.updated_at
+             FROM notes n
+            WHERE n.updated_at >= ? AND n.updated_at < ?
+            ORDER BY n.updated_at ASC
+            LIMIT ?`,
+        )
+        .all(window.from, window.to, cap) as NoteHitRow[]
+      for (const row of rows) {
+        passages.push({
+          id: row.id,
+          source: 'note',
+          title: row.title.trim() || firstLine(row.body),
+          text: row.body,
+          timestamp: row.updated_at,
+          score: 0,
+        })
+      }
+    }
+
+    if (wanted.has('meeting')) {
+      const rows = this.#db
+        .prepare(
+          `SELECT c.meeting_id, c.text, c.ordinal, m.title, m.started_at
+             FROM meeting_chunks c
+             JOIN meetings m ON m.id = c.meeting_id
+            WHERE m.started_at >= ? AND m.started_at < ?
+            ORDER BY m.started_at ASC, c.ordinal ASC
+            LIMIT ?`,
+        )
+        .all(window.from, window.to, cap) as MeetingHitRow[]
+      for (const row of rows) {
+        passages.push({
+          id: `${row.meeting_id}#${row.ordinal}`,
+          source: 'meeting',
+          title: row.title,
+          text: row.text,
+          timestamp: row.started_at,
+          score: 0,
+        })
+      }
+    }
+
+    // One chronological stream across all three sources, so the recap reads as
+    // a day rather than as three separate lists stapled together.
+    return passages.sort((a, b) => a.timestamp - b.timestamp)
+  }
+
+  /**
+   * What exists, rather than what it says — the catalogue question's answer.
+   *
+   * Counts and dates computed in SQL and handed to the model as facts. The
+   * alternative, letting the model count the records it was shown, fails in
+   * exactly the way small models fail: confidently, and off by a lot.
+   */
+  digest(now: number): CorpusDigest {
+    const startOfToday = new Date(now)
+    startOfToday.setHours(0, 0, 0, 0)
+    const dayStart = startOfToday.getTime()
+    const weekStart = dayStart - 6 * 86_400_000
+
+    const dictations = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END), 0) AS today,
+                COALESCE(SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END), 0) AS week,
+                MIN(ts) AS first_at, MAX(ts) AS last_at
+           FROM dictations`,
+      )
+      .get(dayStart, weekStart) as {
+      total: number
+      today: number
+      week: number
+      first_at: number | null
+      last_at: number | null
+    }
+
+    // Word count from the lifetime counters rather than by re-tokenising every
+    // row: `stats.ts` already maintains it, and it is what History reports.
+    const words = (
+      this.#db.prepare(`SELECT COALESCE(total_words, 0) AS n FROM lifetime_stats`).get() as
+        | { n: number }
+        | undefined
+    )?.n
+    const noteTotals = this.#db
+      .prepare(`SELECT COUNT(*) AS total, MAX(updated_at) AS last_at FROM notes`)
+      .get() as { total: number; last_at: number | null }
+    const recentNotes = this.#db
+      .prepare(`SELECT title, body, updated_at FROM notes ORDER BY updated_at DESC LIMIT 5`)
+      .all() as { title: string; body: string; updated_at: number }[]
+
+    const meetingTotals = this.#db
+      .prepare(
+        `SELECT COUNT(*) AS total, MAX(started_at) AS last_at,
+                COALESCE(SUM(duration_ms), 0) AS total_ms
+           FROM meetings`,
+      )
+      .get() as { total: number; last_at: number | null; total_ms: number }
+    const recentMeetings = this.#db
+      .prepare(
+        `SELECT m.id, m.title, m.started_at, m.duration_ms,
+                EXISTS(SELECT 1 FROM meeting_index i WHERE i.meeting_id = m.id) AS indexed
+           FROM meetings m
+          ORDER BY m.started_at DESC
+          LIMIT 10`,
+      )
+      .all() as {
+      id: string
+      title: string
+      started_at: number
+      duration_ms: number
+      indexed: number
+    }[]
+
+    return {
+      dictations: {
+        total: dictations.total,
+        today: dictations.today,
+        week: dictations.week,
+        firstAt: dictations.first_at,
+        lastAt: dictations.last_at,
+        words: words ?? 0,
+      },
+      notes: {
+        total: noteTotals.total,
+        lastAt: noteTotals.last_at,
+        recent: recentNotes.map((row) => ({
+          title: row.title.trim() || firstLine(row.body),
+          at: row.updated_at,
+        })),
+      },
+      meetings: {
+        total: meetingTotals.total,
+        lastAt: meetingTotals.last_at,
+        totalMs: meetingTotals.total_ms,
+        recent: recentMeetings.map((row) => ({
+          title: row.title,
+          at: row.started_at,
+          durationMs: row.duration_ms,
+          indexed: row.indexed === 1,
+        })),
+      },
+    }
   }
 
   // -- meeting index ---------------------------------------------------------

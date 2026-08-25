@@ -6,6 +6,7 @@ import {
   INITIAL_THREAD,
   isBusy,
   splitAnswer,
+  splitBlocks,
   statusLabel,
   threadReducer,
   type ThreadState,
@@ -26,7 +27,7 @@ const NOW = 1_700_000_000_000
 const CONV = 'conv-1'
 
 function turn(role: 'user' | 'assistant', content: string, citations: AskCitation[] = []): AskTurn {
-  return { id: `${role}-${content}`, role, content, citations, createdAt: NOW }
+  return { id: `${role}-${content}`, role, content, citations, coverage: '', createdAt: NOW }
 }
 
 function citation(index: number): AskCitation {
@@ -133,6 +134,7 @@ describe('threadReducer', () => {
       conversationId: CONV,
       citations: [citation(1), citation(2)],
       searched: 17,
+      coverage: '',
     })
     expect(state.citations).toHaveLength(2)
     expect(state.searched).toBe(17)
@@ -142,11 +144,14 @@ describe('threadReducer', () => {
     // Otherwise the chips under a fresh, still-empty answer are the last one's.
     const state = reduce(
       INITIAL_THREAD,
-      { type: 'sources', conversationId: CONV, citations: [citation(1)], searched: 4 },
+      { type: 'sources', conversationId: CONV, citations: [citation(1)], searched: 4, coverage: '' },
       { type: 'question', conversationId: CONV, turn: turn('user', 'next') },
     )
     expect(state.citations).toEqual([])
     expect(state.searched).toBe(0)
+    // The coverage line goes with them; a recap's "read 12 dictations" left
+    // standing over the next answer would misdescribe it.
+    expect(state.coverage).toBe('')
   })
 
   it('loads a stored conversation', () => {
@@ -333,5 +338,46 @@ describe('splitAnswer', () => {
       { kind: 'text', value: 'no citations here' },
     ])
     expect(splitAnswer('', [])).toEqual([])
+  })
+})
+
+describe('splitBlocks', () => {
+  it('groups a run of bullets into one list', () => {
+    // A recap arrives as "- " lines. Rendered as one pre-wrap block it is a
+    // wall of hyphens whose wrapped lines sit flush against the margin.
+    const blocks = splitBlocks('- first thing\n- second thing\n- third thing')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]?.kind).toBe('list')
+    expect(blocks[0]?.lines).toEqual(['first thing', 'second thing', 'third thing'])
+  })
+
+  it('keeps prose and bullets as separate blocks, in order', () => {
+    const blocks = splitBlocks('Here is your day:\n- did a thing\n- did another\nThat was it.')
+    expect(blocks.map((b) => b.kind)).toEqual(['text', 'list', 'text'])
+  })
+
+  it('accepts the bullet characters a model actually emits', () => {
+    expect(splitBlocks('- dash\n• dot\n* star')[0]?.lines).toEqual(['dash', 'dot', 'star'])
+  })
+
+  it('leaves a lone hyphen as prose', () => {
+    // "-" on its own is punctuation mid-sentence, not an empty bullet.
+    expect(splitBlocks('a sentence -\nand its rest')[0]?.kind).toBe('text')
+  })
+
+  it('does not treat a hyphenated word as a bullet', () => {
+    expect(splitBlocks('well-known problem')[0]).toEqual({
+      kind: 'text',
+      lines: ['well-known problem'],
+    })
+  })
+
+  it('drops blank lines rather than emitting empty blocks', () => {
+    expect(splitBlocks('one\n\n\ntwo')).toEqual([{ kind: 'text', lines: ['one', 'two'] }])
+  })
+
+  it('handles an answer that is still streaming its first character', () => {
+    expect(splitBlocks('')).toEqual([])
+    expect(splitBlocks('-')).toEqual([{ kind: 'text', lines: ['-'] }])
   })
 })

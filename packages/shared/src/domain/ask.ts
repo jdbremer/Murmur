@@ -70,6 +70,15 @@ export const AskTurnSchema = z.object({
   content: z.string(),
   /** Only ever populated on assistant turns. */
   citations: z.array(AskCitationSchema).default([]),
+  /**
+   * What this answer was built from — "12 dictations and 1 meeting from today".
+   *
+   * Stored on the turn rather than held in view state because it is provenance,
+   * and provenance that disappears when you reopen the conversation is worse
+   * than none: a recap with no citations and no coverage line is a summary the
+   * reader has to take entirely on trust.
+   */
+  coverage: z.string().default(''),
   createdAt: z.number().int().nonnegative(),
 })
 export type AskTurn = z.infer<typeof AskTurnSchema>
@@ -537,6 +546,14 @@ export const AskEventSchema = z.discriminatedUnion('type', [
     conversationId: z.string().min(1),
     citations: z.array(AskCitationSchema),
     searched: z.number().int().nonnegative(),
+    /**
+     * What the answer was built from, in words — "12 dictations and 1 meeting
+     * from today". Empty for an ordinary lookup, where the citation chips
+     * already say. A recap has no per-claim citations to show (it read
+     * everything), so this line is the only thing standing between the reader
+     * and taking a summary's completeness on faith.
+     */
+    coverage: z.string().default(''),
   }),
   z.object({ type: z.literal('delta'), conversationId: z.string().min(1), text: z.string() }),
   /**
@@ -593,3 +610,420 @@ export const AskRequestSchema = z.object({
   sources: z.array(AskSourceSchema).default([]),
 })
 export type AskRequest = z.infer<typeof AskRequestSchema>
+
+// ---------------------------------------------------------------------------
+// Intent
+// ---------------------------------------------------------------------------
+
+/**
+ * What kind of question this is, and therefore how to answer it.
+ *
+ * The first version of Ask had one strategy — rank passages by keyword
+ * relevance and hand the model the best few — and pointed it at every question.
+ * That answers "what did I say about the migration" and is *structurally*
+ * incapable of answering the two things people actually try first:
+ *
+ *  - **"Summarize my day."** The words carry the instruction, not the topic, so
+ *    BM25 ranks by whichever record happens to contain "today" or "summarize".
+ *    The model then faithfully summarises the one or two records it was handed
+ *    and produces a confident, tiny, wrong answer. A recap needs *everything in
+ *    the window*, chronologically — the opposite of top-k by relevance.
+ *  - **"Do I have any meetings transcribed?"** This is a question about the
+ *    catalogue, not the contents. No amount of full-text search over transcript
+ *    *text* can answer whether a transcript *exists*; the answer lives in
+ *    counts and dates.
+ *
+ * So the question is routed first, and each route retrieves differently.
+ */
+export const ASK_INTENTS = ['lookup', 'recap', 'catalog'] as const
+export const AskIntentSchema = z.enum(ASK_INTENTS)
+export type AskIntent = z.infer<typeof AskIntentSchema>
+
+export interface AskPlan {
+  intent: AskIntent
+  /** The period the question named, or one implied by a bare recap. */
+  window: TimeWindow | null
+  /** For a catalogue question that named one kind of thing. */
+  focus: AskSource | null
+  /** Content words left after the instruction vocabulary is removed. */
+  topic: string[]
+}
+
+/**
+ * Words that carry *the shape of the request* rather than its subject.
+ *
+ * Distinct from {@link STOPWORDS}-style grammar: these are meaningful English
+ * words that happen to describe what the user wants done. "Summarize what I
+ * dictated today" has no topic — every content word in it is an instruction —
+ * and recognising that is exactly what separates a recap from a lookup.
+ */
+const INSTRUCTION_WORDS = new Set([
+  'anything', 'brief', 'catch', 'dictate', 'dictated', 'dictating', 'dictation',
+  'dictations', 'digest', 'discuss', 'discussed', 'everything', 'get', 'give',
+  'going', 'happened', 'me', 'my', 'overview', 'recap', 'recorded', 'recording',
+  'recordings', 'rundown', 'said', 'say', 'saying', 'summarise', 'summarised',
+  'summarize', 'summarized', 'summary', 'talk', 'talked', 'talking',
+  'transcribe', 'transcribed', 'transcript', 'transcripts', 'up', 'work',
+  'worked', 'working', 'wrote',
+])
+
+/** Words naming a period; already handled by {@link parseTimeWindow}. */
+const PERIOD_WORDS = new Set([
+  'day', 'days', 'few', 'fortnight', 'last', 'lately', 'month', 'months',
+  'morning', 'next', 'past', 'previous', 'recent', 'recently', 'today',
+  'tonight', 'week', 'weeks', 'yesterday',
+])
+
+const RECAP_RE =
+  /\b(summari[sz]e|summari[sz]ed|summary|recap|rundown|overview|digest|catch me up|brief me)\b/i
+
+/** "What did I work on", "what have I been up to" — a recap without the verb. */
+const RECAP_PHRASE_RE =
+  /\bwhat (did|have) (i|we) (been )?(do|doing|done|work|worked|working|say|said|saying|talk|talked|discuss|discussed|get|got|up to)\b/i
+
+const CATALOG_RE = [
+  /\b(do|did|have|has) (i|we) (have|got|recorded|transcribed|made)\b/i,
+  /\bhow (many|much)\b/i,
+  /\b(is|are) there (any|a|an)\b/i,
+  /\bwhen (did|was) (i|my|the)\b.*\b(last|first|latest|most recent)\b/i,
+  /\b(list|show me|show|what) (all )?(my |the )?(meetings?|notes?|dictations?|transcripts?|recordings?|conversations?)\b/i,
+  /\bany (meetings?|notes?|dictations?|transcripts?|recordings?)\b/i,
+  /\b(how long|how much time|total)\b/i,
+]
+
+/** Which kind of thing a catalogue question is about, when it names one. */
+const FOCUS_PATTERNS: [RegExp, AskSource][] = [
+  [/\b(meetings?|calls?|standups?)\b/i, 'meeting'],
+  [/\b(notes?|scratchpad)\b/i, 'note'],
+  [/\b(dictations?|dictated)\b/i, 'dictation'],
+]
+
+/**
+ * Decide how to answer a question.
+ *
+ * Rule-based rather than a classification round-trip through the model. A 1B–4B
+ * model classifying its own input is both slower (a whole extra inference
+ * before the first token) and less reliable than a dozen regexes, and — unlike
+ * the model — this can be tested exhaustively and behaves the same every time.
+ *
+ * The ordering matters: catalogue is checked first because it is the most
+ * specific, and a question like "how many meetings did I record this week"
+ * satisfies the recap patterns too.
+ */
+export function planAsk(question: string, now: number): AskPlan {
+  const window = parseTimeWindow(question, now)
+  const topic = topicTerms(question)
+
+  if (CATALOG_RE.some((pattern) => pattern.test(question))) {
+    const focus = FOCUS_PATTERNS.find(([pattern]) => pattern.test(question))?.[1] ?? null
+    return { intent: 'catalog', window, focus, topic }
+  }
+
+  // A recap only when the question has *no subject left* once the instruction
+  // vocabulary is removed. "Summarize my day" is a recap; "summarize what I
+  // said about the migration" still has a subject, and the ordinary lookup
+  // path — which finds the migration and lets the model summarise it — is a
+  // far better answer than dumping the whole day on the model.
+  const looksLikeRecap = RECAP_RE.test(question) || RECAP_PHRASE_RE.test(question)
+  if (looksLikeRecap && topic.length === 0) {
+    // A bare "give me a recap" means the recent past; today is the reading
+    // that makes the answer small enough to be worth having.
+    return { intent: 'recap', window: window ?? todayWindow(now), focus: null, topic }
+  }
+
+  return { intent: 'lookup', window, focus: null, topic }
+}
+
+/** The content words, with grammar, instructions and period words removed. */
+function topicTerms(question: string): string[] {
+  return question
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}']+/u)
+    .map((term) => term.replace(/^'+|'+$/g, ''))
+    .filter(
+      (term) =>
+        term.length > 1 &&
+        !INSTRUCTION_WORDS.has(term) &&
+        !PERIOD_WORDS.has(term) &&
+        !QUESTION_GRAMMAR.has(term),
+    )
+}
+
+/**
+ * Grammar shared with the FTS query builder.
+ *
+ * Deliberately a second, smaller list rather than a reference to the retrieval
+ * one: that list exists to stop a search matching everything, this one exists
+ * to decide whether a question has a subject, and letting them drift apart is
+ * better than coupling two judgements that answer different questions.
+ */
+const QUESTION_GRAMMAR = new Set([
+  'a', 'about', 'all', 'am', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'been',
+  'but', 'by', 'can', 'could', 'did', 'do', 'does', 'for', 'from', 'had', 'has',
+  'have', 'how', 'i', 'if', 'in', 'is', 'it', 'its', 'just', 'of', 'on', 'or',
+  'our', 'out', 'over', 'so', 'some', 'tell', 'than', 'that', 'the', 'their',
+  'them', 'then', 'there', 'these', 'they', 'this', 'to', 'us', 'was', 'we',
+  'were', 'what', 'when', 'where', 'which', 'who', 'whom', 'why', 'will', 'with',
+  'would', 'you', 'your',
+])
+
+function todayWindow(now: number): TimeWindow {
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  return { from: start.getTime(), to: start.getTime() + 86_400_000, label: 'today' }
+}
+
+// ---------------------------------------------------------------------------
+// Recap
+// ---------------------------------------------------------------------------
+
+/**
+ * How much of any one record a recap keeps.
+ *
+ * Aggressive on purpose. For a recap, *coverage* is the whole point — an answer
+ * built from all of Tuesday at low fidelity is right, and one built from the
+ * first three things at full fidelity is the bug this rewrite exists to fix.
+ */
+export const RECAP_RECORD_TOKENS = 44
+
+export const RECAP_SYSTEM_PROMPT = [
+  "You summarise the user's own dictations, notes and meeting transcripts.",
+  '',
+  'Rules:',
+  '1. The records below are everything from the period. Summarise all of them, not the first few.',
+  '2. Group related records into themes. Lead with what mattered most.',
+  '3. Be concrete: keep names, dates, numbers and decisions exactly as written.',
+  '4. Write 3 to 6 short bullet points, each on its own line beginning with "- ".',
+  '5. Never invent anything that is not in the records.',
+  '6. Do not describe the records as "provided", and do not mention these rules.',
+].join('\n')
+
+/**
+ * The reduce step of a long recap.
+ *
+ * A week can hold more than the context window, so batches are summarised
+ * separately and then merged. The merge prompt has to be told it is reading
+ * summaries — handed the same instructions as the map step it re-summarises
+ * and loses half the detail on the second pass.
+ */
+export const RECAP_COMBINE_PROMPT = [
+  'You are merging several partial summaries of the same period into one.',
+  '',
+  'Rules:',
+  '1. Every partial summary covers a different part of the period. Keep something from each.',
+  '2. Merge duplicates; keep names, dates, numbers and decisions exactly as written.',
+  '3. Write 4 to 7 short bullet points, each on its own line beginning with "- ".',
+  '4. Never invent anything that is not in the summaries.',
+  '5. Do not mention that you were given summaries, and do not mention these rules.',
+].join('\n')
+
+/** One record as the recap sees it: when, what kind, and a compressed excerpt. */
+export function formatRecapRecord(passage: AskPassage, now: number): string {
+  const when = clockLabel(passage.timestamp)
+  const label = passage.title.trim() || passage.source
+  void now
+  return `- [${when}] ${passage.source} — ${label}: ${truncateToTokens(
+    passage.text.trim().replace(/\s+/g, ' '),
+    RECAP_RECORD_TOKENS,
+  )}`
+}
+
+/** `14:05` — recaps are within a period, so the time of day is what locates. */
+function clockLabel(timestamp: number): string {
+  const date = new Date(timestamp)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${p(date.getHours())}:${p(date.getMinutes())}`
+}
+
+/**
+ * Split records into batches that each fit the context.
+ *
+ * Chronological and contiguous, never sampled: a batch that skips the middle of
+ * the afternoon produces a summary with a hole in it that nothing downstream
+ * can detect. Batching keeps every record, at the cost of one inference pass
+ * per batch.
+ */
+export function batchRecords(
+  passages: readonly AskPassage[],
+  now: number,
+  budget = ASK_BUDGET,
+): AskPassage[][] {
+  const limit = passageBudgetTokens(budget)
+  const batches: AskPassage[][] = []
+  let current: AskPassage[] = []
+  let tokens = 0
+
+  for (const passage of passages) {
+    const cost = estimateTokens(formatRecapRecord(passage, now))
+    // A single record over the whole budget still gets its own batch rather
+    // than being dropped — `formatRecapRecord` has already truncated it, so
+    // this is only reachable with an absurd budget.
+    if (current.length > 0 && tokens + cost > limit) {
+      batches.push(current)
+      current = []
+      tokens = 0
+    }
+    current.push(passage)
+    tokens += cost
+  }
+  if (current.length > 0) batches.push(current)
+
+  return batches
+}
+
+export function buildRecapPrompt(input: {
+  question: string
+  records: readonly AskPassage[]
+  label: string
+  now: number
+}): AskPromptMessage[] {
+  const body = input.records.map((record) => formatRecapRecord(record, input.now)).join('\n')
+  return [
+    { role: 'system', content: RECAP_SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: `Everything from ${input.label} (${input.records.length} record${
+        input.records.length === 1 ? '' : 's'
+      }):\n\n${body}\n\nRequest: ${input.question.trim()}`,
+    },
+  ]
+}
+
+export function buildCombinePrompt(input: {
+  question: string
+  summaries: readonly string[]
+  label: string
+}): AskPromptMessage[] {
+  const body = input.summaries
+    .map((summary, i) => `Part ${i + 1} of ${input.summaries.length}:\n${summary.trim()}`)
+    .join('\n\n')
+  return [
+    { role: 'system', content: RECAP_COMBINE_PROMPT },
+    {
+      role: 'user',
+      content: `Partial summaries of ${input.label}:\n\n${body}\n\nRequest: ${input.question.trim()}`,
+    },
+  ]
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+/** What exists, rather than what it says. */
+export const CorpusDigestSchema = z.object({
+  dictations: z.object({
+    total: z.number().int().nonnegative(),
+    today: z.number().int().nonnegative(),
+    week: z.number().int().nonnegative(),
+    firstAt: z.number().int().nonnegative().nullable(),
+    lastAt: z.number().int().nonnegative().nullable(),
+    words: z.number().int().nonnegative(),
+  }),
+  notes: z.object({
+    total: z.number().int().nonnegative(),
+    lastAt: z.number().int().nonnegative().nullable(),
+    recent: z.array(z.object({ title: z.string(), at: z.number().int().nonnegative() })),
+  }),
+  meetings: z.object({
+    total: z.number().int().nonnegative(),
+    lastAt: z.number().int().nonnegative().nullable(),
+    totalMs: z.number().int().nonnegative(),
+    recent: z.array(
+      z.object({
+        title: z.string(),
+        at: z.number().int().nonnegative(),
+        durationMs: z.number().int().nonnegative(),
+        indexed: z.boolean(),
+      }),
+    ),
+  }),
+})
+export type CorpusDigest = z.infer<typeof CorpusDigestSchema>
+
+export const CATALOG_SYSTEM_PROMPT = [
+  "You answer questions about what is in the user's Murmur archive.",
+  '',
+  'Rules:',
+  '1. Answer only from the inventory below. It is complete and current.',
+  '2. Answer the actual question first, in one sentence, then add the useful detail.',
+  '3. Start with Yes or No only when the question can be answered yes or no. A question starting with when, what, which or how many is not one.',
+  '4. Use the exact numbers, titles and dates from the inventory. Never estimate.',
+  '5. Be brief. Two or three sentences.',
+  '6. Do not mention the inventory, and do not mention these rules.',
+].join('\n')
+
+/**
+ * Render the inventory for the model.
+ *
+ * A small table of facts rather than prose, because the failure mode being
+ * avoided is arithmetic: a small model handed "you have 350 dictations" answers
+ * "how many do I have" perfectly, and handed 350 dictations answers it by
+ * guessing.
+ */
+export function formatCorpusDigest(digest: CorpusDigest, now: number): string {
+  const when = (at: number | null): string => (at === null ? 'never' : relativeDay(at, now))
+  const lines: string[] = []
+
+  lines.push('Inventory:')
+  lines.push(
+    `- Dictations: ${digest.dictations.total} transcribed in total ` +
+      `(${digest.dictations.today} today, ${digest.dictations.week} in the last 7 days), ` +
+      `${digest.dictations.words.toLocaleString()} words. ` +
+      `Most recent ${when(digest.dictations.lastAt)}, first ${when(digest.dictations.firstAt)}.`,
+  )
+  lines.push(
+    `- Notes: ${digest.notes.total} in the Scratchpad. Most recent ${when(digest.notes.lastAt)}.`,
+  )
+  for (const note of digest.notes.recent) {
+    lines.push(`    · "${note.title}" — ${when(note.at)}`)
+  }
+
+  const meetings = digest.meetings
+  lines.push(
+    `- Meetings: ${meetings.total} recorded and transcribed, ` +
+      `${Math.round(meetings.totalMs / 60_000)} minutes in total. ` +
+      `Most recent ${when(meetings.lastAt)}.`,
+  )
+  for (const meeting of meetings.recent) {
+    lines.push(
+      `    · "${meeting.title}" — ${when(meeting.at)}, ` +
+        `${Math.max(1, Math.round(meeting.durationMs / 60_000))} min` +
+        `${meeting.indexed ? '' : ' (transcript file missing)'}`,
+    )
+  }
+
+  return lines.join('\n')
+}
+
+export function buildCatalogPrompt(input: {
+  question: string
+  digest: CorpusDigest
+  now: number
+}): AskPromptMessage[] {
+  return [
+    { role: 'system', content: CATALOG_SYSTEM_PROMPT },
+    {
+      role: 'user',
+      content: `${formatCorpusDigest(input.digest, input.now)}\n\nQuestion: ${input.question.trim()}`,
+    },
+  ]
+}
+
+/** "12 dictations and 1 meeting from today" — what an answer was built from. */
+export function describeCoverage(passages: readonly AskPassage[], label: string): string {
+  const counts = new Map<AskSource, number>()
+  for (const passage of passages) counts.set(passage.source, (counts.get(passage.source) ?? 0) + 1)
+
+  const parts = ASK_SOURCES.flatMap((source) => {
+    const n = counts.get(source)
+    if (!n) return []
+    const noun = source === 'dictation' ? 'dictation' : source
+    return [`${n} ${noun}${n === 1 ? '' : 's'}`]
+  })
+
+  if (parts.length === 0) return `nothing from ${label}`
+  const joined =
+    parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
+  return `${joined} from ${label}`
+}

@@ -20,6 +20,7 @@ import {
   INITIAL_THREAD,
   isBusy,
   splitAnswer,
+  splitBlocks,
   statusLabel,
   threadReducer,
   type ThreadState,
@@ -465,14 +466,23 @@ function Thread({ state }: { state: ThreadState }): React.JSX.Element {
             {turn.role === 'user' ? (
               <Question>{turn.content}</Question>
             ) : (
-              <Answer text={turn.content} citations={turn.citations} />
+              <Answer
+                text={turn.content}
+                citations={turn.citations}
+                coverage={turn.coverage}
+              />
             )}
           </div>
         )
       })}
 
       {state.streaming ? (
-        <Answer text={state.streaming} citations={state.citations} streaming />
+        <Answer
+          text={state.streaming}
+          citations={state.citations}
+          coverage={state.coverage}
+          streaming
+        />
       ) : state.status === 'searching' || state.status === 'answering' ? (
         <Thinking searching={state.status === 'searching'} />
       ) : null}
@@ -552,15 +562,26 @@ function Thinking({ searching }: { searching: boolean }): React.JSX.Element {
 function Answer({
   text,
   citations,
+  coverage = '',
   streaming = false,
 }: {
   text: string
   citations: readonly AskCitation[]
+  /**
+   * What a recap read, in words. Recaps have no per-claim citations — the
+   * model saw everything in the period — so without this the reader has no
+   * way to tell a summary of twelve records from a summary of one, which is
+   * precisely the failure this line exists to make visible.
+   */
+  coverage?: string
   streaming?: boolean
 }): React.JSX.Element {
   const toast = useToast()
-  const parts = splitAnswer(text, citations)
-  const used = parts.flatMap((part) => (part.citation ? [part.citation] : []))
+  const blocks = splitBlocks(text)
+  const used = blocks
+    .flatMap((block) => block.lines)
+    .flatMap((line) => splitAnswer(line, citations))
+    .flatMap((part) => (part.citation ? [part.citation] : []))
   const unique = [...new Map(used.map((c) => [c.index, c])).values()]
 
   const copy = (): void => {
@@ -575,27 +596,57 @@ function Answer({
 
   return (
     <div className="ask-turn group/answer">
-      <p className="whitespace-pre-wrap text-[14px] leading-[1.75] text-ink">
-        {parts.map((part, i) =>
-          part.kind === 'citation' && part.citation ? (
-            // The chip and the word before it inside one unbreakable run —
-            // see `takeLastWord` for why a chip alone on a line is easy to
-            // produce and how bad it looks.
-            <span key={`${part.value}-${i}`} className="whitespace-nowrap">
-              {part.lead}
-              <CitationChip citation={part.citation} />
-            </span>
+      <div className="space-y-3 text-[14px] leading-[1.75] text-ink">
+        {blocks.map((block, b) =>
+          block.kind === 'list' ? (
+            <ul key={`b-${b}`} className="space-y-1.5">
+              {block.lines.map((line, i) => (
+                <li key={`li-${i}`} className="flex gap-2.5">
+                  {/* A dot rather than the model's hyphen: the marker is the
+                      renderer's job, and hanging it outside the text column
+                      keeps wrapped continuation lines aligned under the words
+                      instead of under the bullet. */}
+                  <span
+                    aria-hidden="true"
+                    className="mt-[0.62em] size-[3px] shrink-0 rounded-full bg-ink-faint"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <Prose text={line} citations={citations} />
+                  </span>
+                </li>
+              ))}
+            </ul>
           ) : (
-            <span key={`t-${i}`}>{part.value}</span>
+            <p key={`b-${b}`} className="whitespace-pre-wrap">
+              <Prose text={block.lines.join('\n')} citations={citations} />
+              {streaming && b === blocks.length - 1 ? <Caret /> : null}
+            </p>
           ),
         )}
-        {streaming ? (
-          <span
-            aria-hidden="true"
-            className="ask-caret ml-0.5 inline-block h-[0.95em] w-[2px] translate-y-[2px] rounded-full bg-accent align-baseline"
-          />
+        {streaming && blocks.at(-1)?.kind === 'list' ? (
+          <p>
+            <Caret />
+          </p>
         ) : null}
-      </p>
+      </div>
+
+      {coverage ? (
+        <p className="mt-2.5 flex items-center gap-1.5 text-[11px] text-ink-faint">
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className="size-[12px] shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+          Read {coverage}
+        </p>
+      ) : null}
 
       {!streaming && unique.length > 0 ? <Sources citations={unique} /> : null}
 
@@ -625,6 +676,42 @@ function Answer({
         </div>
       )}
     </div>
+  )
+}
+
+/** One run of text with its citation chips rendered inline. */
+function Prose({
+  text,
+  citations,
+}: {
+  text: string
+  citations: readonly AskCitation[]
+}): React.JSX.Element {
+  return (
+    <>
+      {splitAnswer(text, citations).map((part, i) =>
+        part.kind === 'citation' && part.citation ? (
+          // The chip and the word before it inside one unbreakable run — see
+          // `takeLastWord` for why a chip alone on a line is easy to produce
+          // and how bad it looks.
+          <span key={`${part.value}-${i}`} className="whitespace-nowrap">
+            {part.lead}
+            <CitationChip citation={part.citation} />
+          </span>
+        ) : (
+          <span key={`t-${i}`}>{part.value}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+function Caret(): React.JSX.Element {
+  return (
+    <span
+      aria-hidden="true"
+      className="ask-caret ml-0.5 inline-block h-[0.95em] w-[2px] translate-y-[2px] rounded-full bg-accent align-baseline"
+    />
   )
 }
 

@@ -1,18 +1,25 @@
 import {
   ASK_BUDGET,
+  batchRecords,
   buildAskPrompt,
+  buildCatalogPrompt,
+  buildCombinePrompt,
+  buildRecapPrompt,
+  describeCoverage,
   deriveConversationTitle,
   fitPassages,
-  parseTimeWindow,
+  planAsk,
   trimHistory,
   usedCitations,
   type AskConversation,
   type AskEvent,
   type AskRequest,
+  type AskCitation,
   type AskSearchHit,
   type AskSource,
   type AskState,
   type AskStatus,
+  type TimeWindow,
 } from '@murmur/shared'
 
 import { isPreempted } from '../engines/gate'
@@ -141,6 +148,7 @@ export class AskService {
       role: 'user',
       content: question,
       citations: [],
+      coverage: '',
       createdAt: this.#now(),
     })
     this.#emit({ type: 'question', conversationId: conversation.id, turn: userTurn })
@@ -180,15 +188,149 @@ export class AskService {
     signal: AbortSignal,
   ): Promise<void> {
     const now = this.#now()
-    const window = parseTimeWindow(question, now)
-    this.#setStatus(conversationId, 'searching', window?.label ?? '')
-    // Cheap when nothing changed — one `stat` per meeting — so it runs per
-    // question rather than on a schedule. A transcript finished thirty seconds
-    // ago is exactly the thing someone is most likely to ask about.
+    const plan = planAsk(question, now)
+    this.#setStatus(conversationId, 'searching', plan.window?.label ?? '')
+    // Cheap when nothing changed — one `stat` per meeting — so it runs before
+    // every question rather than on a schedule. A transcript finished thirty
+    // seconds ago is exactly what someone is most likely to ask about.
     const synced = this.#deps.retrieval.syncMeetings()
     if (synced.indexed || synced.removed) {
       this.#log.info(`meeting index: +${synced.indexed} ~${synced.removed}`)
     }
+    if (plan.intent === 'catalog') {
+      await this.#answerCatalog(conversationId, question, now, signal)
+      return
+    }
+    if (plan.intent === 'recap' && plan.window) {
+      await this.#answerRecap(conversationId, question, plan.window, sources, now, signal)
+      return
+    }
+    await this.#answerLookup(
+      conversationId,
+      question,
+      questionId,
+      sources,
+      plan.window,
+      now,
+      signal,
+    )
+  }
+
+  /**
+   * "Do I have any meetings transcribed?" — a question about the catalogue.
+   *
+   * No passage retrieval at all. Searching transcript *text* can never tell you
+   * whether a transcript *exists*, which is why this used to answer "I could
+   * not find anything about that" while a perfectly good recording sat on disk.
+   */
+  async #answerCatalog(
+    conversationId: string,
+    question: string,
+    now: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const digest = this.#deps.retrieval.digest(now)
+    this.#emit({
+      type: 'sources',
+      conversationId,
+      citations: [],
+      searched: 0,
+      coverage: 'your archive',
+    })
+    const answer = await this.#generate(
+      conversationId,
+      buildCatalogPrompt({ question, digest, now }),
+      signal,
+    )
+    this.#finish(conversationId, answer, [], 'your archive')
+  }
+
+  /**
+   * "Summarise my day" — a question about a period rather than a topic.
+   *
+   * Enumerates *everything* in the window and, when that overflows the context,
+   * summarises it in batches and merges the results. The batching is the whole
+   * point: the alternative is dropping the tail, which is indistinguishable
+   * from a confident, complete-looking, wrong answer.
+   */
+  async #answerRecap(
+    conversationId: string,
+    question: string,
+    window: TimeWindow,
+    sources: AskSource[],
+    now: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const records = this.#deps.retrieval.enumerate(window, {
+      ...(sources.length > 0 ? { sources } : {}),
+    })
+    if (records.length === 0) {
+      this.#emit({
+        type: 'sources',
+        conversationId,
+        citations: [],
+        searched: 0,
+        coverage: describeCoverage([], window.label),
+      })
+      this.#finish(conversationId, `I have nothing recorded from ${window.label}.`, [], '')
+      return
+    }
+    const coverage = describeCoverage(records, window.label)
+    const batches = batchRecords(records, now)
+    this.#emit({
+      type: 'sources',
+      conversationId,
+      citations: [],
+      searched: records.length,
+      coverage,
+    })
+    if (batches.length === 1) {
+      const answer = await this.#generate(
+        conversationId,
+        buildRecapPrompt({ question, records, label: window.label, now }),
+        signal,
+      )
+      this.#finish(conversationId, answer, [], coverage)
+      return
+    }
+    // More than fits in one pass: summarise each batch, then merge. Only the
+    // final merge is streamed — the intermediate passes are working notes, and
+    // showing them would look like the answer restarting several times.
+    this.#log.info(`recap of ${records.length} records in ${batches.length} passes`)
+    const summaries: string[] = []
+    for (const [index, batch] of batches.entries()) {
+      this.#setStatus(
+        conversationId,
+        'searching',
+        `${window.label} · part ${index + 1} of ${batches.length}`,
+      )
+      summaries.push(
+        await this.#generate(
+          conversationId,
+          buildRecapPrompt({ question, records: batch, label: window.label, now }),
+          signal,
+          { silent: true },
+        ),
+      )
+    }
+    const answer = await this.#generate(
+      conversationId,
+      buildCombinePrompt({ question, summaries, label: window.label }),
+      signal,
+    )
+    this.#finish(conversationId, answer, [], coverage)
+  }
+
+  /** "What did I say about X" — the original keyword-retrieval path. */
+  async #answerLookup(
+    conversationId: string,
+    question: string,
+    questionId: string,
+    sources: AskSource[],
+    window: TimeWindow | null,
+    now: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     const candidates = this.#deps.retrieval.search(question, {
       ...(sources.length > 0 ? { sources } : {}),
       ...(window ? { window } : {}),
@@ -211,12 +353,24 @@ export class AskService {
       conversationId,
       citations: prompt.citations,
       searched: candidates.length,
+      coverage: '',
     })
     const answer = await this.#generate(conversationId, prompt.messages, signal)
+    this.#finish(conversationId, answer, usedCitations(answer, prompt.citations))
+  }
+
+  /** Store the finished answer and tell the renderer the turn is complete. */
+  #finish(
+    conversationId: string,
+    answer: string,
+    citations: AskCitation[],
+    coverage = '',
+  ): void {
     const turn = this.#deps.store.append(conversationId, {
       role: 'assistant',
       content: answer,
-      citations: usedCitations(answer, prompt.citations),
+      citations,
+      coverage,
       createdAt: this.#now(),
     })
     this.#setStatus(conversationId, 'idle')
@@ -236,13 +390,14 @@ export class AskService {
     conversationId: string,
     messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
     signal: AbortSignal,
+    options: { silent?: boolean } = {},
   ): Promise<string> {
     for (let attempt = 0; ; attempt += 1) {
       const engine = this.#deps.engine()
       if (!engine?.streamChat) throw new Error('The polishing model is not available right now.')
       let text = ''
       try {
-        this.#setStatus(conversationId, 'answering')
+        if (!options.silent) this.#setStatus(conversationId, 'answering')
         const stream = engine.streamChat({
           messages,
           maxTokens: ASK_BUDGET.answerTokens,
@@ -250,7 +405,9 @@ export class AskService {
         })
         for await (const delta of stream) {
           text += delta
-          this.#emit({ type: 'delta', conversationId, text: delta })
+          // Silent passes are the recap's working notes; streaming them
+          // would read as the answer restarting over and over.
+          if (!options.silent) this.#emit({ type: 'delta', conversationId, text: delta })
         }
         return text.trim()
       } catch (error) {
