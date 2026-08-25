@@ -19,6 +19,9 @@ packages/native/prebuilds/
 /resources/models/
 /models/
 
+# python environments for model conversion (scripts/models/*)
+.venv*/
+
 # sidecar checkouts and binaries, built by scripts/sidecars/*.sh
 .sidecars/
 # the compiled system-audio tap helper; its Swift source is tracked and the
