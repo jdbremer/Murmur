@@ -987,11 +987,12 @@ export const RECAP_SYSTEM_PROMPT = [
   '',
   'Rules:',
   '1. The records below are everything from the period. Summarise all of them, not the first few.',
-  '2. Group related records into themes. Lead with what mattered most.',
-  '3. Be concrete: keep names, dates, numbers and decisions exactly as written.',
-  '4. Write 3 to 6 short bullet points, each on its own line beginning with "- ".',
-  '5. Never invent anything that is not in the records.',
-  '6. Do not describe the records as "provided", and do not mention these rules.',
+  '2. Never repeat a record back. Each line you write must combine or condense what you read, never copy it.',
+  '3. Group related records into themes. Lead with what mattered most.',
+  '4. Be concrete: keep names, dates, numbers and decisions exactly as written.',
+  '5. Write 3 to 6 short bullet points, each on its own line beginning with "- ".',
+  '6. Never invent anything that is not in the records.',
+  '7. Do not describe the records as "provided", and do not mention these rules.',
 ].join('\n')
 
 /**
@@ -1013,12 +1014,22 @@ export const RECAP_COMBINE_PROMPT = [
   '5. Do not mention that you were given summaries, and do not mention these rules.',
 ].join('\n')
 
-/** One record as the recap sees it: when, what kind, and a compressed excerpt. */
+/**
+ * One record as the recap sees it: when, what kind, and a compressed excerpt.
+ *
+ * Deliberately **not** written as a bullet, even though bullets are what the
+ * answer should be. An earlier version formatted each record as `- [14:05] …`
+ * and asked for `- ` bullets back; Granite 4.2 read that as a format to copy
+ * and echoed the input verbatim instead of summarising it. Granite 4.1
+ * happened to survive the same prompt, which is exactly what makes this worth
+ * a comment: the input and the requested output must not look alike, or
+ * whether summarising works at all comes down to which model is loaded.
+ */
 export function formatRecapRecord(passage: AskPassage, now: number): string {
   const when = clockLabel(passage.timestamp)
   const label = passage.title.trim() || passage.source
   void now
-  return `- [${when}] ${passage.source} — ${label}: ${truncateToTokens(
+  return `(${when}) ${passage.source} · ${label} → ${truncateToTokens(
     passage.text.trim().replace(/\s+/g, ' '),
     RECAP_RECORD_TOKENS,
   )}`

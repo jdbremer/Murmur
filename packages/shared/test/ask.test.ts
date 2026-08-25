@@ -619,8 +619,11 @@ describe('formatRecapRecord', () => {
       { id: 'd', source: 'dictation', title: 'Slack', text: 'shipped it', timestamp: at, score: 0 },
       now,
     )
-    expect(line).toContain('[14:05]')
+    expect(line).toContain('(14:05)')
     expect(line).toContain('shipped it')
+    // Not a bullet: the input must not look like the requested output, or a
+    // model copies the format back instead of summarising (seen on Granite 4.2).
+    expect(line.trimStart().startsWith('-')).toBe(false)
   })
 
   it('compresses hard, because coverage beats fidelity in a recap', () => {
