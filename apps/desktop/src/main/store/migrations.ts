@@ -432,6 +432,142 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       `)
     },
   },
+  {
+    version: 7,
+    name: 'ask',
+    up(db) {
+      // Ask needs to search meeting transcripts, and meeting transcripts are
+      // the one body of text Murmur does *not* keep in SQLite: `meetings` holds
+      // metadata and a `path`, while the words live in a Markdown file the user
+      // owns, can edit, and can point a different tool at (PLAN §18.2). That is
+      // a deliberate property and Ask does not get to change it.
+      //
+      // So this is an *index*, not a store. `meeting_chunks` is a derived copy
+      // that `retrieval.ts` rebuilds from the file whenever size or mtime moves,
+      // and `meeting_index` is the staleness marker that makes the check cheap.
+      // Deleting the whole thing costs nothing but a re-scan, which is exactly
+      // the property a cache should have.
+      //
+      // Chunked rather than one row per meeting because an hour of talking is
+      // several thousand words and the model's whole context is ~3,600 tokens.
+      // Retrieval has to be able to return the two minutes that answer the
+      // question rather than the meeting that contains them.
+      db.exec(`
+        CREATE TABLE meeting_index (
+          meeting_id TEXT PRIMARY KEY REFERENCES meetings(id) ON DELETE CASCADE,
+          indexed_at INTEGER NOT NULL,
+          file_size  INTEGER NOT NULL,
+          file_mtime INTEGER NOT NULL
+        );
+
+        CREATE TABLE meeting_chunks (
+          id         INTEGER PRIMARY KEY,
+          meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+          ordinal    INTEGER NOT NULL,
+          text       TEXT NOT NULL
+        );
+        CREATE INDEX idx_meeting_chunks_meeting ON meeting_chunks (meeting_id, ordinal);
+      `)
+
+      // Same external-content arrangement as the other two indexes, so the
+      // chunk text is stored once. The triggers matter more here than
+      // elsewhere: re-indexing a meeting deletes and re-inserts its chunks, and
+      // an FTS index left holding the old rows would return passages whose text
+      // no longer exists.
+      db.exec(`
+        CREATE VIRTUAL TABLE meeting_chunks_fts USING fts5(
+          text,
+          content='meeting_chunks',
+          content_rowid='id',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER meeting_chunks_ai AFTER INSERT ON meeting_chunks BEGIN
+          INSERT INTO meeting_chunks_fts(rowid, text) VALUES (new.id, new.text);
+        END;
+
+        CREATE TRIGGER meeting_chunks_ad AFTER DELETE ON meeting_chunks BEGIN
+          INSERT INTO meeting_chunks_fts(meeting_chunks_fts, rowid, text)
+          VALUES ('delete', old.id, old.text);
+        END;
+
+        CREATE TRIGGER meeting_chunks_au AFTER UPDATE ON meeting_chunks BEGIN
+          INSERT INTO meeting_chunks_fts(meeting_chunks_fts, rowid, text)
+          VALUES ('delete', old.id, old.text);
+          INSERT INTO meeting_chunks_fts(rowid, text) VALUES (new.id, new.text);
+        END;
+      `)
+
+      // The conversations themselves.
+      //
+      // Named threads rather than one running log, because an answer is a piece
+      // of work rather than a message: you ask about the migration on Monday,
+      // come back to it on Thursday, and the four questions that got you there
+      // are the context that makes the fifth one worth asking. A single log
+      // would put that Thursday question in the same breath as an unrelated one
+      // about the offsite, and — since history is replayed into the prompt —
+      // would actively degrade the answer as well as the record.
+      //
+      // `updated_at` rather than `created_at` orders the list, so a thread you
+      // returned to sorts as recent. It is denormalised from the turns for the
+      // usual reason: the list view is the common read and it should not have to
+      // aggregate every turn in the table to sort itself.
+      db.exec(`
+        CREATE TABLE ask_conversations (
+          id         TEXT PRIMARY KEY,
+          title      TEXT NOT NULL DEFAULT '',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX idx_ask_conversations_updated ON ask_conversations (updated_at DESC);
+      `)
+
+      // Citations are JSON rather than a join table because they are a
+      // *snapshot*: the answer cited the note as it read at the time, and a
+      // relational link would silently re-point at edited or deleted text and
+      // make an old answer look like it cited something it never saw.
+      db.exec(`
+        CREATE TABLE ask_turns (
+          id              TEXT PRIMARY KEY,
+          conversation_id TEXT NOT NULL REFERENCES ask_conversations(id) ON DELETE CASCADE,
+          role            TEXT NOT NULL,
+          content         TEXT NOT NULL,
+          citations       TEXT NOT NULL DEFAULT '[]',
+          created_at      INTEGER NOT NULL
+        );
+        CREATE INDEX idx_ask_turns_conversation ON ask_turns (conversation_id, created_at);
+      `)
+
+      // Conversations are searchable for the same reason dictations are: after a
+      // few weeks there are more of them than a list is useful for, and the
+      // thing you remember is a phrase from the answer rather than the title you
+      // never chose. Indexing the turn text and joining back up to the
+      // conversation is what makes "that thing about the rollback" findable.
+      db.exec(`
+        CREATE VIRTUAL TABLE ask_turns_fts USING fts5(
+          content,
+          content='ask_turns',
+          content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER ask_turns_ai AFTER INSERT ON ask_turns BEGIN
+          INSERT INTO ask_turns_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+
+        CREATE TRIGGER ask_turns_ad AFTER DELETE ON ask_turns BEGIN
+          INSERT INTO ask_turns_fts(ask_turns_fts, rowid, content)
+          VALUES ('delete', old.rowid, old.content);
+        END;
+
+        CREATE TRIGGER ask_turns_au AFTER UPDATE ON ask_turns BEGIN
+          INSERT INTO ask_turns_fts(ask_turns_fts, rowid, content)
+          VALUES ('delete', old.rowid, old.content);
+          INSERT INTO ask_turns_fts(rowid, content) VALUES (new.rowid, new.content);
+        END;
+      `)
+    },
+  },
 ])
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

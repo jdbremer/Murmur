@@ -84,6 +84,34 @@ export interface PolishEngine {
   status(): EngineStatus
   onStatusChange(listener: StatusListener): () => void
   dispose(): Promise<void>
+  /**
+   * Multi-turn streaming chat over the same endpoint, for Ask (PLAN §2.2.9).
+   *
+   * Optional so that an engine can exist without it. It is not a formality:
+   * dictation must keep working when Ask cannot run, so every call site has to
+   * treat a missing chat capability as an ordinary state rather than a bug —
+   * and making the method required would let that check be forgotten.
+   */
+  streamChat?(request: EngineChatRequest): AsyncGenerator<string, EngineChatEnd>
+}
+
+export interface EngineChatMessage {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface EngineChatRequest {
+  messages: EngineChatMessage[]
+  maxTokens: number
+  /**
+   * Required, not optional. A stream with no way to stop it is a model slot
+   * that cannot be reclaimed, and on a one-slot sidecar that is a stuck app.
+   */
+  signal: AbortSignal
+}
+
+export interface EngineChatEnd {
+  truncated: boolean
 }
 
 /**

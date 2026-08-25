@@ -10,6 +10,7 @@ import { ALL_SECTIONS, Sidebar } from './Sidebar'
 import { DashboardSection } from './sections/DashboardSection'
 import { HistorySection } from './sections/HistorySection'
 import { InsightsSection } from './sections/InsightsSection'
+import { AskSection } from './sections/ask/AskSection'
 import { NotesSection } from './sections/NotesSection'
 import { DictionarySection } from './sections/DictionarySection'
 import { SnippetsSection } from './sections/SnippetsSection'
@@ -33,7 +34,7 @@ import { HelpSection } from './sections/HelpSection'
  */
 export function App(): React.JSX.Element {
   const [section, setSection] = useState<SectionId>('dashboard')
-  const { settings } = useSettings()
+  const { settings, update } = useSettings()
 
   useAppearance(settings?.appearance ?? 'system')
 
@@ -58,6 +59,22 @@ export function App(): React.JSX.Element {
     contentRef.current?.focus({ preventScroll: true })
   }, [section])
 
+  /**
+   * ⌘\ folds the sidebar — the binding VS Code, Slack and the rest of the
+   * dock-panel world already taught. Persisted in settings rather than local
+   * state, so the Hub reopens the way it was left.
+   */
+  const sidebarCollapsed = settings?.hubSidebarCollapsed ?? false
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== '\\') return
+      event.preventDefault()
+      void update({ hubSidebarCollapsed: !sidebarCollapsed })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sidebarCollapsed, update])
+
   // Nothing renders until settings load: the alternative is showing the Hub for
   // a frame and then replacing it with onboarding, which looks like a bug.
   if (!settings) return <div className="h-full bg-canvas" />
@@ -77,12 +94,21 @@ export function App(): React.JSX.Element {
     <NavigationProvider value={setSection}>
       <ToastProvider>
         <div className="relative flex h-full bg-canvas text-ink">
-          <Sidebar active={section} onSelect={setSection} />
+          <Sidebar
+            active={section}
+            collapsed={sidebarCollapsed}
+            onSelect={setSection}
+            onToggle={() => void update({ hubSidebarCollapsed: !sidebarCollapsed })}
+          />
           {/* The content pane is a raised card floating on the canvas — the
               reference product's defining layout move. The sidebar shares the
               canvas with no dividing line; the card's edge IS the division. */}
           <main className="min-w-0 flex-1 p-2 pl-0">
-            <div className="elev-1 h-full overflow-y-auto rounded-2xl border border-line bg-surface">
+            <div
+              className={`elev-1 h-full rounded-2xl border border-line bg-surface ${
+                FILL_SECTIONS.has(section) ? 'overflow-hidden' : 'overflow-y-auto'
+              }`}
+            >
               {/* Keyed on the section so switching drifts the new content in.
                   `@container` makes every section's breakpoints measure *this*
                   box rather than the window: the pane is ~230px narrower than
@@ -93,7 +119,12 @@ export function App(): React.JSX.Element {
                 ref={contentRef}
                 tabIndex={-1}
                 aria-labelledby="section-title"
-                className={`hub-section @container mx-auto px-10 py-9 outline-none ${measureFor(section)}`}
+                className={`hub-section @container mx-auto outline-none ${
+                  // Fill sections take the height and leave the bottom edge to
+                  // their own footer (Ask's composer); the padded bottom would
+                  // otherwise put a 36px dead strip under it.
+                  FILL_SECTIONS.has(section) ? 'flex h-full min-h-0 flex-col px-10' : 'px-10 py-9'
+                } ${measureFor(section)}`}
               >
                 {renderSection(section)}
               </div>
@@ -140,8 +171,21 @@ function useAppearance(appearance: 'system' | 'light' | 'dark'): void {
  * catalog capped at the same width leaves half a large display empty and
  * stacks cards that would happily sit side by side.
  */
+/**
+ * Sections that scroll *inside* themselves instead of scrolling the pane.
+ *
+ * Ask is a chat: its header and composer hold still and only the thread moves,
+ * which is impossible while the pane itself is the scroller — a long thread
+ * would carry the composer away with it. For these sections the card clips and
+ * the section receives the full height to divide up.
+ */
+const FILL_SECTIONS = new Set<SectionId>(['ask'])
+
 const WIDE_SECTIONS = new Set<SectionId>([
   'dashboard',
+  // Ask puts a conversation rail beside the thread; at the narrow width the
+  // rail eats the reading column the answers need.
+  'ask',
   'models',
   'insights',
   'meetings',
@@ -162,6 +206,8 @@ function renderSection(section: SectionId): React.JSX.Element {
       return <DashboardSection />
     case 'history':
       return <HistorySection />
+    case 'ask':
+      return <AskSection />
     case 'insights':
       return <InsightsSection />
     case 'notes':

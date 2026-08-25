@@ -22,6 +22,8 @@ import { DictationOrchestrator } from './dictation/orchestrator'
 import { DictationStateMachine } from './dictation/state-machine'
 import { EngineCoordinator } from './engines/coordinator'
 import { registerIpcHandlers } from './ipc/register'
+import { AskService } from './ask/service'
+import { RetrievalRepository } from './store/retrieval'
 import { createLogger } from './logging'
 import { loadCatalog } from './models/catalog'
 import { ModelManager } from './models/manager'
@@ -29,6 +31,7 @@ import { describeNative, native } from './native'
 import { installSecurityPolicies } from './security'
 import { databasePath, openDatabase } from './store/db'
 import {
+  AskRepository,
   DictationsRepository,
   DictionaryRepository,
   NotesRepository,
@@ -200,6 +203,8 @@ async function bootstrap(): Promise<void> {
   const notes = new NotesRepository(database.db)
   const style = new StyleRepository(database.db)
   const meetingStore = new MeetingsRepository(database.db)
+  const askStore = new AskRepository(database.db)
+  const retrieval = new RetrievalRepository(database.db)
 
   // Retention sweep at boot (PLAN §9). Cheap, and it means a user who lowers
   // the window sees it take effect without waiting for a background job.
@@ -239,6 +244,20 @@ async function bootstrap(): Promise<void> {
   // `registerIpcHandlers`, because subsystems built below need to *emit* on it
   // before any handler is registered.
   const ipc = createMainIpc(ipcMain)
+
+  // Ask (PLAN §2.2.9). Built here rather than in `registerIpcHandlers` because
+  // it emits on `ask.event` from its own async loop, long after the handler
+  // that started it has returned.
+  const ask = new AskService({
+    retrieval,
+    store: askStore,
+    // Read through the coordinator on every call rather than captured once: the
+    // polish engine is disposed and rebuilt whenever the model or endpoint
+    // changes, and a captured reference would keep answering into a dead
+    // sidecar.
+    engine: () => engines.polish(),
+    emit: (event) => ipc.broadcast(windows.uiWebContents(), 'ask.event', event),
+  })
 
   const audio = new CaptureController({
     ipc,
@@ -446,6 +465,7 @@ async function bootstrap(): Promise<void> {
     loopbackAudio,
     meetingsFolder,
     transcriber,
+    ask,
     isDev,
     quit,
   })

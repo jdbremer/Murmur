@@ -21,6 +21,7 @@ export * from './domain/permissions'
 export * from './domain/engine'
 export * from './domain/hardware'
 export * from './domain/updates'
+export * from './domain/ask'
 
 // Model catalog (PLAN §8) --------------------------------------------------
 export * from './catalog/schema'

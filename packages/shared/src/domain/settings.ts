@@ -392,6 +392,18 @@ const settingsFields = {
   externalEndpoint: ExternalEndpointSchema.nullable(),
   appearance: AppearanceSchema,
   /**
+   * Hub chrome the user has folded away.
+   *
+   * Settings rather than `localStorage`, for one reason: a pane you collapsed
+   * because your window is narrow, which springs back open every launch, is a
+   * preference the app keeps forgetting. Both are pure view state and nothing
+   * outside the Hub reads them — the engines re-apply on every settings change
+   * and treat an unchanged model as a no-op, so toggling a sidebar costs a
+   * broadcast and nothing else.
+   */
+  hubSidebarCollapsed: z.boolean(),
+  askRailCollapsed: z.boolean(),
+  /**
    * False until the first-run sequence finishes (PLAN §2.4). The Hub renders
    * onboarding instead of its sections while this is false, so the flag lives
    * with the rest of the persisted state rather than in a marker file.
@@ -449,6 +461,8 @@ export const SettingsSchema = z.object({
   polishModelId: settingsFields.polishModelId.default(null),
   externalEndpoint: settingsFields.externalEndpoint.default(null),
   appearance: settingsFields.appearance.default('system'),
+  hubSidebarCollapsed: settingsFields.hubSidebarCollapsed.default(false),
+  askRailCollapsed: settingsFields.askRailCollapsed.default(false),
   onboardingCompleted: settingsFields.onboardingCompleted.default(false),
   commandModeEnabled: settingsFields.commandModeEnabled.default(true),
   soundCuesEnabled: settingsFields.soundCuesEnabled.default(true),

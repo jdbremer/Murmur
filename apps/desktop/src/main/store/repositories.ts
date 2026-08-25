@@ -2,8 +2,14 @@ import { randomUUID } from 'node:crypto'
 
 import type { Database } from 'better-sqlite3'
 
+import { z } from 'zod'
+
 import {
   AppCategorySchema,
+  AskCitationSchema,
+  AskConversationSchema,
+  AskSearchHitSchema,
+  AskTurnSchema,
   DictationRecordSchema,
   DictionaryEntrySchema,
   INSIGHTS_MAX_APPS,
@@ -15,6 +21,9 @@ import {
   StyleProfileSchema,
   createDefaultStyleProfiles,
   healStyleProfiles,
+  type AskConversation,
+  type AskSearchHit,
+  type AskTurn,
   type DictationRecord,
   type DictionaryEntry,
   type DictionaryEntryDraft,
@@ -1152,5 +1161,255 @@ function toMeeting(row: MeetingRow): MeetingRecord {
     hadSystemAudio: row.had_system_audio === 1,
     segmentCount: row.segment_count,
     durationMs: row.duration_ms,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Ask
+// ---------------------------------------------------------------------------
+
+interface AskTurnRow {
+  id: string
+  role: string
+  content: string
+  citations: string
+  created_at: number
+}
+
+interface AskConversationRow {
+  id: string
+  title: string
+  created_at: number
+  updated_at: number
+  turn_count: number
+}
+
+/**
+ * Ask's conversations and their turns (PLAN §2.2.9).
+ *
+ * Citations are stored as JSON rather than a join table because they are a
+ * *snapshot* of what the model was shown. A relational link would silently
+ * re-point at edited or deleted text, and an answer from March would end up
+ * appearing to cite a note that was rewritten in June.
+ *
+ * Reads are lenient about that JSON on purpose: a turn whose citations fail to
+ * parse still has an answer worth showing, and losing a whole conversation to
+ * one malformed row is a far worse outcome than losing its chips.
+ */
+export class AskRepository {
+  readonly #db: Database
+
+  constructor(db: Database) {
+    this.#db = db
+  }
+
+  // -- conversations ---------------------------------------------------------
+
+  create(title: string, now: number): AskConversation {
+    const id = randomUUID()
+    this.#db
+      .prepare(
+        `INSERT INTO ask_conversations (id, title, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, title, now, now)
+    return AskConversationSchema.parse({ id, title, createdAt: now, updatedAt: now, turnCount: 0 })
+  }
+
+  /**
+   * Conversations, most recently used first.
+   *
+   * The turn count comes from a correlated subquery rather than a stored
+   * column: it is only read by the list, and a denormalised counter is one more
+   * thing that can drift out of step with the rows it counts.
+   */
+  list(limit = 200): AskConversation[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT c.id, c.title, c.created_at, c.updated_at,
+                (SELECT COUNT(*) FROM ask_turns t WHERE t.conversation_id = c.id) AS turn_count
+           FROM ask_conversations c
+          ORDER BY c.updated_at DESC, c.rowid DESC
+          LIMIT ?`,
+      )
+      .all(limit) as AskConversationRow[]
+    return rows.map(toConversation)
+  }
+
+  get(id: string): AskConversation | null {
+    const row = this.#db
+      .prepare(
+        `SELECT c.id, c.title, c.created_at, c.updated_at,
+                (SELECT COUNT(*) FROM ask_turns t WHERE t.conversation_id = c.id) AS turn_count
+           FROM ask_conversations c WHERE c.id = ?`,
+      )
+      .get(id) as AskConversationRow | undefined
+    return row ? toConversation(row) : null
+  }
+
+  rename(id: string, title: string, now: number): AskConversation | null {
+    this.#db
+      .prepare(`UPDATE ask_conversations SET title = ?, updated_at = ? WHERE id = ?`)
+      .run(title.slice(0, 200), now, id)
+    return this.get(id)
+  }
+
+  /** Deletes the turns too, by the cascade on `ask_turns.conversation_id`. */
+  delete(id: string): boolean {
+    return this.#db.prepare(`DELETE FROM ask_conversations WHERE id = ?`).run(id).changes > 0
+  }
+
+  /** Everything. Does not touch a single dictation, note or transcript. */
+  clear(): number {
+    return this.#db.prepare(`DELETE FROM ask_conversations`).run().changes
+  }
+
+  /** Drop conversations that never got a turn — an opened-but-unused thread. */
+  pruneEmpty(exceptId?: string): number {
+    return this.#db
+      .prepare(
+        `DELETE FROM ask_conversations
+          WHERE id != COALESCE(?, '')
+            AND NOT EXISTS (SELECT 1 FROM ask_turns t WHERE t.conversation_id = ask_conversations.id)`,
+      )
+      .run(exceptId ?? null).changes
+  }
+
+  // -- turns -----------------------------------------------------------------
+
+  /**
+   * Add a turn and mark the conversation used, in one transaction.
+   *
+   * Together because a turn whose conversation still sorts by its old timestamp
+   * is a thread that answered you and then hid at the bottom of the list.
+   */
+  append(conversationId: string, turn: Omit<AskTurn, 'id'> & { id?: string }): AskTurn {
+    const record = AskTurnSchema.parse({ ...turn, id: turn.id ?? randomUUID() })
+    const write = this.#db.transaction(() => {
+      this.#db
+        .prepare(
+          `INSERT INTO ask_turns (id, conversation_id, role, content, citations, created_at)
+           VALUES (@id, @conversationId, @role, @content, @citations, @createdAt)
+           ON CONFLICT(id) DO UPDATE SET
+             content = excluded.content,
+             citations = excluded.citations`,
+        )
+        .run({
+          id: record.id,
+          conversationId,
+          role: record.role,
+          content: record.content,
+          citations: JSON.stringify(record.citations),
+          createdAt: record.createdAt,
+        })
+      this.#db
+        .prepare(`UPDATE ask_conversations SET updated_at = ? WHERE id = ?`)
+        .run(record.createdAt, conversationId)
+    })
+    write()
+    return record
+  }
+
+  /**
+   * A conversation's turns, oldest first.
+   *
+   * Ordered by `rowid`, not by `id`, and that is load-bearing. A question and
+   * its answer routinely land in the same millisecond — a short answer needs no
+   * more than that — so `created_at` alone leaves them tied, and a UUID
+   * tiebreak resolves the tie at random. Half the time the thread would render
+   * the answer above the question that prompted it. `rowid` is insertion order
+   * by construction and cannot tie.
+   */
+  turns(conversationId: string, limit = 500): AskTurn[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM (
+           SELECT rowid AS rid, id, role, content, citations, created_at
+             FROM ask_turns
+            WHERE conversation_id = ?
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT ?
+         ) ORDER BY created_at ASC, rid ASC`,
+      )
+      .all(conversationId, limit) as AskTurnRow[]
+    return rows.map(toAskTurn)
+  }
+
+  // -- search ----------------------------------------------------------------
+
+  /**
+   * Find conversations by what was said in them.
+   *
+   * One hit per conversation, not per turn: a long thread about the migration
+   * matches on eight of its turns, and eight rows for one conversation buries
+   * the seven other threads that also matched. The best-ranked turn stands for
+   * its conversation, and its text is the snippet.
+   */
+  search(query: string, limit = 30): AskSearchHit[] {
+    const match = toFtsQuery(query)
+    if (!match) return []
+
+    let rows: (AskConversationRow & { snippet: string; role: string; turn_id: string })[]
+    try {
+      rows = this.#db
+        .prepare(
+          `SELECT c.id, c.title, c.created_at, c.updated_at,
+                  (SELECT COUNT(*) FROM ask_turns t2 WHERE t2.conversation_id = c.id) AS turn_count,
+                  best.content AS snippet, best.role AS role, best.id AS turn_id
+             FROM ask_conversations c
+             JOIN (
+               SELECT t.conversation_id, t.content, t.role, t.id,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY t.conversation_id ORDER BY bm25(ask_turns_fts) ASC
+                      ) AS rn
+                 FROM ask_turns t
+                 JOIN ask_turns_fts f ON f.rowid = t.rowid
+                WHERE ask_turns_fts MATCH ?
+             ) AS best ON best.conversation_id = c.id AND best.rn = 1
+            ORDER BY c.updated_at DESC
+            LIMIT ?`,
+        )
+        .all(match, limit) as typeof rows
+    } catch {
+      // FTS5 raises on some inputs that survive `toFtsQuery`. An empty result is
+      // the right answer for a search box; a crash is not.
+      return []
+    }
+
+    return rows.map((row) =>
+      AskSearchHitSchema.parse({
+        conversation: toConversation(row),
+        snippet: row.snippet,
+        role: row.role === 'assistant' ? 'assistant' : 'user',
+        turnId: row.turn_id,
+      }),
+    )
+  }
+}
+
+function toConversation(row: AskConversationRow): AskConversation {
+  return AskConversationSchema.parse({
+    id: row.id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    turnCount: row.turn_count ?? 0,
+  })
+}
+
+function toAskTurn(row: AskTurnRow): AskTurn {
+  let citations: unknown
+  try {
+    citations = JSON.parse(row.citations)
+  } catch {
+    citations = []
+  }
+  const parsed = z.array(AskCitationSchema).safeParse(citations)
+  return AskTurnSchema.parse({
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    citations: parsed.success ? parsed.data : [],
+    createdAt: row.created_at,
   })
 }

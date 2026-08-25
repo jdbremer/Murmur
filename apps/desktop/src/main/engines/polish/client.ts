@@ -46,6 +46,11 @@ interface ChatCompletionResponse {
   error?: { message?: string }
 }
 
+interface ChatStreamChunk {
+  choices?: { delta?: { content?: string }; finish_reason?: string | null }[]
+  error?: { message?: string }
+}
+
 export interface ChatCompletion {
   text: string
   /**
@@ -167,6 +172,134 @@ export class ChatClient {
       throw new Error('Polish endpoint returned no message content')
     }
     return { text: content, truncated: choice?.finish_reason === 'length' }
+  }
+
+  /**
+   * A streaming completion, yielding text as the model produces it.
+   *
+   * Separate from {@link complete} rather than a flag on it, because the two
+   * have genuinely different failure modes and the caller has to handle them
+   * differently. A non-streaming call either returns a whole answer or throws;
+   * a stream can fail *after* it has already emitted half an answer, and Ask
+   * has to keep and display that half rather than discard it. Collapsing both
+   * into one signature would mean every polish call site growing a branch for
+   * partial output it can never receive.
+   */
+  async *stream(request: ChatStreamRequest): AsyncGenerator<string, ChatStreamEnd> {
+    const url = `${this.#options.baseUrl.replace(/\/$/, '')}/v1/chat/completions`
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    if (this.#options.apiKey) headers['authorization'] = `Bearer ${this.#options.apiKey}`
+
+    const response = await this.#options.fetchImpl(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: this.#options.model,
+        messages: request.messages,
+        temperature: request.temperature ?? POLISH.temperature,
+        top_p: POLISH.topP,
+        max_tokens: request.maxTokens,
+        stream: true,
+        reasoning_effort: 'none',
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+      signal: request.signal,
+    })
+
+    if (!response.ok) {
+      const detail = await safeErrorBody(response)
+      throw new Error(`Chat endpoint returned ${response.status}${detail ? `: ${detail}` : ''}`)
+    }
+    if (!response.body) throw new Error('Chat endpoint returned no body to stream')
+
+    const decoder = new SseDecoder()
+    const utf8 = new TextDecoder()
+    const reader = response.body.getReader()
+    let truncated = false
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        // `stream: true` on the TextDecoder, so a multi-byte character split
+        // across two network reads is held rather than emitted as U+FFFD.
+        for (const payload of decoder.push(utf8.decode(value, { stream: true }))) {
+          if (payload === '[DONE]') return { truncated }
+
+          let chunk: ChatStreamChunk
+          try {
+            chunk = JSON.parse(payload) as ChatStreamChunk
+          } catch {
+            // A malformed frame mid-stream is not worth destroying an
+            // in-progress answer over; the next one is usually fine.
+            continue
+          }
+
+          if (chunk.error?.message) throw new Error(`Chat endpoint error: ${chunk.error.message}`)
+          const choice = chunk.choices?.[0]
+          if (choice?.finish_reason === 'length') truncated = true
+          const text = choice?.delta?.content
+          if (text) yield text
+        }
+      }
+    } finally {
+      // Releasing the lock lets an aborted stream's socket be torn down at
+      // once, which matters here more than usual: llama-server runs with
+      // `--parallel 1`, so a socket we have stopped reading is a slot the next
+      // dictation cannot have.
+      reader.releaseLock()
+    }
+
+    return { truncated }
+  }
+}
+
+export interface ChatStreamRequest {
+  messages: ChatMessage[]
+  maxTokens: number
+  temperature?: number
+  signal: AbortSignal
+}
+
+export interface ChatStreamEnd {
+  truncated: boolean
+}
+
+/**
+ * Server-sent-events framing, split out so it can be tested without a socket.
+ *
+ * The whole job is that network reads have nothing to do with message
+ * boundaries: one read can carry three events, or the first half of one. Every
+ * naive implementation of this works perfectly against a fast local server and
+ * corrupts output against a slow one, because locally each write usually
+ * arrives as its own read. Keeping the buffer in an object with a `push` method
+ * makes the split-frame case something a test can construct directly.
+ */
+export class SseDecoder {
+  #buffer = ''
+
+  /** Feed a raw chunk; get back whatever complete `data:` payloads it finished. */
+  push(chunk: string): string[] {
+    this.#buffer += chunk
+    const payloads: string[] = []
+
+    for (;;) {
+      // Events are separated by a blank line. Tolerate CRLF: the spec allows it
+      // and some proxies rewrite line endings.
+      const boundary = this.#buffer.search(/\r?\n\r?\n/)
+      if (boundary === -1) break
+      const raw = this.#buffer.slice(0, boundary)
+      this.#buffer = this.#buffer.slice(boundary).replace(/^\r?\n\r?\n/, '')
+
+      const data = raw
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n')
+      if (data) payloads.push(data)
+    }
+
+    return payloads
   }
 }
 

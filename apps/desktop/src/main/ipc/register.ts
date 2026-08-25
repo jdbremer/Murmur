@@ -43,6 +43,7 @@ import type {
 } from '../store/repositories'
 import type { MeetingRecorder } from '../meeting/recorder'
 import type { FileTranscriber } from '../transcription/file-transcriber'
+import type { AskService } from '../ask/service'
 import type { SystemAudioSource } from '../audio/system-capture'
 import type { LoopbackSystemAudio } from '../audio/loopback-capture'
 import type { FrameBus } from '../audio/frame-bus'
@@ -113,6 +114,8 @@ export interface IpcContext {
   meetingsFolder: string
   /** File transcription (PLAN §18.4). */
   transcriber: FileTranscriber
+  /** Grounded chat over the user's own history (PLAN §2.2.9). */
+  ask: AskService
   isDev: boolean
   quit: () => void
 }
@@ -478,6 +481,29 @@ export function registerIpcHandlers(context: IpcContext): MainIpc {
     else select()
 
     return target
+  })
+
+  // -- ask (PLAN §2.2.9) ----------------------------------------------------
+
+  ipc.handle('ask.state', () => context.ask.state())
+  ipc.handle('ask.open', ({ conversationId }) => context.ask.open(conversationId))
+  ipc.handle('ask.search', ({ query }) => context.ask.search(query))
+  ipc.handle('ask.rename', ({ id, title }) => context.ask.rename(id, title))
+  ipc.handle('ask.deleteConversation', ({ id }) => context.ask.delete(id))
+  ipc.handle('ask.clear', () => context.ask.clear())
+  ipc.handle('ask.cancel', () => {
+    context.ask.cancel()
+  })
+  /**
+   * Awaited, so the renderer's promise resolves when the answer is *finished*
+   * rather than when it was accepted — that is what re-enables the composer.
+   *
+   * Failures are reported by the service on `ask.event` and deliberately do not
+   * also reject here. Rejecting would surface an IPC failure toast on top of
+   * the error already rendered in the thread, for one underlying problem.
+   */
+  ipc.handle('ask.send', async (request) => {
+    await context.ask.ask(request)
   })
 
   // -- style ---------------------------------------------------------------

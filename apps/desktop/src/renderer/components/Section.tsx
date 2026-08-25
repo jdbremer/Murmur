@@ -7,16 +7,25 @@ export function Section({
   description,
   children,
   actions,
+  fill = false,
 }: {
   title: string
   description: string
   children?: ReactNode
   /** Right-aligned header controls, e.g. a "Check again" button. */
   actions?: ReactNode | undefined
+  /**
+   * App-like sections (Ask) own their scrolling: the header stays put and a
+   * region inside the children scrolls. `fill` makes this section a column
+   * that hands its children the remaining height — it only does something
+   * when `App.tsx` has also put the section in `FILL_SECTIONS`, which is what
+   * stops the *pane* from scrolling.
+   */
+  fill?: boolean
 }): React.JSX.Element {
   return (
-    <section>
-      <header className="mb-6 flex items-start justify-between gap-4">
+    <section className={fill ? 'flex h-full min-h-0 flex-col' : undefined}>
+      <header className="mb-6 flex shrink-0 items-start justify-between gap-4">
         <div>
           {/* One per screen, and the label the content region is named by. */}
           <h1 id="section-title" className="text-[24px] font-semibold tracking-tight text-ink">

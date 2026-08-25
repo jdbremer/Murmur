@@ -135,6 +135,18 @@ const api: MurmurApi = {
     onSelect: (listener) => ipc.on('notes.select', listener),
   },
 
+  ask: {
+    send: (request) => ipc.invoke('ask.send', request),
+    cancel: () => ipc.invoke('ask.cancel'),
+    state: () => ipc.invoke('ask.state'),
+    open: (request) => ipc.invoke('ask.open', request),
+    search: (request) => ipc.invoke('ask.search', request),
+    rename: (request) => ipc.invoke('ask.rename', request),
+    remove: (request) => ipc.invoke('ask.deleteConversation', request),
+    clear: () => ipc.invoke('ask.clear'),
+    subscribe: (listener) => ipc.on('ask.event', listener),
+  },
+
   dictionary: {
     list: () => ipc.invoke('dictionary.list'),
     create: (entry) => ipc.invoke('dictionary.create', entry),

@@ -119,6 +119,12 @@ describe('openDatabase', () => {
       DROP TABLE app_usage;
       DROP TABLE notes;
       DROP TABLE notes_fts;
+      DROP TABLE ask_turns_fts;
+      DROP TABLE ask_turns;
+      DROP TABLE ask_conversations;
+      DROP TABLE meeting_chunks_fts;
+      DROP TABLE meeting_chunks;
+      DROP TABLE meeting_index;
       ALTER TABLE dictations DROP COLUMN app_name;
     `)
     const ts = Date.parse('2026-08-01T12:00:00')
@@ -135,6 +141,7 @@ describe('openDatabase', () => {
       '4:snippets',
       '5:insights',
       '6:notes',
+      '7:ask',
     ])
 
     // The polished text's 6 words, at 6 words / 6 s = 60 wpm, on one day.

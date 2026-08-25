@@ -13,6 +13,7 @@ import { createContext, useContext } from 'react'
 export type SectionId =
   | 'dashboard'
   | 'history'
+  | 'ask'
   | 'insights'
   | 'notes'
   | 'dictionary'

@@ -32,6 +32,8 @@ describe('SettingsSchema', () => {
       polishModelId: null,
       externalEndpoint: null,
       appearance: 'system',
+      hubSidebarCollapsed: false,
+      askRailCollapsed: false,
       onboardingCompleted: false,
       commandModeEnabled: true,
       soundCuesEnabled: true,

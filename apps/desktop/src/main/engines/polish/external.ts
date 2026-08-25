@@ -1,7 +1,14 @@
 import { EngineStatusSchema, type EngineStatus, type ExternalEndpoint } from '@murmur/shared'
 
 import { createLogger, type Logger } from '../../logging'
-import { StatusHolder, type PolishEngine, type PolishRequest, type PolishResult } from '../types'
+import {
+  StatusHolder,
+  type EngineChatEnd,
+  type EngineChatRequest,
+  type PolishEngine,
+  type PolishRequest,
+  type PolishResult,
+} from '../types'
 import { ChatClient, classifyEndpoint, endpointWarnings } from './client'
 import { unwrapModelOutput } from './prompt'
 
@@ -84,6 +91,29 @@ export class ExternalPolishEngine implements PolishEngine {
     const completion = await client.complete(request)
     const text = unwrapModelOutput(completion.text)
     return { text, durationMs: Date.now() - started, truncated: completion.truncated }
+  }
+
+  /**
+   * Stream a chat answer (PLAN §2.2.9).
+   *
+   * No gate here, unlike the bundled server. That is not an oversight: the
+   * `--parallel 1` slot Ask has to be scheduled around is a property of *our*
+   * sidecar, and an LM Studio or vLLM endpoint serves concurrent requests
+   * perfectly well. Adding a gate anyway would serialise a server that does not
+   * need it and make dictation wait behind chat on exactly the deployments
+   * where it never had to.
+   */
+  async *streamChat(request: EngineChatRequest): AsyncGenerator<string, EngineChatEnd> {
+    const endpoint = this.#endpoint
+    if (!endpoint) throw new Error('No external polish endpoint configured')
+
+    const client = new ChatClient({
+      baseUrl: endpoint.baseUrl,
+      apiKey: endpoint.apiKey,
+      model: endpoint.model,
+      fetchImpl: (url, init) => globalThis.fetch(url, init),
+    })
+    return yield* client.stream(request)
   }
 
   async unload(): Promise<void> {

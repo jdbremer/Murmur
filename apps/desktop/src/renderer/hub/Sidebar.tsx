@@ -43,6 +43,14 @@ const GROUPS: readonly SectionGroup[] = [
         icon: 'M12 21a9 9 0 1 0-8.9-10.4M12 7v5l3.5 2M3 4v4h4',
       },
       {
+        id: 'ask',
+        label: 'Ask',
+        // A speech bubble with a question inside it, sharing the question-mark
+        // stroke with Help — the two are the only places in the app you ask
+        // something rather than do something.
+        icon: 'M12 20a8 7 0 1 0-6.9-3.9L4 20l4.1-.8A8 7 0 0 0 12 20zM10.3 9.6a1.8 1.8 0 1 1 2.4 1.7c-.4.2-.7.6-.7 1.1v.2M12 15.2h.01',
+      },
+      {
         id: 'insights',
         label: 'Insights',
         // A rising bar chart.
@@ -128,23 +136,41 @@ export const ALL_SECTIONS: readonly SectionMeta[] = GROUPS.flatMap((group) => gr
 
 export function Sidebar({
   active,
+  collapsed,
   onSelect,
+  onToggle,
 }: {
   active: SectionId
+  /** Icon-only rail. Persisted in settings, so it survives a relaunch. */
+  collapsed: boolean
   onSelect: (id: SectionId) => void
+  onToggle: () => void
 }): React.JSX.Element {
   return (
-    <nav aria-label="Sections" className="flex w-56 shrink-0 flex-col bg-canvas">
+    <nav
+      aria-label="Sections"
+      // Width animates; everything inside either fits both widths or fades.
+      // `motion-reduce` pins the duration, so the fold is instant under Reduce
+      // Motion instead of a slide.
+      className={[
+        'flex shrink-0 flex-col overflow-hidden bg-canvas transition-[width] duration-200 ease-out motion-reduce:transition-none',
+        collapsed ? 'w-[64px]' : 'w-56',
+      ].join(' ')}
+    >
       {/* Space for the inset traffic lights on macOS; also the window drag area. */}
       <div className="h-11 shrink-0" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pb-3">
-        <p className="flex items-center gap-2 px-3 pb-3 text-[13px] font-semibold tracking-tight text-ink">
+      <div
+        className={`flex min-h-0 flex-1 flex-col overflow-y-auto pb-3 ${collapsed ? 'px-2.5' : 'px-3'}`}
+      >
+        <p
+          className={`flex items-center gap-2 pb-3 text-[13px] font-semibold tracking-tight text-ink ${collapsed ? 'justify-center px-0' : 'px-3'}`}
+        >
           {/* The wordmark's glyph is the pill's own waveform, at rest. */}
           <svg
             viewBox="0 0 24 24"
             aria-hidden="true"
-            className="size-[16px] text-accent"
+            className="size-[16px] shrink-0 text-accent"
             fill="none"
             stroke="currentColor"
             strokeWidth="2.4"
@@ -152,15 +178,20 @@ export function Sidebar({
           >
             <path d="M4 10.5v3M8 8v8M12 5v14M16 8v8M20 10.5v3" />
           </svg>
-          Murmur
+          {collapsed ? null : 'Murmur'}
         </p>
 
         {GROUPS.map((group, index) => (
           <div key={group.label ?? index} className={group.pinned ? 'mt-auto pt-4' : 'mb-4'}>
-            {group.label ? (
+            {group.label && !collapsed ? (
               <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-faint">
                 {group.label}
               </p>
+            ) : null}
+            {/* Collapsed, a group is only its items — a hairline between groups
+                keeps the rhythm the labels were carrying. */}
+            {group.label && collapsed ? (
+              <div aria-hidden="true" className="mx-2 mb-2 h-px bg-line" />
             ) : null}
             <ul className="space-y-0.5">
               {group.items.map((section) => (
@@ -168,6 +199,7 @@ export function Sidebar({
                   <SidebarItem
                     section={section}
                     active={section.id === active}
+                    collapsed={collapsed}
                     onSelect={onSelect}
                   />
                 </li>
@@ -175,6 +207,41 @@ export function Sidebar({
             </ul>
           </div>
         ))}
+
+      </div>
+
+      {/* The fold, in its own footer *outside* the scroll area. Inside it, the
+          button sits below the pinned group and needs a scroll nobody knows to
+          make before it is even visible — a control that has to be found is a
+          control that does not exist. */}
+      <div className={`shrink-0 border-t border-line pb-2 pt-1.5 ${collapsed ? 'px-2.5' : 'px-3'}`}>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+          aria-expanded={!collapsed}
+          title={`${collapsed ? 'Expand' : 'Collapse'} the sidebar (⌘\\)`}
+          className={[
+            'flex w-full items-center gap-3 rounded-lg py-2 text-[12px] text-ink-faint transition-colors duration-150 hover:bg-ink/[0.04] hover:text-ink',
+            collapsed ? 'justify-center px-0' : 'px-3',
+          ].join(' ')}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className="size-[17px] shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            {/* A panel with its divider, and a chevron pointing the way out. */}
+            <path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14" />
+            <path d={collapsed ? 'm13.5 9.5 3 2.5-3 2.5' : 'm16.5 9.5-3 2.5 3 2.5'} />
+          </svg>
+          {collapsed ? null : 'Collapse'}
+        </button>
       </div>
     </nav>
   )
@@ -183,10 +250,12 @@ export function Sidebar({
 function SidebarItem({
   section,
   active,
+  collapsed,
   onSelect,
 }: {
   section: SectionMeta
   active: boolean
+  collapsed: boolean
   onSelect: (id: SectionId) => void
 }): React.JSX.Element {
   return (
@@ -194,8 +263,12 @@ function SidebarItem({
       type="button"
       onClick={() => onSelect(section.id)}
       aria-current={active ? 'page' : undefined}
+      // The label collapses into a tooltip rather than disappearing.
+      title={collapsed ? section.label : undefined}
+      aria-label={collapsed ? section.label : undefined}
       className={[
-        'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-[13px] transition-colors duration-150',
+        'flex w-full items-center gap-3 rounded-lg py-2 text-[13px] transition-colors duration-150',
+        collapsed ? 'justify-center px-0' : 'px-3',
         // Neutral rather than brand-tinted, like the reference: the active pill
         // is a slightly sunken patch of the canvas, not an accent chip.
         active
@@ -215,7 +288,7 @@ function SidebarItem({
       >
         <path d={section.icon} />
       </svg>
-      {section.label}
+      {collapsed ? null : section.label}
     </button>
   )
 }

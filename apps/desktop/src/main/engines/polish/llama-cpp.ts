@@ -11,8 +11,11 @@ import {
   type SidecarInfo,
   type SidecarSpec,
 } from '../sidecar'
+import { PriorityGate } from '../gate'
 import {
   StatusHolder,
+  type EngineChatEnd,
+  type EngineChatRequest,
   type ModelRef,
   type PolishEngine,
   type PolishRequest,
@@ -58,6 +61,11 @@ export class LlamaCppPolishEngine implements PolishEngine {
   #model: ModelRef | null = null
   #modelId: string | null = null
   #idleTimer: NodeJS.Timeout | null = null
+  /**
+   * Who gets the single `--parallel 1` slot. Dictation always outranks Ask;
+   * see `gate.ts` for why that has to be preemption rather than a queue.
+   */
+  readonly #gate = new PriorityGate()
   /** Set while the idle timer unloaded us, so `polish()` knows to respawn. */
   #suspended = false
 
@@ -89,6 +97,13 @@ export class LlamaCppPolishEngine implements PolishEngine {
   }
 
   async polish(request: PolishRequest): Promise<PolishResult> {
+    // High priority: this aborts an Ask stream that holds the slot and waits
+    // only for its socket to close, so a dictation never queues behind an
+    // answer that may still have twenty seconds to run.
+    return this.#gate.run('high', () => this.#polish(request))
+  }
+
+  async #polish(request: PolishRequest): Promise<PolishResult> {
     if (this.#suspended) {
       this.#log.info('waking after idle unload')
       await this.#spawn()
@@ -116,7 +131,56 @@ export class LlamaCppPolishEngine implements PolishEngine {
     return { text, durationMs: Date.now() - started, truncated: completion.truncated }
   }
 
+  /**
+   * Stream a chat answer at low priority (PLAN §2.2.9).
+   *
+   * Two signals are merged, and the distinction between them survives into the
+   * caller: `request.signal` is the user cancelling, which is final, while the
+   * lease's signal is a dictation taking the slot, which Ask retries. Both look
+   * like `AbortError` at the fetch layer, so `gate.ts` aborts with a
+   * `PreemptedError` *reason* — that reason is the only thing that tells the
+   * two apart, and losing it would turn every dictation into a cancelled chat.
+   */
+  async *streamChat(request: EngineChatRequest): AsyncGenerator<string, EngineChatEnd> {
+    const lease = await this.#gate.acquire('low')
+    try {
+      if (request.signal.aborted) throw request.signal.reason ?? new Error('aborted')
+      if (lease.signal.aborted) throw lease.signal.reason ?? new Error('preempted')
+
+      if (this.#suspended) {
+        this.#log.info('waking after idle unload')
+        await this.#spawn()
+      }
+
+      const sidecar = this.#sidecar
+      const baseUrl = sidecar?.baseUrl
+      const token = sidecar?.token
+      if (!sidecar || !baseUrl || !token || sidecar.info().state !== 'running') {
+        throw new Error(`llama-server is not ready (${this.#status.get().detail || 'not started'})`)
+      }
+
+      const client = new ChatClient({
+        baseUrl,
+        apiKey: token,
+        model: this.#modelId ?? 'local',
+        fetchImpl: (url, init) => loopbackFetch(url, init),
+      })
+
+      return yield* client.stream({
+        messages: request.messages,
+        maxTokens: request.maxTokens,
+        signal: AbortSignal.any([request.signal, lease.signal]),
+      })
+    } finally {
+      lease.release()
+      // Ask counts as activity: unloading the model out from under an ongoing
+      // conversation would make the next question pay the full reload.
+      this.#armIdleTimer()
+    }
+  }
+
   async unload(): Promise<void> {
+    this.#gate.drain()
     this.#clearIdleTimer()
     this.#suspended = false
     this.#model = null

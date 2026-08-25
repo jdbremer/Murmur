@@ -43,6 +43,13 @@ import { InsightsSchema } from '../domain/insights'
 import { PermissionKindSchema, PermissionsStatusSchema } from '../domain/permissions'
 import { SettingsPatchSchema, SettingsSchema } from '../domain/settings'
 import { UpdateStateSchema } from '../domain/updates'
+import {
+  AskConversationSchema,
+  AskEventSchema,
+  AskRequestSchema,
+  AskSearchHitSchema,
+  AskStateSchema,
+} from '../domain/ask'
 import { StyleProfilePatchSchema, StyleProfileSetSchema } from '../domain/style'
 import {
   ImportedModelSchema,
@@ -199,6 +206,18 @@ export type AppInfo = z.infer<typeof AppInfoSchema>
 // ---------------------------------------------------------------------------
 // renderer → main, request/response
 // ---------------------------------------------------------------------------
+
+export const AskOpenRequestSchema = z.object({
+  /** Null opens a blank composer — the "New" button. */
+  conversationId: z.string().min(1).nullable().default(null),
+})
+
+export const AskSearchRequestSchema = z.object({ query: z.string().max(200) })
+
+export const AskRenameRequestSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1).max(200),
+})
 
 export const invokeContract = {
   // --- app ---------------------------------------------------------------
@@ -436,6 +455,45 @@ export const invokeContract = {
     request: z.object({ noteId: z.string().min(1).nullable().default(null) }),
     response: NoteSchema,
   },
+
+  // --- ask (PLAN §2.2.9) --------------------------------------------------
+  /**
+   * Ask a question about your own dictations, notes and meetings.
+   *
+   * Resolves when the answer is finished, not when it starts: the renderer
+   * awaits it to know when to re-enable the composer. The answer itself arrives
+   * on `ask.event`, because a streamed answer has no single response value and
+   * buffering one until the end would throw away the only part of a slow local
+   * model that makes it feel alive.
+   */
+  'ask.send': { request: AskRequestSchema, response: z.void() },
+  /**
+   * Stop the answer in flight.
+   *
+   * Distinct from the preemption in `gate.ts`, which also stops a stream: this
+   * one is final and the other retries. Conflating them would either strand a
+   * cancelled answer in a retry loop or silently drop one a dictation
+   * interrupted.
+   */
+  'ask.cancel': { request: z.void(), response: z.void() },
+  /** Everything needed to render the pane from cold, including its history. */
+  'ask.state': { request: z.void(), response: AskStateSchema },
+  /**
+   * Switch to a conversation, or to a blank one with `null`.
+   *
+   * Returns the whole state rather than acknowledging, because switching
+   * changes the turns, the active id and the conversation list all at once, and
+   * three round trips to assemble one screen is three chances to render a
+   * half-swapped pane.
+   */
+  'ask.open': { request: AskOpenRequestSchema, response: AskStateSchema },
+  /** Find conversations by what was said in them. */
+  'ask.search': { request: AskSearchRequestSchema, response: z.array(AskSearchHitSchema) },
+  'ask.rename': { request: AskRenameRequestSchema, response: AskConversationSchema.nullable() },
+  /** Delete one conversation and its turns. Never touches what it cited. */
+  'ask.deleteConversation': { request: IdRequestSchema, response: AskStateSchema },
+  /** Erase every conversation. Does not touch the dictations or notes cited. */
+  'ask.clear': { request: z.void(), response: AskStateSchema },
 
   // --- style (PLAN §2.2.3) -----------------------------------------------
   'style.get': { request: z.void(), response: StyleProfileSetSchema },
@@ -796,6 +854,15 @@ export const eventContract = {
    * whatever sorted first — which is the *newest* note, never the one clicked.
    */
   'notes.select': z.object({ id: z.string().min(1) }),
+  /**
+   * Ask progress: retrieval finished, a token arrived, the answer is done.
+   *
+   * One channel carrying a discriminated union rather than four channels,
+   * because the events are strictly ordered with respect to each other and
+   * separate channels give no such guarantee — a `done` overtaking its last
+   * `delta` would truncate the stored answer on screen.
+   */
+  'ask.event': AskEventSchema,
 } as const satisfies Record<string, z.ZodType>
 
 export type EventContract = typeof eventContract

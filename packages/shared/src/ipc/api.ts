@@ -197,6 +197,21 @@ export interface MurmurApi {
     onSelect(listener: (event: Evt<'notes.select'>) => void): Unsubscribe
   }
 
+  /** Grounded chat over the user's own dictations, notes and meetings. */
+  readonly ask: {
+    /** Resolves when the answer is finished; the text arrives on `subscribe`. */
+    send(request: Req<'ask.send'>): Promise<void>
+    cancel(): Promise<void>
+    state(): Promise<Res<'ask.state'>>
+    /** Switch conversations; `conversationId: null` opens a blank one. */
+    open(request: Req<'ask.open'>): Promise<Res<'ask.open'>>
+    search(request: Req<'ask.search'>): Promise<Res<'ask.search'>>
+    rename(request: Req<'ask.rename'>): Promise<Res<'ask.rename'>>
+    remove(request: Req<'ask.deleteConversation'>): Promise<Res<'ask.deleteConversation'>>
+    clear(): Promise<Res<'ask.clear'>>
+    subscribe(listener: (event: Evt<'ask.event'>) => void): Unsubscribe
+  }
+
   readonly dictionary: {
     list(): Promise<Res<'dictionary.list'>>
     create(entry: Req<'dictionary.create'>): Promise<Res<'dictionary.create'>>
