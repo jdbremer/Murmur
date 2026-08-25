@@ -477,7 +477,11 @@ describe('AskService', () => {
       }
 
       return service
-        .ask({ question: 'Summarize everything I dictated today', conversationId: null, sources: [] })
+        .ask({
+          question: 'Summarize everything I dictated today',
+          conversationId: null,
+          sources: [],
+        })
         .then(() => {
           const shown = prompt()
           for (const text of day) expect(shown).toContain(text)
@@ -589,8 +593,20 @@ describe('AskService', () => {
       // time the thread renders the answer above the question that prompted it.
       for (let i = 0; i < 30; i += 1) {
         const id = thread()
-        store.append(id, { role: 'user', content: `q${i}`, citations: [], coverage: '', createdAt: NOW })
-        store.append(id, { role: 'assistant', content: `a${i}`, citations: [], coverage: '', createdAt: NOW })
+        store.append(id, {
+          role: 'user',
+          content: `q${i}`,
+          citations: [],
+          coverage: '',
+          createdAt: NOW,
+        })
+        store.append(id, {
+          role: 'assistant',
+          content: `a${i}`,
+          citations: [],
+          coverage: '',
+          createdAt: NOW,
+        })
         expect(store.turns(id).map((t) => t.role)).toEqual(['user', 'assistant'])
       }
     })
@@ -598,7 +614,13 @@ describe('AskService', () => {
     it('keeps the end of a long conversation, not its beginning', () => {
       const id = thread()
       for (let i = 0; i < 20; i += 1) {
-        store.append(id, { role: 'user', content: `q${i}`, citations: [], coverage: '', createdAt: NOW + i })
+        store.append(id, {
+          role: 'user',
+          content: `q${i}`,
+          citations: [],
+          coverage: '',
+          createdAt: NOW + i,
+        })
       }
       const kept = store.turns(id, 5)
       expect(kept).toHaveLength(5)
@@ -625,7 +647,13 @@ describe('AskService', () => {
       // A thread that answered you and then sank to the bottom of the list is
       // the bug this guards: the list sorts on `updated_at`.
       const id = store.create('fixture', NOW).id
-      store.append(id, { role: 'user', content: 'q', citations: [], coverage: '', createdAt: NOW + 5_000 })
+      store.append(id, {
+        role: 'user',
+        content: 'q',
+        citations: [],
+        coverage: '',
+        createdAt: NOW + 5_000,
+      })
       expect(store.get(id)?.updatedAt).toBe(NOW + 5_000)
     })
 
@@ -652,8 +680,20 @@ describe('AskService', () => {
       // Coming back to the Hub should land where you left off.
       const older = store.create('older', NOW - 10_000)
       const newer = store.create('newer', NOW)
-      store.append(older.id, { role: 'user', content: 'a', citations: [], coverage: '', createdAt: NOW - 10_000 })
-      store.append(newer.id, { role: 'user', content: 'b', citations: [], coverage: '', createdAt: NOW })
+      store.append(older.id, {
+        role: 'user',
+        content: 'a',
+        citations: [],
+        coverage: '',
+        createdAt: NOW - 10_000,
+      })
+      store.append(newer.id, {
+        role: 'user',
+        content: 'b',
+        citations: [],
+        coverage: '',
+        createdAt: NOW,
+      })
 
       expect(build().state().activeId).toBe(newer.id)
     })
@@ -661,7 +701,13 @@ describe('AskService', () => {
     it('orders the list by when each was last used, not when it was made', () => {
       const older = store.create('older', NOW - 100_000)
       store.create('newer', NOW - 50_000)
-      store.append(older.id, { role: 'user', content: 'revived', citations: [], coverage: '', createdAt: NOW })
+      store.append(older.id, {
+        role: 'user',
+        content: 'revived',
+        citations: [],
+        coverage: '',
+        createdAt: NOW,
+      })
 
       expect(service.state().conversations[0]?.id).toBe(older.id)
     })

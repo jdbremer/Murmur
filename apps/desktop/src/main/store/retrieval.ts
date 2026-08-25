@@ -1,12 +1,7 @@
 import { readFileSync, statSync } from 'node:fs'
 
 import type { Database } from 'better-sqlite3'
-import {
-  type AskPassage,
-  type AskSource,
-  type CorpusDigest,
-  type TimeWindow,
-} from '@murmur/shared'
+import { type AskPassage, type AskSource, type CorpusDigest, type TimeWindow } from '@murmur/shared'
 
 import { createLogger, type Logger } from '../logging'
 
@@ -691,8 +686,7 @@ export class RetrievalRepository {
     // row: `stats.ts` already maintains it, and it is what History reports.
     const words = (
       this.#db.prepare(`SELECT COALESCE(total_words, 0) AS n FROM lifetime_stats`).get() as
-        | { n: number }
-        | undefined
+        { n: number } | undefined
     )?.n
     const noteTotals = this.#db
       .prepare(`SELECT COUNT(*) AS total, MAX(updated_at) AS last_at FROM notes`)

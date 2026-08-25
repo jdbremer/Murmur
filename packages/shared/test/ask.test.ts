@@ -560,11 +560,19 @@ describe('batchRecords', () => {
   }
 
   it('keeps a normal day in a single pass', () => {
-    expect(batchRecords(Array.from({ length: 12 }, (_, i) => record(i)), now)).toHaveLength(1)
+    expect(
+      batchRecords(
+        Array.from({ length: 12 }, (_, i) => record(i)),
+        now,
+      ),
+    ).toHaveLength(1)
   })
 
   it('splits a period too large for the context', () => {
-    const batches = batchRecords(Array.from({ length: 400 }, (_, i) => record(i)), now)
+    const batches = batchRecords(
+      Array.from({ length: 400 }, (_, i) => record(i)),
+      now,
+    )
     expect(batches.length).toBeGreaterThan(1)
   })
 
@@ -578,7 +586,10 @@ describe('batchRecords', () => {
   })
 
   it('keeps each batch inside the context budget', () => {
-    for (const batch of batchRecords(Array.from({ length: 400 }, (_, i) => record(i)), now)) {
+    for (const batch of batchRecords(
+      Array.from({ length: 400 }, (_, i) => record(i)),
+      now,
+    )) {
       const tokens = batch.reduce((sum, r) => sum + estimateTokens(formatRecapRecord(r, now)), 0)
       expect(tokens).toBeLessThanOrEqual(passageBudgetTokens())
     }
@@ -652,7 +663,14 @@ describe('describeCoverage', () => {
 describe('formatCorpusDigest', () => {
   const now = new Date('2026-08-19T15:30:00').getTime()
   const digest = {
-    dictations: { total: 350, today: 12, week: 47, firstAt: now - 120 * 86_400_000, lastAt: now, words: 11_247 },
+    dictations: {
+      total: 350,
+      today: 12,
+      week: 47,
+      firstAt: now - 120 * 86_400_000,
+      lastAt: now,
+      words: 11_247,
+    },
     notes: { total: 2, lastAt: now, recent: [{ title: 'Q3 launch plan', at: now }] },
     meetings: {
       total: 1,

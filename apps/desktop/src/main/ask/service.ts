@@ -375,12 +375,7 @@ export class AskService {
   }
 
   /** Store the finished answer and tell the renderer the turn is complete. */
-  #finish(
-    conversationId: string,
-    answer: string,
-    citations: AskCitation[],
-    coverage = '',
-  ): void {
+  #finish(conversationId: string, answer: string, citations: AskCitation[], coverage = ''): void {
     const turn = this.#deps.store.append(conversationId, {
       role: 'assistant',
       content: answer,

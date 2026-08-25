@@ -144,7 +144,13 @@ describe('threadReducer', () => {
     // Otherwise the chips under a fresh, still-empty answer are the last one's.
     const state = reduce(
       INITIAL_THREAD,
-      { type: 'sources', conversationId: CONV, citations: [citation(1)], searched: 4, coverage: '' },
+      {
+        type: 'sources',
+        conversationId: CONV,
+        citations: [citation(1)],
+        searched: 4,
+        coverage: '',
+      },
       { type: 'question', conversationId: CONV, turn: turn('user', 'next') },
     )
     expect(state.citations).toEqual([])
