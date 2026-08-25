@@ -178,7 +178,9 @@ describe('toAskQuery', () => {
   })
 
   it('caps a rambling question rather than sending fifty terms', () => {
-    const query = toAskQuery('alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar')
+    const query = toAskQuery(
+      'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike november oscar',
+    )
     expect((query ?? '').split(' OR ')).toHaveLength(12)
   })
 
@@ -529,7 +531,11 @@ describe('RetrievalRepository', () => {
 
       expect(retrieval.search('rollback')).toEqual([])
       expect(retrieval.search('completely')).toHaveLength(1)
-      expect(() => db.prepare(`INSERT INTO meeting_chunks_fts(meeting_chunks_fts) VALUES('integrity-check')`).run()).not.toThrow()
+      expect(() =>
+        db
+          .prepare(`INSERT INTO meeting_chunks_fts(meeting_chunks_fts) VALUES('integrity-check')`)
+          .run(),
+      ).not.toThrow()
     })
   })
 

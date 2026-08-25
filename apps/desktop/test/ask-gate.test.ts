@@ -132,9 +132,7 @@ describe('PriorityGate', () => {
 
   it('runs and releases even when the task throws', async () => {
     const gate = new PriorityGate()
-    await expect(
-      gate.run('low', () => Promise.reject(new Error('boom'))),
-    ).rejects.toThrow('boom')
+    await expect(gate.run('low', () => Promise.reject(new Error('boom')))).rejects.toThrow('boom')
     expect(gate.busy).toBe(false)
   })
 

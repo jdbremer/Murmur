@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type {
-  AskCitation,
-  AskConversation,
-  AskEvent,
-  AskState,
-  AskTurn,
-} from '@murmur/shared'
+import type { AskCitation, AskConversation, AskEvent, AskState, AskTurn } from '@murmur/shared'
 
 import {
   INITIAL_THREAD,
@@ -100,7 +94,11 @@ describe('threadReducer', () => {
   })
 
   it('appends the question as its own turn', () => {
-    const state = reduce(OPEN, { type: 'question', conversationId: CONV, turn: turn('user', 'why?') })
+    const state = reduce(OPEN, {
+      type: 'question',
+      conversationId: CONV,
+      turn: turn('user', 'why?'),
+    })
     expect(state.turns.map((t) => t.role)).toEqual(['user'])
   })
 
@@ -108,7 +106,11 @@ describe('threadReducer', () => {
     // A stale failure sitting above an answer that is arriving perfectly well
     // is the kind of thing that makes a pane look broken when it is not.
     const failed = reduce(OPEN, { type: 'error', conversationId: CONV, message: 'model not ready' })
-    const asked = reduce(failed, { type: 'question', conversationId: CONV, turn: turn('user', 'again') })
+    const asked = reduce(failed, {
+      type: 'question',
+      conversationId: CONV,
+      turn: turn('user', 'again'),
+    })
     expect(asked.error).toBeNull()
   })
 
@@ -202,7 +204,8 @@ describe('threadReducer', () => {
     // Asking with no thread open creates one in main, so the first event is the
     // renderer's only way to learn its id.
     const state = reduce(INITIAL_THREAD, {
-      type: 'question',      conversationId: 'fresh',
+      type: 'question',
+      conversationId: 'fresh',
       turn: turn('user', 'first question'),
     })
     expect(state.activeId).toBe('fresh')
@@ -277,9 +280,7 @@ describe('splitAnswer', () => {
 
   it('takes the space before a dropped marker with it', () => {
     const parts = splitAnswer('I could not find anything about that. [1]', [])
-    expect(parts).toEqual([
-      { kind: 'text', value: 'I could not find anything about that.' },
-    ])
+    expect(parts).toEqual([{ kind: 'text', value: 'I could not find anything about that.' }])
   })
 
   it('does not leave a seam where a marker was removed', () => {
@@ -303,9 +304,7 @@ describe('splitAnswer', () => {
       citation(2),
     ])
     const rebuilt = parts
-      .map((part) =>
-        part.kind === 'citation' ? `${part.lead ?? ''} [${part.value}]` : part.value,
-      )
+      .map((part) => (part.kind === 'citation' ? `${part.lead ?? ''} [${part.value}]` : part.value))
       .join('')
     expect(rebuilt).toBe('Blocked [1] on the migration [2]; see also.')
   })

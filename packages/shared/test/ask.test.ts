@@ -396,9 +396,7 @@ describe('parseTimeWindow', () => {
   it('reads the phrasings people actually use', () => {
     expect(parseTimeWindow('over the past week', now)?.label).toBe('this week')
     expect(parseTimeWindow('in the last month', now)?.label).toBe('this month')
-    expect(parseTimeWindow('what have I been saying lately', now)?.label).toBe(
-      'the last fortnight',
-    )
+    expect(parseTimeWindow('what have I been saying lately', now)?.label).toBe('the last fortnight')
   })
 
   it('returns nothing when no period is named', () => {
@@ -412,7 +410,15 @@ describe('parseTimeWindow', () => {
   })
 
   it('never returns an inverted or empty window', () => {
-    for (const question of ['today', 'yesterday', 'this week', 'last week', 'this month', 'last month', 'lately']) {
+    for (const question of [
+      'today',
+      'yesterday',
+      'this week',
+      'last week',
+      'this month',
+      'last month',
+      'lately',
+    ]) {
       const window = parseTimeWindow(question, now)
       expect(window).not.toBeNull()
       expect(window?.to).toBeGreaterThan(window?.from ?? 0)

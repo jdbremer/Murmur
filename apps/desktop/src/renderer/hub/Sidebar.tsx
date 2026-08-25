@@ -207,7 +207,6 @@ export function Sidebar({
             </ul>
           </div>
         ))}
-
       </div>
 
       {/* The fold, in its own footer *outside* the scroll area. Inside it, the

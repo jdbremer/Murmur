@@ -47,7 +47,6 @@ class FakeEngine implements PolishEngine {
   constructor(script?: FakeEngine['script']) {
     this.script =
       script ??
-       
       async function* () {
         yield 'ok'
         return { truncated: false }
@@ -144,7 +143,6 @@ const deltas = (): string =>
 const statuses = (): string[] =>
   events.flatMap((event) => (event.type === 'status' ? [event.status] : []))
 
- 
 async function* say(...parts: string[]): AsyncGenerator<string, EngineChatEnd> {
   for (const part of parts) yield part
   return { truncated: false }
@@ -155,7 +153,11 @@ describe('AskService', () => {
     engine = new FakeEngine(() => say('The migration ', 'is blocked [1].'))
     service = build()
 
-    await service.ask({ question: 'what is blocking the migration?', conversationId: null, sources: [] })
+    await service.ask({
+      question: 'what is blocking the migration?',
+      conversationId: null,
+      sources: [],
+    })
 
     expect(kinds()).toEqual([
       'question',
@@ -286,12 +288,11 @@ describe('AskService', () => {
     it('gives up rather than restarting forever', async () => {
       // Someone dictating steadily could restart an answer indefinitely. A pane
       // that flickers for ever is worse than one that says it gave way.
-      engine = new FakeEngine(
-        () =>
-          (async function* (): AsyncGenerator<string, EngineChatEnd> {
-            yield 'x'
-            throw new PreemptedError()
-          })(),
+      engine = new FakeEngine(() =>
+        (async function* (): AsyncGenerator<string, EngineChatEnd> {
+          yield 'x'
+          throw new PreemptedError()
+        })(),
       )
       service = build()
       await service.ask({ question: 'migration', conversationId: null, sources: [] })
@@ -307,15 +308,14 @@ describe('AskService', () => {
     it('stops for good rather than retrying', async () => {
       // A cancel and a preemption both arrive as an abort. Only the reason
       // tells them apart, and only one of them is allowed to restart.
-      engine = new FakeEngine(
-        () =>
-          (async function* (): AsyncGenerator<string, EngineChatEnd> {
-            yield 'starting'
-            service.cancel()
-            const error = new Error('Cancelled')
-            error.name = 'AskCancelledError'
-            throw error
-          })(),
+      engine = new FakeEngine(() =>
+        (async function* (): AsyncGenerator<string, EngineChatEnd> {
+          yield 'starting'
+          service.cancel()
+          const error = new Error('Cancelled')
+          error.name = 'AskCancelledError'
+          throw error
+        })(),
       )
       service = build()
       await service.ask({ question: 'migration', conversationId: null, sources: [] })
@@ -327,16 +327,15 @@ describe('AskService', () => {
     })
 
     it('keeps the question but stores no answer', async () => {
-      engine = new FakeEngine(
-        () =>
-          (async function* (): AsyncGenerator<string, EngineChatEnd> {
-            service.cancel()
-            const error = new Error('Cancelled')
-            error.name = 'AskCancelledError'
-            throw error
-             
-            yield ''
-          })(),
+      engine = new FakeEngine(() =>
+        (async function* (): AsyncGenerator<string, EngineChatEnd> {
+          service.cancel()
+          const error = new Error('Cancelled')
+          error.name = 'AskCancelledError'
+          throw error
+
+          yield ''
+        })(),
       )
       service = build()
       await service.ask({ question: 'migration', conversationId: null, sources: [] })
@@ -437,13 +436,12 @@ describe('AskService', () => {
   })
 
   it('surfaces an engine failure as an error in the thread', async () => {
-    engine = new FakeEngine(
-      () =>
-        (async function* (): AsyncGenerator<string, EngineChatEnd> {
-          throw new Error('llama-server is not ready')
-           
-          yield ''
-        })(),
+    engine = new FakeEngine(() =>
+      (async function* (): AsyncGenerator<string, EngineChatEnd> {
+        throw new Error('llama-server is not ready')
+
+        yield ''
+      })(),
     )
     service = build()
     await service.ask({ question: 'migration', conversationId: null, sources: [] })
@@ -507,9 +505,7 @@ describe('AskService', () => {
       store.append(id, { role: 'user', content: 'q', citations: [], createdAt: NOW })
       store.delete(id)
       expect(store.turns(id)).toEqual([])
-      expect(
-        (db.prepare(`SELECT COUNT(*) AS n FROM ask_turns`).get() as { n: number }).n,
-      ).toBe(0)
+      expect((db.prepare(`SELECT COUNT(*) AS n FROM ask_turns`).get() as { n: number }).n).toBe(0)
     })
   })
 

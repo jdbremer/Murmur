@@ -843,7 +843,12 @@ function Composer({
               className="grid size-8 shrink-0 place-items-center rounded-xl bg-ink text-surface transition-opacity duration-150 hover:opacity-85"
             >
               {/* A stop square, filled — the streaming state's own glyph. */}
-              <svg viewBox="0 0 24 24" aria-hidden="true" className="size-[11px]" fill="currentColor">
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                className="size-[11px]"
+                fill="currentColor"
+              >
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
             </button>

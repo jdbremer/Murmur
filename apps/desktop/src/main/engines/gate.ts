@@ -54,8 +54,7 @@ interface Waiter {
 }
 
 export class PriorityGate {
-  #active: { controller: AbortController; released: boolean; priority: GatePriority } | null =
-    null
+  #active: { controller: AbortController; released: boolean; priority: GatePriority } | null = null
   #waiters: Waiter[] = []
 
   get busy(): boolean {
