@@ -16,6 +16,12 @@ export default tseslint.config(
       // Sidecar source checkouts (scripts/sidecars/build-*.sh) carry their own
       // eslint configs, which must never be resolved against our node_modules.
       '.sidecars/**',
+      // Python environments for the model conversions (scripts/models/*).
+      // site-packages ships vendored JavaScript — torch alone brings a few
+      // hundred files — and linting somebody else's bundled assets is noise.
+      '.venv*/**',
+      // Downloaded model weights and their publisher's own code.
+      'models/**',
     ],
   },
 

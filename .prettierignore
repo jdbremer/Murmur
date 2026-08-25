@@ -4,6 +4,8 @@ out
 release
 build
 packages/native/build
+.venv*
+models
 *.node
 package-lock.json
 
