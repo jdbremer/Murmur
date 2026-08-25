@@ -220,7 +220,13 @@ export function AskSection(): React.JSX.Element {
               <div className="mx-auto max-w-[46rem]">
                 {state.unavailable ? <Unavailable>{state.unavailable}</Unavailable> : null}
                 {empty ? (
-                  <Opening counts={state.counts} total={total} onAsk={send} disabled={blocked} />
+                  <Opening
+                    counts={state.counts}
+                    suggestions={state.suggestions}
+                    total={total}
+                    onAsk={send}
+                    disabled={blocked}
+                  />
                 ) : (
                   <Thread state={state} />
                 )}
@@ -343,11 +349,13 @@ const EXAMPLES = [
 
 function Opening({
   counts,
+  suggestions,
   total,
   onAsk,
   disabled,
 }: {
   counts: ThreadState['counts']
+  suggestions: ThreadState['suggestions']
   total: number
   onAsk: (question: string) => void
   disabled: boolean
@@ -384,7 +392,7 @@ function Opening({
         Try asking
       </p>
       <ul className="mt-2.5 grid gap-2 @xl:grid-cols-3">
-        {EXAMPLES.map((example) => (
+        {(suggestions.length > 0 ? suggestions : EXAMPLES).map((example) => (
           <li key={example.question}>
             <button
               type="button"
@@ -466,11 +474,7 @@ function Thread({ state }: { state: ThreadState }): React.JSX.Element {
             {turn.role === 'user' ? (
               <Question>{turn.content}</Question>
             ) : (
-              <Answer
-                text={turn.content}
-                citations={turn.citations}
-                coverage={turn.coverage}
-              />
+              <Answer text={turn.content} citations={turn.citations} coverage={turn.coverage} />
             )}
           </div>
         )

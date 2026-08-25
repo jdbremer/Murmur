@@ -18,6 +18,7 @@ import {
   parseTimeWindow,
   passageBudgetTokens,
   planAsk,
+  suggestedQuestions,
   relativeDay,
   trimHistory,
   truncateToTokens,
@@ -51,7 +52,14 @@ function passage(over: Partial<AskPassage> = {}): AskPassage {
 }
 
 function turn(role: 'user' | 'assistant', content: string): AskTurn {
-  return { id: `${role}-${content.slice(0, 4)}`, role, content, citations: [], createdAt: NOW }
+  return {
+    id: `${role}-${content.slice(0, 4)}`,
+    role,
+    content,
+    citations: [],
+    coverage: '',
+    createdAt: NOW,
+  }
 }
 
 describe('token estimation', () => {
@@ -682,5 +690,120 @@ describe('formatCorpusDigest', () => {
       meetings: { total: 0, lastAt: null, totalMs: 0, recent: [] },
     }
     expect(formatCorpusDigest(empty, now)).toContain('never')
+  })
+})
+
+describe('planAsk with a conversation behind it', () => {
+  const now = new Date('2026-08-19T15:30:00').getTime()
+  const after = (previous: string, question: string): ReturnType<typeof planAsk> =>
+    planAsk(question, now, { previousQuestion: previous })
+
+  it('carries the earlier subject into the search', () => {
+    // Retrieval never sees the conversation — only the prompt does. Without
+    // this, "who is fixing that?" searches for "fixing", finds whichever
+    // record mentions fixing anything, and truthfully reports finding nothing
+    // about the thing that was on screen a moment ago.
+    const plan = after('What is blocking the beta launch?', 'Who is fixing that?')
+    expect(plan.followUp).toBe(true)
+    expect(plan.query).toContain('blocking')
+    expect(plan.query).toContain('beta')
+    // The question itself is untouched; only the search text grows.
+    expect(plan.query.startsWith('Who is fixing that?')).toBe(true)
+  })
+
+  it('recognises a continuation opener', () => {
+    expect(after('Where is the offsite?', 'And who is booking it?').followUp).toBe(true)
+    expect(after('Where is the offsite?', 'what else?').followUp).toBe(true)
+  })
+
+  it('leaves a self-contained question alone', () => {
+    // A new subject must not drag the last one along, or every answer slowly
+    // accumulates the whole conversation as search terms.
+    const plan = after('What is blocking the beta launch?', 'Where are we holding the offsite?')
+    expect(plan.followUp).toBe(false)
+    expect(plan.query).toBe('Where are we holding the offsite?')
+  })
+
+  it('inherits recap intent for a bare period follow-up', () => {
+    // "What about yesterday?" after a recap means recap yesterday. On its own
+    // it names no subject at all, so without inheritance it searched for
+    // nothing and said so.
+    const plan = after('Summarize my day', 'What about yesterday?')
+    expect(plan.intent).toBe('recap')
+    expect(plan.window?.label).toBe('yesterday')
+  })
+
+  it('does not inherit recap for a follow-up that names a subject', () => {
+    // "Who owns it?" after a recap is a lookup, not another recap.
+    expect(after('Summarize my day', 'Who owns the rollback plan?').intent).toBe('lookup')
+  })
+
+  it('lets a question override the inherited intent', () => {
+    expect(after('Summarize my day', 'How many meetings do I have?').intent).toBe('catalog')
+  })
+
+  it('behaves exactly as before when there is no conversation', () => {
+    const plan = planAsk('Who is fixing that?', now, { previousQuestion: null })
+    expect(plan.followUp).toBe(false)
+    expect(plan.query).toBe('Who is fixing that?')
+  })
+
+  it('does not repeat a term the follow-up already has', () => {
+    const plan = after('What is blocking the migration?', 'is the migration done?')
+    expect(plan.query.match(/migration/g) ?? []).toHaveLength(1)
+  })
+})
+
+describe('suggestedQuestions', () => {
+  const base = {
+    dictations: { total: 0, today: 0, week: 0, firstAt: null, lastAt: null, words: 0 },
+    notes: { total: 0, lastAt: null, recent: [] },
+    meetings: { total: 0, lastAt: null, totalMs: 0, recent: [] },
+  }
+
+  it('names a meeting that actually happened', () => {
+    // "What did we agree in Design standup?" teaches the feature in a way
+    // "…in my last meeting?" cannot, because the reader can tell it is theirs.
+    const questions = suggestedQuestions({
+      ...base,
+      meetings: {
+        total: 1,
+        lastAt: 1,
+        totalMs: 600_000,
+        recent: [{ title: 'Design standup', at: 1, durationMs: 600_000, indexed: true }],
+      },
+    })
+    expect(questions.some((q) => q.question.includes('Design standup'))).toBe(true)
+  })
+
+  it('offers a recap only when there is something to recap', () => {
+    expect(suggestedQuestions(base)).toEqual([])
+    const today = { ...base, dictations: { ...base.dictations, total: 3, today: 3 } }
+    expect(suggestedQuestions(today)[0]?.question).toBe('Summarise my day')
+  })
+
+  it('falls back to the week when today is empty', () => {
+    const week = { ...base, dictations: { ...base.dictations, total: 9, today: 0, week: 9 } }
+    expect(week.dictations.week).toBe(9)
+    expect(suggestedQuestions(week)[0]?.question).toBe('Summarise this week')
+  })
+
+  it('counts what it offers, so the hint is never a guess', () => {
+    const one = { ...base, dictations: { ...base.dictations, total: 1, today: 1 } }
+    expect(suggestedQuestions(one)[0]?.hint).toBe('1 dictation today')
+  })
+
+  it('stays scannable', () => {
+    const full = {
+      dictations: { total: 40, today: 5, week: 20, firstAt: 1, lastAt: 2, words: 900 },
+      notes: { total: 3, lastAt: 2, recent: [{ title: 'Plan', at: 2 }] },
+      meetings: {
+        total: 2,
+        lastAt: 2,
+        totalMs: 100,
+        recent: [{ title: 'Standup', at: 2, durationMs: 100, indexed: true }],
+      },
+    }
+    expect(suggestedQuestions(full).length).toBeLessThanOrEqual(3)
   })
 })

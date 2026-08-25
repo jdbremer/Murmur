@@ -41,6 +41,8 @@ export interface ThreadState {
   /** Non-null when Ask cannot run at all; the composer is disabled. */
   unavailable: string | null
   counts: AskState['counts']
+  /** Opening questions built from what this user actually has. */
+  suggestions: AskState['suggestions']
 }
 
 export const INITIAL_THREAD: ThreadState = {
@@ -56,6 +58,7 @@ export const INITIAL_THREAD: ThreadState = {
   error: null,
   unavailable: null,
   counts: { dictations: 0, notes: 0, meetings: 0 },
+  suggestions: [],
 }
 
 export type ThreadAction = { type: 'loaded'; state: AskState } | { type: 'event'; event: AskEvent }
@@ -74,6 +77,7 @@ export function threadReducer(state: ThreadState, action: ThreadAction): ThreadS
         turns: action.state.turns,
         status: action.state.status,
         counts: action.state.counts,
+        suggestions: action.state.suggestions,
         unavailable: action.state.unavailable,
         streaming: '',
         citations: [],

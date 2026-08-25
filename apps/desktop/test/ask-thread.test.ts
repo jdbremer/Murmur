@@ -165,6 +165,7 @@ describe('threadReducer', () => {
           conversations: [conv()],
           turns: [turn('user', 'q')],
           counts: { dictations: 12, notes: 3, meetings: 1 },
+          suggestions: [],
           unavailable: null,
         } satisfies AskState,
       },
@@ -187,6 +188,7 @@ describe('threadReducer', () => {
         conversations: [conv({ id: 'conv-2' })],
         turns: [],
         counts: { dictations: 300, notes: 4, meetings: 2 },
+        suggestions: [],
         unavailable: null,
       } satisfies AskState,
     })

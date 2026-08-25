@@ -9,6 +9,7 @@ import {
   deriveConversationTitle,
   fitPassages,
   planAsk,
+  suggestedQuestions,
   trimHistory,
   usedCitations,
   type AskConversation,
@@ -80,6 +81,7 @@ export class AskService {
       conversations,
       turns: activeId ? this.#deps.store.turns(activeId) : [],
       counts: this.#deps.retrieval.counts(),
+      suggestions: suggestedQuestions(this.#deps.retrieval.digest(this.#now())),
       unavailable: this.#unavailableReason(),
     }
   }
@@ -188,7 +190,17 @@ export class AskService {
     signal: AbortSignal,
   ): Promise<void> {
     const now = this.#now()
-    const plan = planAsk(question, now)
+    // The question before this one, so a follow-up can lean on it. Read from
+    // the store rather than tracked in memory: reopening a conversation and
+    // continuing it should behave exactly like never having left.
+    const earlier = this.#deps.store
+      .turns(conversationId)
+      .filter((turn) => turn.role === 'user' && turn.id !== questionId)
+      .at(-1)
+    const plan = planAsk(question, now, { previousQuestion: earlier?.content ?? null })
+    if (plan.followUp && plan.query !== question) {
+      this.#log.info(`follow-up; searching ${JSON.stringify(plan.query)}`)
+    }
     this.#setStatus(conversationId, 'searching', plan.window?.label ?? '')
     // Cheap when nothing changed — one `stat` per meeting — so it runs before
     // every question rather than on a schedule. A transcript finished thirty
@@ -208,6 +220,7 @@ export class AskService {
     await this.#answerLookup(
       conversationId,
       question,
+      plan.query,
       questionId,
       sources,
       plan.window,
@@ -325,13 +338,15 @@ export class AskService {
   async #answerLookup(
     conversationId: string,
     question: string,
+    /** The search text, which for a follow-up carries the earlier subject. */
+    query: string,
     questionId: string,
     sources: AskSource[],
     window: TimeWindow | null,
     now: number,
     signal: AbortSignal,
   ): Promise<void> {
-    const candidates = this.#deps.retrieval.search(question, {
+    const candidates = this.#deps.retrieval.search(query, {
       ...(sources.length > 0 ? { sources } : {}),
       ...(window ? { window } : {}),
     })

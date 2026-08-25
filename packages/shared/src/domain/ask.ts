@@ -591,6 +591,10 @@ export const AskStateSchema = z.object({
     notes: z.number().int().nonnegative(),
     meetings: z.number().int().nonnegative(),
   }),
+  /** Opening questions built from what this user actually has. */
+  suggestions: z
+    .array(z.object({ question: z.string(), hint: z.string() }))
+    .default([]),
   /**
    * Null when Ask can run. A sentence explaining why not otherwise — no polish
    * model downloaded, polishing switched off, the endpoint unreachable.
@@ -647,7 +651,32 @@ export interface AskPlan {
   focus: AskSource | null
   /** Content words left after the instruction vocabulary is removed. */
   topic: string[]
+  /**
+   * What to actually search — the question, plus the subject it is leaning on
+   * from earlier in the conversation. See {@link planAsk}.
+   */
+  query: string
+  /** True when the question only makes sense as a continuation. */
+  followUp: boolean
 }
+
+/** What was asked immediately before, so a follow-up can lean on it. */
+export interface AskContext {
+  previousQuestion: string | null
+}
+
+/**
+ * Words that point at something already said rather than naming it.
+ *
+ * "Who is fixing **that**?" is a complete sentence and a useless search query:
+ * every content word in it is either grammar or a pointer, so retrieval looks
+ * for "fixing" and finds whichever record happens to mention fixing anything.
+ */
+const REFERENTIAL_RE = /\b(it|its|that|those|this|these|they|them|their|one|ones|same|so)\b/i
+
+/** Openers that only exist to continue — "and…", "what about…". */
+const CONTINUATION_RE =
+  /^\s*(and\b|also\b|plus\b|what about\b|how about\b|what else\b|who else\b|anything else\b|any others?\b|more\b|then\b)/i
 
 /**
  * Words that carry *the shape of the request* rather than its subject.
@@ -710,28 +739,83 @@ const FOCUS_PATTERNS: [RegExp, AskSource][] = [
  * specific, and a question like "how many meetings did I record this week"
  * satisfies the recap patterns too.
  */
-export function planAsk(question: string, now: number): AskPlan {
+export function planAsk(
+  question: string,
+  now: number,
+  context: AskContext = { previousQuestion: null },
+): AskPlan {
   const window = parseTimeWindow(question, now)
   const topic = topicTerms(question)
+  const own = ownIntent(question, topic)
 
-  if (CATALOG_RE.some((pattern) => pattern.test(question))) {
-    const focus = FOCUS_PATTERNS.find(([pattern]) => pattern.test(question))?.[1] ?? null
-    return { intent: 'catalog', window, focus, topic }
+  // A question that leans on the last one: a pointer with no antecedent, a
+  // continuation opener, or nothing left at all once the grammar is removed.
+  const leaning =
+    CONTINUATION_RE.test(question) || REFERENTIAL_RE.test(question) || topic.length === 0
+  const followUp = leaning && Boolean(context.previousQuestion)
+
+  // Carry the previous question's subject into the search. Retrieval never
+  // sees the conversation — only the prompt does — so without this, "who is
+  // fixing that?" searches for "fixing" and truthfully reports finding
+  // nothing, moments after the thing being pointed at was on screen.
+  //
+  // The *question* is left alone; only the search text grows. The model still
+  // reads what the user actually typed, with the real history above it.
+  let query = question
+  if (followUp && context.previousQuestion) {
+    const carried = topicTerms(context.previousQuestion).filter((term) => !topic.includes(term))
+    if (carried.length > 0) query = `${question} ${carried.join(' ')}`
   }
 
+  // Intent the question declares for itself always wins. Only a question that
+  // declares none inherits — so "what about yesterday?" after a recap recaps
+  // yesterday, while "who owns it?" after a recap is still a lookup.
+  const intent: AskIntent =
+    own ?? (followUp ? (inheritableIntent(context.previousQuestion) ?? 'lookup') : 'lookup')
+
+  if (intent === 'catalog') {
+    const focus = FOCUS_PATTERNS.find(([pattern]) => pattern.test(question))?.[1] ?? null
+    return { intent, window, focus, topic, query, followUp }
+  }
+  if (intent === 'recap') {
+    // A bare "give me a recap" means the recent past; today is the reading
+    // that makes the answer small enough to be worth having.
+    return {
+      intent,
+      window: window ?? todayWindow(now),
+      focus: null,
+      topic,
+      query,
+      followUp,
+    }
+  }
+  return { intent: 'lookup', window, focus: null, topic, query, followUp }
+}
+
+/** The intent a question declares by itself, or null when it declares none. */
+function ownIntent(question: string, topic: string[]): AskIntent | null {
+  if (CATALOG_RE.some((pattern) => pattern.test(question))) return 'catalog'
   // A recap only when the question has *no subject left* once the instruction
   // vocabulary is removed. "Summarize my day" is a recap; "summarize what I
   // said about the migration" still has a subject, and the ordinary lookup
-  // path — which finds the migration and lets the model summarise it — is a
-  // far better answer than dumping the whole day on the model.
-  const looksLikeRecap = RECAP_RE.test(question) || RECAP_PHRASE_RE.test(question)
-  if (looksLikeRecap && topic.length === 0) {
-    // A bare "give me a recap" means the recent past; today is the reading
-    // that makes the answer small enough to be worth having.
-    return { intent: 'recap', window: window ?? todayWindow(now), focus: null, topic }
+  // path — find the migration, let the model summarise it — is a far better
+  // answer than dumping the whole day on the model.
+  if ((RECAP_RE.test(question) || RECAP_PHRASE_RE.test(question)) && topic.length === 0) {
+    return 'recap'
   }
+  return null
+}
 
-  return { intent: 'lookup', window, focus: null, topic }
+/**
+ * What the previous question was answered as.
+ *
+ * Recomputed from its text rather than stored, so there is exactly one
+ * definition of what a question means and no second copy to fall out of step.
+ * Planned without context of its own, which is what stops the recursion.
+ */
+function inheritableIntent(previousQuestion: string | null): AskIntent | null {
+  if (!previousQuestion) return null
+  return ownIntent(previousQuestion, topicTerms(previousQuestion))
 }
 
 /** The content words, with grammar, instructions and period words removed. */
@@ -1026,4 +1110,46 @@ export function describeCoverage(passages: readonly AskPassage[], label: string)
   const joined =
     parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
   return `${joined} from ${label}`
+}
+
+/**
+ * Opening questions drawn from what the user actually has.
+ *
+ * The first question is the hardest one to ask: a blank composer over a corpus
+ * you cannot see gives no clue what this thing is good at. Canned examples help
+ * a little, but "What did we agree in Design standup?" — naming a meeting that
+ * really happened — teaches the feature in a way "What did we agree in my last
+ * meeting?" never does, because the reader can tell it is about *them*.
+ *
+ * Built from the digest rather than the model: no inference, no latency, and
+ * nothing invented.
+ */
+export function suggestedQuestions(digest: CorpusDigest): { question: string; hint: string }[] {
+  const out: { question: string; hint: string }[] = []
+
+  if (digest.dictations.today > 0) {
+    out.push({
+      question: 'Summarise my day',
+      hint: `${digest.dictations.today} dictation${digest.dictations.today === 1 ? '' : 's'} today`,
+    })
+  } else if (digest.dictations.week > 0) {
+    out.push({ question: 'Summarise this week', hint: `${digest.dictations.week} this week` })
+  }
+
+  const meeting = digest.meetings.recent[0]
+  if (meeting) {
+    out.push({ question: `What did we agree in ${meeting.title}?`, hint: 'from the transcript' })
+  }
+
+  const note = digest.notes.recent[0]
+  if (note) {
+    out.push({ question: `What is in my "${note.title}" note?`, hint: 'your most recent note' })
+  }
+
+  // A fallback so the opening is never bare, and never more than three so the
+  // row stays scannable.
+  if (out.length < 3 && digest.dictations.total > 0) {
+    out.push({ question: 'What did I say about the deadline?', hint: 'across everything' })
+  }
+  return out.slice(0, 3)
 }
