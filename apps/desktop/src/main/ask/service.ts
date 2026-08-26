@@ -24,6 +24,7 @@ import {
 } from '@murmur/shared'
 
 import { isPreempted } from '../engines/gate'
+import { stripThinking } from '../engines/polish/prompt'
 import type { PolishEngine } from '../engines/types'
 import { createLogger, type Logger } from '../logging'
 import type { AskRepository } from '../store/repositories'
@@ -419,7 +420,10 @@ export class AskService {
           // would read as the answer restarting over and over.
           if (!options.silent) this.#emit({ type: 'delta', conversationId, text: delta })
         }
-        return text.trim()
+        // A reasoning model's deliberation is not the answer. Granite 4.2
+        // emits a stray `</think>` even with thinking disabled — see
+        // `stripThinking`, which the polish path runs for the same reason.
+        return stripThinking(text.trim())
       } catch (error) {
         // A user cancel and a dictation preemption both surface as an abort;
         // only the reason distinguishes them, and only one of them retries.

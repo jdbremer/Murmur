@@ -636,8 +636,45 @@ export function checkPolishOutput(raw: string, polished: string): GuardVerdict {
  * is wrapped, so a transcript that genuinely starts with a quotation mark
  * survives.
  */
+/**
+ * Remove a reasoning model's thinking from its answer.
+ *
+ * Reasoning models are asked to skip thinking entirely — the chat client sends
+ * `enable_thinking: false` and `reasoning_effort: 'none'` — and Granite 4.2
+ * showed that this is not enough on its own. Its template implements "off" by
+ * *pre-filling* `<think></think>` into the prompt, so the opening tag is
+ * already spent before generation starts and what comes back is
+ *
+ *     This is a test.\n</think>\nThis is a test.
+ *
+ * — a closing tag with no opener, and the answer on both sides of it. Pasted
+ * into whatever the user was dictating into, tag and all.
+ *
+ * So the closing tag is handled first and on its own, because the obvious
+ * implementation — a regex for a balanced `<think>…</think>` block — matches
+ * nothing here. Everything after the last close is the answer; that is true
+ * both for this pre-filled case and for an ordinary model that reasons and
+ * then answers.
+ *
+ * An opener with no close is the remaining case: the model is still thinking
+ * when it runs out of tokens, so there is no answer to keep. Returning nothing
+ * is right — the length guard in `polish()` sees an empty result and keeps the
+ * raw transcript, which is the correct outcome and a far better one than
+ * inserting a paragraph of deliberation.
+ */
+export function stripThinking(text: string): string {
+  let out = text
+  const close = out.lastIndexOf('</think>')
+  if (close !== -1) out = out.slice(close + '</think>'.length).trim()
+
+  const open = out.indexOf('<think>')
+  if (open !== -1) out = out.slice(0, open).trim()
+
+  return out
+}
+
 export function unwrapModelOutput(text: string): string {
-  let out = text.trim()
+  let out = stripThinking(text.trim())
 
   const fence = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(out)
   if (fence?.[1] !== undefined) out = fence[1].trim()

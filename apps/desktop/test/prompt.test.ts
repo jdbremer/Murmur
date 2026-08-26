@@ -7,6 +7,7 @@ import { StyleProfileSchema, type DictionaryEntry } from '@murmur/shared'
 
 import { POLISH } from '../src/main/config'
 import {
+  stripThinking,
   maxCommandOutputTokens,
   checkCommandOutput,
   buildCommandPrompt,
@@ -486,5 +487,51 @@ describe('checkPolishOutput — what the guard must never reject', () => {
         'Would you like to join us for the retro on Friday afternoon?',
       ).ok,
     ).toBe(true)
+  })
+})
+
+describe('stripThinking', () => {
+  it('keeps the answer when a closing tag arrives with no opener', () => {
+    // Verbatim from Granite 4.2 with thinking disabled. Its template pre-fills
+    // `<think></think>` into the prompt, so the opener is spent before
+    // generation and the model closes a block it never opened — with the
+    // answer on both sides. This reached a real transcript.
+    expect(stripThinking('This is a test.\n</think>\nThis is a test.')).toBe('This is a test.')
+  })
+
+  it('drops an ordinary reasoning block', () => {
+    expect(stripThinking('<think>Let me consider…</think>\nShip on Friday.')).toBe(
+      'Ship on Friday.',
+    )
+  })
+
+  it('keeps only what follows the last close, when there are several', () => {
+    expect(stripThinking('a</think>b</think>final')).toBe('final')
+  })
+
+  it('returns nothing when the model never stopped thinking', () => {
+    // No answer was produced, so there is nothing to keep. Empty is the right
+    // result: the length guard in `polish()` then keeps the raw transcript,
+    // rather than inserting a paragraph of deliberation.
+    expect(stripThinking('<think>still working on it')).toBe('')
+  })
+
+  it('leaves ordinary text completely alone', () => {
+    expect(stripThinking('Ship on Friday.')).toBe('Ship on Friday.')
+    expect(stripThinking('')).toBe('')
+  })
+
+  it('does not eat text that merely mentions thinking', () => {
+    expect(stripThinking('I think we should ship on Friday.')).toBe(
+      'I think we should ship on Friday.',
+    )
+  })
+})
+
+describe('unwrapModelOutput with a reasoning model', () => {
+  it('strips thinking before it looks for fences or quotes', () => {
+    // Order matters: the tags wrap the whole reply, so a fence or a quotation
+    // inside the answer is only findable once they are gone.
+    expect(unwrapModelOutput('</think>\n"Ship on Friday."')).toBe('Ship on Friday.')
   })
 })
