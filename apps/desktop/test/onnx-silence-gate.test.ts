@@ -77,6 +77,18 @@ describe('the silence gate the ONNX host runs before transcribing', () => {
     expect(analyse(buried).speechStart).not.toBeNull()
   })
 
+  it('still finds speech in an utterance as short as a single word', () => {
+    // The gate must not become a duration test. Someone dictating just "okay"
+    // sends a few hundred milliseconds, and `trimSilence` has already cut the
+    // quiet either side of it before this runs — so what reaches the gate is
+    // the word alone. Measured: detected down to 120 ms, which is shorter than
+    // a spoken syllable.
+    for (const ms of [800, 500, 300, 200, 120]) {
+      const samples = Math.round((ms / 1000) * 16_000)
+      expect(analyse(recorded.slice(0, samples)).speechStart, `${ms}ms`).not.toBeNull()
+    }
+  })
+
   it('finds nothing in an empty buffer rather than throwing', () => {
     expect(analyse(new Float32Array(0)).speechStart).toBeNull()
   })
