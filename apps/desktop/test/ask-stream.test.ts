@@ -165,6 +165,20 @@ describe('ChatClient.stream', () => {
     expect(result.text).not.toContain('�')
   })
 
+  it("does not yield a reasoning model's deliberation", async () => {
+    // Thinking must never reach the UI. It is excluded by never being read:
+    // the deliberation arrives as `reasoning_content`, a field the chunk type
+    // does not declare, so there is no filter here that could be got wrong.
+    const thought = `data: ${JSON.stringify({
+      choices: [{ delta: { reasoning_content: 'The user is asking about Priya...' } }],
+    })}\n\n`
+    const result = await collect(
+      client([thought, frame('Priya owns it.'), 'data: [DONE]\n\n']).stream(request),
+    )
+    expect(result.text).toBe('Priya owns it.')
+    expect(result.text).not.toContain('The user is asking')
+  })
+
   it('reports truncation when the model hits the token cap', async () => {
     const capped = `data: ${JSON.stringify({
       choices: [{ delta: { content: 'cut' }, finish_reason: 'length' }],
@@ -216,5 +230,83 @@ describe('ChatClient.stream', () => {
     // llama-server sends one; not every OpenAI-compatible server does.
     const result = await collect(client([frame('partial')]).stream(request))
     expect(result).toEqual({ text: 'partial', truncated: false })
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+/** A fetch that records the request body instead of answering meaningfully. */
+function capturing(): { fetchImpl: never; body: () => Record<string, unknown> } {
+  let seen: Record<string, unknown> = {}
+  const fetchImpl = ((_url: string, init: { body: string }) => {
+    seen = JSON.parse(init.body) as Record<string, unknown>
+    const encoder = new TextEncoder()
+    return Promise.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            controller.close()
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+  }) as never
+  return { fetchImpl, body: () => seen }
+}
+
+function capturingClient(fetchImpl: never): ChatClient {
+  return new ChatClient({
+    baseUrl: 'http://127.0.0.1:9999',
+    apiKey: null,
+    model: 'test',
+    fetchImpl,
+  })
+}
+
+/**
+ * The thinking controls, which are worth pinning precisely because the obvious
+ * spelling is the broken one.
+ *
+ * `reasoning_effort: "low"` is the OpenAI-compatible field and looks like the
+ * whole answer. Granite's chat template ignores it: sent alone it produced
+ * unbounded deliberation that consumed the entire 768-token answer budget and
+ * returned an *empty* string. The `low_effort` template kwarg is what Granite
+ * honours — the same question then answered in 114 tokens. A future tidy-up
+ * that "removes the redundant kwarg" would silently blank out Ask, so both
+ * fields are asserted here.
+ */
+describe('thinking controls', () => {
+  const request = { messages: [], maxTokens: 64, signal: new AbortController().signal }
+
+  it('keeps thinking off unless the caller asks for it', async () => {
+    const { fetchImpl, body } = capturing()
+    await collect(capturingClient(fetchImpl).stream(request))
+    expect(body()['reasoning_effort']).toBe('none')
+    expect(body()['chat_template_kwargs']).toEqual({ enable_thinking: false })
+  })
+
+  it('sends the template kwarg Granite honours, not just reasoning_effort', async () => {
+    const { fetchImpl, body } = capturing()
+    await collect(capturingClient(fetchImpl).stream({ ...request, thinking: true }))
+    expect(body()['chat_template_kwargs']).toEqual({ enable_thinking: true, low_effort: true })
+    expect(body()['reasoning_effort']).toBe('low')
+  })
+
+  it('never lets the polish path deliberate', async () => {
+    // Dictation is a latency product. `complete` has no thinking parameter at
+    // all, so this cannot regress by a call site passing one.
+    const { fetchImpl, body } = capturing()
+    await capturingClient(fetchImpl)
+      .complete({
+        systemPrompt: 'edit',
+        examples: [],
+        userText: 'um hello',
+        maxTokens: 32,
+      } as never)
+      .catch(() => undefined)
+    expect(body()['reasoning_effort']).toBe('none')
+    expect(body()['chat_template_kwargs']).toEqual({ enable_thinking: false })
   })
 })

@@ -567,10 +567,19 @@ function Answer({
   text,
   citations,
   coverage = '',
+  truncated = false,
   streaming = false,
 }: {
   text: string
   citations: readonly AskCitation[]
+  /**
+   * True when the model ran out of tokens mid-answer.
+   *
+   * Said rather than hidden: the answer is kept, because a partial one still
+   * holds the useful part — but without a note the reader cannot tell a
+   * sentence that ended from one that simply stopped.
+   */
+  truncated?: boolean
   /**
    * What a recap read, in words. Recaps have no per-claim citations — the
    * model saw everything in the period — so without this the reader has no
@@ -633,6 +642,25 @@ function Answer({
           </p>
         ) : null}
       </div>
+
+      {truncated && !streaming ? (
+        <p className="mt-2 flex items-center gap-1.5 text-[11px] text-warning">
+          <svg
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            className="size-[12px] shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7.5v5.5M12 16.5h.01" />
+          </svg>
+          This answer ran out of room and stops early.
+        </p>
+      ) : null}
 
       {coverage ? (
         <p className="mt-2.5 flex items-center gap-1.5 text-[11px] text-ink-faint">

@@ -58,6 +58,7 @@ function turn(role: 'user' | 'assistant', content: string): AskTurn {
     content,
     citations: [],
     coverage: '',
+    truncated: false,
     createdAt: NOW,
   }
 }

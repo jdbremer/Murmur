@@ -47,8 +47,39 @@ interface ChatCompletionResponse {
 }
 
 interface ChatStreamChunk {
+  /**
+   * A reasoning model splits its output across two delta fields: the
+   * deliberation arrives as `reasoning_content` and the answer as `content`.
+   * Only `content` is declared here, and that is the whole mechanism by which
+   * thinking stays out of the UI — there is no filtering step to get wrong,
+   * because the tokens are never read in the first place.
+   */
   choices?: { delta?: { content?: string }; finish_reason?: string | null }[]
   error?: { message?: string }
+}
+
+/**
+ * The request body's thinking controls, in one place because getting them
+ * subtly wrong is worse than leaving them off.
+ *
+ * `reasoning_effort` is the OpenAI-compatible spelling and is what a template
+ * *should* read. Granite's does not: setting `reasoning_effort: "low"` on its
+ * own buys unbounded deliberation, which on a measured question spent the
+ * entire 768-token budget thinking and returned an empty answer. The
+ * `low_effort` template kwarg is the one Granite actually honours — same
+ * question, 114 tokens, answered. Both are sent: the kwarg for Granite, the
+ * standard field for endpoints whose templates read it.
+ */
+function thinkingParams(thinking: boolean): Record<string, unknown> {
+  if (!thinking) {
+    // Thinking-mode models must run with thinking off for polish (PLAN §7.3).
+    // llama.cpp accepts these as no-ops when the model has no such mode.
+    return { reasoning_effort: 'none', chat_template_kwargs: { enable_thinking: false } }
+  }
+  return {
+    reasoning_effort: 'low',
+    chat_template_kwargs: { enable_thinking: true, low_effort: true },
+  }
 }
 
 export interface ChatCompletion {
@@ -150,10 +181,8 @@ export class ChatClient {
         top_p: POLISH.topP,
         max_tokens: request.maxTokens,
         stream: false,
-        // Thinking-mode models must run with thinking off (PLAN §7.3).
-        // llama.cpp accepts these as no-ops when the model has no such mode.
-        reasoning_effort: 'none',
-        chat_template_kwargs: { enable_thinking: false },
+        // Dictation is a latency product; it never deliberates.
+        ...thinkingParams(false),
       }),
       signal: request.signal ?? AbortSignal.timeout(TIMEOUTS.sidecarRequestMs),
     })
@@ -200,8 +229,7 @@ export class ChatClient {
         top_p: POLISH.topP,
         max_tokens: request.maxTokens,
         stream: true,
-        reasoning_effort: 'none',
-        chat_template_kwargs: { enable_thinking: false },
+        ...thinkingParams(request.thinking ?? false),
       }),
       signal: request.signal,
     })
@@ -258,6 +286,16 @@ export interface ChatStreamRequest {
   messages: ChatMessage[]
   maxTokens: number
   temperature?: number
+  /**
+   * Let a reasoning model deliberate before answering. Off by default, because
+   * the caller that must never pay for it — dictation — should not have to ask.
+   *
+   * It costs about a second per answer and earns it on questions with more
+   * than one part, which a small model otherwise declines outright rather than
+   * reasoning through. The deliberation itself is never shown to the user:
+   * see {@link ChatStreamChunk}.
+   */
+  thinking?: boolean
   signal: AbortSignal
 }
 

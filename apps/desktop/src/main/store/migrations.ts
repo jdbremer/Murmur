@@ -582,6 +582,20 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       db.exec(`ALTER TABLE ask_turns ADD COLUMN coverage TEXT NOT NULL DEFAULT ''`)
     },
   },
+  {
+    version: 9,
+    name: 'ask-truncated',
+    up(db) {
+      // Whether an answer ran out of tokens mid-sentence.
+      //
+      // The stream has always reported this and the service always dropped it,
+      // so an answer that stopped mid-clause looked exactly like one that
+      // finished. Kept with the turn for the same reason as `coverage`: it is a
+      // property of that answer, and losing it when the conversation reopens
+      // takes the explanation away at the point the reader wants it.
+      db.exec(`ALTER TABLE ask_turns ADD COLUMN truncated INTEGER NOT NULL DEFAULT 0`)
+    },
+  },
 ])
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

@@ -169,6 +169,7 @@ export class LlamaCppPolishEngine implements PolishEngine {
       return yield* client.stream({
         messages: request.messages,
         maxTokens: request.maxTokens,
+        thinking: request.thinking ?? false,
         signal: AbortSignal.any([request.signal, lease.signal]),
       })
     } finally {

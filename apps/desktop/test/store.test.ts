@@ -143,6 +143,7 @@ describe('openDatabase', () => {
       '6:notes',
       '7:ask',
       '8:ask-coverage',
+      '9:ask-truncated',
     ])
 
     // The polished text's 6 words, at 6 words / 6 s = 60 wpm, on one day.

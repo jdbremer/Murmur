@@ -79,6 +79,15 @@ export const AskTurnSchema = z.object({
    * reader has to take entirely on trust.
    */
   coverage: z.string().default(''),
+  /**
+   * True when the model hit the token cap mid-answer.
+   *
+   * Worth storing rather than merely logging: a truncated answer is still the
+   * best answer available and is kept, so without a mark on it the reader has
+   * no way to tell a sentence the model chose to end from one that simply
+   * stopped.
+   */
+  truncated: z.boolean().default(false),
   createdAt: z.number().int().nonnegative(),
 })
 export type AskTurn = z.infer<typeof AskTurnSchema>
@@ -109,8 +118,17 @@ export type AskStatus = z.infer<typeof AskStatusSchema>
 export const ASK_BUDGET = {
   /** Total we are willing to occupy. Below `--ctx-size` by a safety margin. */
   contextTokens: 3600,
-  /** Reserved for the answer, so the model is never cut off mid-sentence. */
-  answerTokens: 512,
+  /**
+   * Reserved for the answer, so the model is never cut off mid-sentence.
+   *
+   * 512 was not enough. A multi-hop question — one that has to reconcile two
+   * sources before it can answer — ran past it and stopped mid-clause, and
+   * nothing downstream noticed, because the truncation flag the stream already
+   * returns was being discarded. Raised against a measured overrun rather than
+   * doubled on principle: it comes out of the passage budget, and passages are
+   * what make the answer grounded in the first place.
+   */
+  answerTokens: 768,
   /** Reserved for the grounding rules; measured, not guessed — see the test. */
   systemTokens: 320,
   /** Reserved for earlier turns of the conversation. */

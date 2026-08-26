@@ -1174,6 +1174,7 @@ interface AskTurnRow {
   content: string
   citations: string
   coverage: string | null
+  truncated: number | null
   created_at: number
 }
 
@@ -1289,12 +1290,15 @@ export class AskRepository {
     const write = this.#db.transaction(() => {
       this.#db
         .prepare(
-          `INSERT INTO ask_turns (id, conversation_id, role, content, citations, coverage, created_at)
-           VALUES (@id, @conversationId, @role, @content, @citations, @coverage, @createdAt)
+          `INSERT INTO ask_turns
+             (id, conversation_id, role, content, citations, coverage, truncated, created_at)
+           VALUES
+             (@id, @conversationId, @role, @content, @citations, @coverage, @truncated, @createdAt)
            ON CONFLICT(id) DO UPDATE SET
              content = excluded.content,
              citations = excluded.citations,
-             coverage = excluded.coverage`,
+             coverage = excluded.coverage,
+             truncated = excluded.truncated`,
         )
         .run({
           id: record.id,
@@ -1303,6 +1307,7 @@ export class AskRepository {
           content: record.content,
           citations: JSON.stringify(record.citations),
           coverage: record.coverage,
+          truncated: record.truncated ? 1 : 0,
           createdAt: record.createdAt,
         })
       this.#db
@@ -1327,7 +1332,7 @@ export class AskRepository {
     const rows = this.#db
       .prepare(
         `SELECT * FROM (
-           SELECT rowid AS rid, id, role, content, citations, coverage, created_at
+           SELECT rowid AS rid, id, role, content, citations, coverage, truncated, created_at
              FROM ask_turns
             WHERE conversation_id = ?
             ORDER BY created_at DESC, rowid DESC
@@ -1414,6 +1419,7 @@ function toAskTurn(row: AskTurnRow): AskTurn {
     content: row.content,
     citations: parsed.success ? parsed.data : [],
     coverage: row.coverage ?? '',
+    truncated: row.truncated === 1,
     createdAt: row.created_at,
   })
 }

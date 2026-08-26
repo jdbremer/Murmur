@@ -104,6 +104,12 @@ export interface EngineChatRequest {
   messages: EngineChatMessage[]
   maxTokens: number
   /**
+   * Let a reasoning model deliberate before it answers. Optional and off by
+   * default: the default is the one dictation needs, so the latency-critical
+   * path cannot acquire deliberation by forgetting a field.
+   */
+  thinking?: boolean
+  /**
    * Required, not optional. A stream with no way to stop it is a model slot
    * that cannot be reclaimed, and on a one-slot sidecar that is a stuck app.
    */

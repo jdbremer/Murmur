@@ -143,6 +143,16 @@ const deltas = (): string =>
 const statuses = (): string[] =>
   events.flatMap((event) => (event.type === 'status' ? [event.status] : []))
 
+/**
+ * A stream that ends without producing a single token — what a reasoning model
+ * does when its deliberation consumes the whole answer budget. Yielding
+ * nothing is the behaviour under test, hence the disabled rule.
+ */
+// eslint-disable-next-line require-yield
+async function* nothing(truncated: boolean): AsyncGenerator<string, EngineChatEnd> {
+  return { truncated }
+}
+
 async function* say(...parts: string[]): AsyncGenerator<string, EngineChatEnd> {
   for (const part of parts) yield part
   return { truncated: false }
@@ -301,6 +311,65 @@ describe('AskService', () => {
       const error = events.find((event) => event.type === 'error')
       expect(error).toMatchObject({ type: 'error' })
       expect(statuses().at(-1)).toBe('error')
+    })
+  })
+
+  describe('deliberation', () => {
+    it('lets the model think, which dictation never does', async () => {
+      const seen: (boolean | undefined)[] = []
+      engine = new FakeEngine((_attempt, request) => {
+        seen.push(request.thinking)
+        return say('answered')
+      })
+      service = build()
+      await service.ask({ question: 'migration', conversationId: null, sources: [] })
+      expect(seen).toEqual([true])
+    })
+
+    it('retries without thinking when thinking ate the whole budget', async () => {
+      // Deliberation and answer share one token cap, so a hard enough question
+      // can spend the cap thinking and stream nothing. Retrying identically
+      // would just reproduce it; a rambling answer beats an empty bubble.
+      const seen: (boolean | undefined)[] = []
+      engine = new FakeEngine((attempt, request) => {
+        seen.push(request.thinking)
+        return attempt === 0 ? nothing(true) : say('a real answer')
+      })
+      service = build()
+      await service.ask({ question: 'migration', conversationId: null, sources: [] })
+
+      expect(seen).toEqual([true, false])
+      expect(activeTurns()[1]?.content).toBe('a real answer')
+    })
+
+    it('keeps an empty answer that was not truncated', async () => {
+      // An empty answer that stopped cleanly is the model declining, which is
+      // a legitimate outcome for a grounded assistant. Only the ran-out-of-room
+      // case is worth a second attempt.
+      engine = new FakeEngine(() => nothing(false))
+      service = build()
+      await service.ask({ question: 'migration', conversationId: null, sources: [] })
+      expect(engine.calls).toBe(1)
+    })
+
+    it('does not splice a retried answer onto leaked deliberation', async () => {
+      // A template that leaks its thinking into `content` has already streamed
+      // something before `stripThinking` empties it out.
+      engine = new FakeEngine((attempt) =>
+        attempt === 0
+          ? (async function* (): AsyncGenerator<string, EngineChatEnd> {
+              yield '<think>weighing the sources'
+              return { truncated: true }
+            })()
+          : say('fresh'),
+      )
+      service = build()
+      await service.ask({ question: 'migration', conversationId: null, sources: [] })
+
+      const order = events.flatMap((e) =>
+        e.type === 'restart' ? ['restart'] : e.type === 'delta' ? [e.text] : [],
+      )
+      expect(order).toEqual(['<think>weighing the sources', 'restart', 'fresh'])
     })
   })
 
@@ -598,6 +667,7 @@ describe('AskService', () => {
           content: `q${i}`,
           citations: [],
           coverage: '',
+          truncated: false,
           createdAt: NOW,
         })
         store.append(id, {
@@ -605,6 +675,7 @@ describe('AskService', () => {
           content: `a${i}`,
           citations: [],
           coverage: '',
+          truncated: false,
           createdAt: NOW,
         })
         expect(store.turns(id).map((t) => t.role)).toEqual(['user', 'assistant'])
@@ -619,6 +690,7 @@ describe('AskService', () => {
           content: `q${i}`,
           citations: [],
           coverage: '',
+          truncated: false,
           createdAt: NOW + i,
         })
       }
@@ -637,6 +709,7 @@ describe('AskService', () => {
         content: 'still readable',
         citations: [],
         coverage: '',
+        truncated: false,
         createdAt: NOW,
       })
       db.prepare(`UPDATE ask_turns SET citations = '{oops' WHERE id = ?`).run(turn.id)
@@ -652,6 +725,7 @@ describe('AskService', () => {
         content: 'q',
         citations: [],
         coverage: '',
+        truncated: false,
         createdAt: NOW + 5_000,
       })
       expect(store.get(id)?.updatedAt).toBe(NOW + 5_000)
@@ -659,7 +733,14 @@ describe('AskService', () => {
 
     it('deletes a conversation together with its turns', () => {
       const id = thread()
-      store.append(id, { role: 'user', content: 'q', citations: [], coverage: '', createdAt: NOW })
+      store.append(id, {
+        role: 'user',
+        content: 'q',
+        citations: [],
+        coverage: '',
+        truncated: false,
+        createdAt: NOW,
+      })
       store.delete(id)
       expect(store.turns(id)).toEqual([])
       expect((db.prepare(`SELECT COUNT(*) AS n FROM ask_turns`).get() as { n: number }).n).toBe(0)
@@ -685,6 +766,7 @@ describe('AskService', () => {
         content: 'a',
         citations: [],
         coverage: '',
+        truncated: false,
         createdAt: NOW - 10_000,
       })
       store.append(newer.id, {
@@ -692,6 +774,7 @@ describe('AskService', () => {
         content: 'b',
         citations: [],
         coverage: '',
+        truncated: false,
         createdAt: NOW,
       })
 
@@ -706,6 +789,7 @@ describe('AskService', () => {
         content: 'revived',
         citations: [],
         coverage: '',
+        truncated: false,
         createdAt: NOW,
       })
 
@@ -825,6 +909,7 @@ describe('AskService', () => {
           content: `rollback question ${i}`,
           citations: [],
           coverage: '',
+          truncated: false,
           createdAt: NOW + i,
         })
       }

@@ -63,6 +63,8 @@ export class AskService {
   readonly #log: Logger
   #status: AskStatus = 'idle'
   #activeId: string | null = null
+  /** Whether the answer being assembled hit the token cap. */
+  #truncated = false
   /** Non-null while an answer is in flight; aborting it is a user cancel. */
   #cancel: AbortController | null = null
   constructor(deps: AskServiceDeps) {
@@ -152,6 +154,7 @@ export class AskService {
       content: question,
       citations: [],
       coverage: '',
+      truncated: false,
       createdAt: this.#now(),
     })
     this.#emit({ type: 'question', conversationId: conversation.id, turn: userTurn })
@@ -382,8 +385,12 @@ export class AskService {
       content: answer,
       citations,
       coverage,
+      // Read from the stream's own report, which used to be discarded — so an
+      // answer that stopped mid-clause looked exactly like one that finished.
+      truncated: this.#truncated,
       createdAt: this.#now(),
     })
+    this.#truncated = false
     this.#setStatus(conversationId, 'idle')
     const conversation = this.#deps.store.get(conversationId)
     if (conversation) {
@@ -403,27 +410,62 @@ export class AskService {
     signal: AbortSignal,
     options: { silent?: boolean } = {},
   ): Promise<string> {
+    let droppedThinking = false
     for (let attempt = 0; ; attempt += 1) {
       const engine = this.#deps.engine()
       if (!engine?.streamChat) throw new Error('The polishing model is not available right now.')
       let text = ''
+      this.#truncated = false
       try {
         if (!options.silent) this.#setStatus(conversationId, 'answering')
         const stream = engine.streamChat({
           messages,
           maxTokens: ASK_BUDGET.answerTokens,
+          // Ask deliberates; dictation never does. What this buys, measured
+          // against a live Granite 4.2 over a seeded archive: a question with
+          // two parts — "what is blocking the launch, and is any of it
+          // resolved?" — was *declined* without it ("I could not find anything
+          // about that in your notes") though the archive answered both parts,
+          // and answered correctly with it. Single-hop questions were already
+          // fine either way, so the ~1s it costs buys the multi-hop ones.
+          // The deliberation is dropped at the transport, not here.
+          thinking: !droppedThinking,
           signal,
         })
-        for await (const delta of stream) {
-          text += delta
+        // An explicit loop, not `for await`: that form discards a generator's
+        // *return* value, and the return value is where the stream reports
+        // having hit the token cap.
+        for (;;) {
+          const next = await stream.next()
+          if (next.done) {
+            this.#truncated = next.value.truncated
+            break
+          }
+          text += next.value
           // Silent passes are the recap's working notes; streaming them
           // would read as the answer restarting over and over.
-          if (!options.silent) this.#emit({ type: 'delta', conversationId, text: delta })
+          if (!options.silent) this.#emit({ type: 'delta', conversationId, text: next.value })
         }
         // A reasoning model's deliberation is not the answer. Granite 4.2
         // emits a stray `</think>` even with thinking disabled — see
         // `stripThinking`, which the polish path runs for the same reason.
-        return stripThinking(text.trim())
+        const answer = stripThinking(text.trim())
+
+        // Thinking introduces a failure mode that thinking-off does not have:
+        // the deliberation and the answer share one token budget, so a hard
+        // enough question can spend the whole budget thinking and emit nothing.
+        // Retrying identically would only reproduce it, so the retry drops
+        // thinking — a rambling answer beats an empty bubble.
+        if (answer === '' && this.#truncated && !droppedThinking) {
+          this.#log.info('the model spent its whole budget thinking; retrying without it')
+          droppedThinking = true
+          // Same reason the preemption path emits this: a template that leaks
+          // its deliberation into `content` has already streamed something,
+          // and the retry must not splice its answer onto that.
+          if (!options.silent) this.#emit({ type: 'restart', conversationId })
+          continue
+        }
+        return answer
       } catch (error) {
         // A user cancel and a dictation preemption both surface as an abort;
         // only the reason distinguishes them, and only one of them retries.

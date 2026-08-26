@@ -27,7 +27,15 @@ const NOW = 1_700_000_000_000
 const CONV = 'conv-1'
 
 function turn(role: 'user' | 'assistant', content: string, citations: AskCitation[] = []): AskTurn {
-  return { id: `${role}-${content}`, role, content, citations, coverage: '', createdAt: NOW }
+  return {
+    id: `${role}-${content}`,
+    role,
+    content,
+    citations,
+    coverage: '',
+    truncated: false,
+    createdAt: NOW,
+  }
 }
 
 function citation(index: number): AskCitation {
