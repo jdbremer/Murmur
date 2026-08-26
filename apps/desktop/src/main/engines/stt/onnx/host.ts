@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { analyse } from '../../../audio/vad'
+
 import { ctcAverageLogProb, decodeByteLevelTokens, decodeCtcGreedy } from './ctc-decode'
 import { computeLogMel, PARAKEET_MEL } from './featurizer'
 import { computeGraniteFeatures } from './granite-features'
@@ -396,6 +398,39 @@ async function handleTranscribe(
 
   const started = Date.now()
   const pcm = new Float32Array(request.pcm, 0, request.sampleCount)
+
+  // Do not ask the model to transcribe silence.
+  //
+  // Every ONNX model here invents words when handed audio with no speech in
+  // it — measured on Granite Speech 5.0, pure digital silence decodes to
+  // "thank", quiet noise to "thank you", and room noise to "okay". whisper.cpp
+  // has the same habit, which is what `transcript.ts` exists to clean up after.
+  //
+  // That guard cannot be reused here, and it is worth saying why rather than
+  // leaving the asymmetry looking like an oversight. It leans on two things
+  // this path does not have: per-segment boundaries, and a per-segment
+  // confidence to compare against its neighbours. A single `avgLogProb` for the
+  // whole utterance looks like a substitute and is not — measured, correctly
+  // transcribed speech that was quiet *and* noisy scored -0.359, worse than
+  // every hallucination measured (-0.10 to -0.30). Thresholding on it would
+  // throw away good transcriptions in exactly the rooms people complain about.
+  //
+  // The voice-activity gate is the honest signal: it answers "was anyone
+  // speaking" from energy and zero-crossings, without the model's opinion, and
+  // it separates the two cases completely. Real speech is still detected at a
+  // twentieth of normal volume and when buried in noise; silence and noise at
+  // every level report no speech at all.
+  const voice = analyse(pcm)
+  if (voice.speechStart === null) {
+    reply({
+      type: 'transcribed',
+      id: request.id,
+      text: '',
+      avgLogProb: null,
+      durationMs: Date.now() - started,
+    })
+    return
+  }
 
   if (current.family === 'parakeet-tdt') {
     await transcribeParakeet(current, pcm, tensors, started, request.id)
