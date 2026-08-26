@@ -14,6 +14,7 @@ import type { CaptureController, CaptureLease } from '../audio/controller'
 import type { FrameBus } from '../audio/frame-bus'
 import type { SystemAudioSource } from '../audio/system-capture'
 import { frameRms } from '../audio/vad'
+import { SessionConfidence } from '../engines/stt/transcript'
 import { AUDIO, MEETING } from '../config'
 import type { TranscribeQueue } from '../engines/stt-queue'
 import type { SttEngine } from '../engines/types'
@@ -71,6 +72,8 @@ interface Session {
   unsubscribe: () => void
   segmenters: Record<MeetingTrack, TrackSegmenter>
   holdback: MicHoldback
+  /** How confident this recording's speech usually is, for the filler guard. */
+  confidence: SessionConfidence
   hasSystemAudio: boolean
   segments: MeetingSegment[]
   /** Transcribed but not yet written — see `#flush` for why they wait. */
@@ -211,6 +214,7 @@ export class MeetingRecorder extends EventEmitter<MeetingRecorderEvents> {
       unsubscribe,
       segmenters: { me: new TrackSegmenter('me'), them: new TrackSegmenter('them') },
       holdback: new MicHoldback(),
+      confidence: new SessionConfidence(),
       hasSystemAudio,
       segments: [],
       pending: [],
@@ -356,6 +360,18 @@ export class MeetingRecorder extends EventEmitter<MeetingRecorderEvents> {
         if (this.#session !== session) return
         const text = transcript.text.trim()
         if (!text) return
+
+        // A whole segment that is nothing but "thank you" or "okay", and much
+        // less confident than the rest of this recording, is the model talking
+        // to itself over room tone. The silence gate in the ONNX host catches
+        // audio with no speech in it at all; this catches the case that passes
+        // the gate — a stretch quiet enough to hold no words but loud enough to
+        // look like someone might be speaking.
+        if (session.confidence.isInvention(text, transcript.avgLogProb)) {
+          this.#log.info(`dropped a likely invention: ${JSON.stringify(text)}`)
+          return
+        }
+        session.confidence.note(transcript.avgLogProb)
 
         const segment: MeetingSegment = {
           id: randomUUID(),

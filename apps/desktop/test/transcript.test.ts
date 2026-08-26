@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { normaliseTranscript, stripHallucinatedTail } from '../src/main/engines/stt/transcript'
+import {
+  SessionConfidence,
+  normaliseTranscript,
+  stripHallucinatedTail,
+} from '../src/main/engines/stt/transcript'
 
 describe('normaliseTranscript', () => {
   it('collapses the segment newlines whisper.cpp joins its output with', () => {
@@ -131,5 +135,72 @@ describe('stripHallucinatedTail', () => {
 
   it('handles an empty transcript', () => {
     expect(stripHallucinatedTail([])).toEqual({ segments: [], dropped: null })
+  })
+})
+
+describe('SessionConfidence', () => {
+  /** A recording whose speech scores around -0.02, as clean speech does. */
+  const clean = (): SessionConfidence => {
+    const session = new SessionConfidence()
+    session.note(-0.01)
+    session.note(-0.02)
+    session.note(-0.03)
+    return session
+  }
+
+  it('drops a filler-only segment far below the recording’s own confidence', () => {
+    // The reported case: a whole segment of "thank you" conjured out of room
+    // tone at the end of a meeting.
+    expect(clean().isInvention('Thank you.', -0.19)).toBe(true)
+    expect(clean().isInvention('Okay', -0.22)).toBe(true)
+  })
+
+  it('keeps a filler the speaker actually said', () => {
+    // Spoken clearly, it scores like the rest of the call. This is the case a
+    // word list alone gets wrong, and the reason the confidence test exists.
+    expect(clean().isInvention('Thank you.', -0.02)).toBe(false)
+  })
+
+  it('keeps any segment that contains real words', () => {
+    // Whatever its confidence: a segment with content is a real segment.
+    expect(clean().isInvention('Thank you for sending the plan.', -0.9)).toBe(false)
+  })
+
+  it('judges against this recording, not a fixed threshold', () => {
+    // The whole point of a relative baseline. In a noisy room the speaker's own
+    // speech scores badly too, so an absolute threshold would eat it —
+    // measured, correct speech that was quiet *and* noisy scored -0.359, worse
+    // than every hallucination measured.
+    const noisy = new SessionConfidence()
+    noisy.note(-0.35)
+    noisy.note(-0.4)
+    noisy.note(-0.38)
+    expect(noisy.isInvention('Thank you.', -0.36)).toBe(false)
+    expect(noisy.isInvention('Thank you.', -0.9)).toBe(true)
+  })
+
+  it('does nothing until the recording has said enough to have a baseline', () => {
+    // Early segments have nothing to be compared against, and guessing there
+    // would drop the first thing somebody says.
+    const fresh = new SessionConfidence()
+    expect(fresh.isInvention('Thank you.', -0.9)).toBe(false)
+    fresh.note(-0.02)
+    expect(fresh.isInvention('Thank you.', -0.9)).toBe(false)
+    fresh.note(-0.02)
+    expect(fresh.isInvention('Thank you.', -0.9)).toBe(true)
+  })
+
+  it('does nothing when the engine reports no confidence', () => {
+    // whisper.cpp reports it, the ONNX host reports it; anything that does not
+    // simply keeps every segment rather than guessing.
+    expect(clean().isInvention('Thank you.', null)).toBe(false)
+    expect(clean().isInvention('Thank you.', undefined)).toBe(false)
+  })
+
+  it('ignores unscored segments when forming the baseline', () => {
+    const session = new SessionConfidence()
+    session.note(null)
+    session.note(undefined)
+    expect(session.baseline()).toBeNull()
   })
 })

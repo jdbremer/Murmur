@@ -173,3 +173,71 @@ export function stripHallucinatedTail(segments: readonly TranscriptSegment[]): S
 
   return { segments: earlier, dropped: (last.text ?? '').trim() }
 }
+
+/**
+ * How much less confident a segment has to be than the rest of its recording
+ * before a filler word in it is treated as invention.
+ *
+ * Absolute, and small, because it is compared against *this recording's own*
+ * median rather than a fixed floor. That distinction is the whole design.
+ * Measured on Granite Speech 5.0: clean speech scores about -0.001 to -0.05,
+ * and words conjured out of silence or room tone score -0.10 to -0.30 — but
+ * correctly transcribed speech that was quiet *and* noisy scored -0.359, worse
+ * than every hallucination. A fixed threshold anywhere in that range throws
+ * away good transcriptions in noisy rooms.
+ *
+ * A relative one does not, because a noisy room drags the baseline down with
+ * it: what matters is whether this segment is unusually poor *for this
+ * recording*. 0.06 is the gap between the cleanest hallucination measured
+ * (-0.101) and a typical clean baseline (-0.02), with a little room.
+ */
+const SESSION_CONFIDENCE_MARGIN = 0.06
+
+/** Below this many scored segments there is no baseline worth comparing to. */
+const SESSION_BASELINE_MIN = 2
+
+/**
+ * Tracks how confident a recording's speech usually is.
+ *
+ * A meeting arrives as independent segments rather than one utterance, so
+ * {@link stripHallucinatedTail} — which compares a suspect *tail* against the
+ * segments before it inside a single transcript — has nothing to work with.
+ * This is the same idea rebuilt for a stream: remember the scores, and judge a
+ * new segment against the median of the ones already accepted.
+ */
+export class SessionConfidence {
+  readonly #scores: number[] = []
+
+  /** Record an accepted segment's confidence. Nulls are simply not evidence. */
+  note(score: number | null | undefined): void {
+    if (typeof score === 'number' && Number.isFinite(score)) this.#scores.push(score)
+  }
+
+  /** The recording's typical confidence, or null while it is still unknown. */
+  baseline(): number | null {
+    return this.#scores.length >= SESSION_BASELINE_MIN ? median(this.#scores) : null
+  }
+
+  /**
+   * Is this whole segment a word the model invented?
+   *
+   * Both conditions are required, and neither is sufficient:
+   *
+   *  1. **The segment is nothing but a known filler.** A segment that also
+   *     contains real words is a real segment, whatever its confidence.
+   *  2. **It is markedly less confident than this recording's own speech.** A
+   *     clearly spoken "thank you" at the end of a call scores like the rest of
+   *     the call and is kept — which is the case a word list alone gets wrong,
+   *     and the reason `stripHallucinatedTail` refuses to drop a whole
+   *     utterance without this evidence.
+   */
+  isInvention(text: string, score: number | null | undefined): boolean {
+    if (!HALLUCINATED_TAILS.has(bareWords(text))) return false
+
+    const baseline = this.baseline()
+    if (baseline === null) return false
+    if (typeof score !== 'number' || !Number.isFinite(score)) return false
+
+    return score < baseline - SESSION_CONFIDENCE_MARGIN
+  }
+}
