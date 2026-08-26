@@ -82,6 +82,18 @@ export class WindowManager {
     return window !== null && !window.isDestroyed() && window.isVisible() && !window.isMinimized()
   }
 
+  /**
+   * Does a Hub window exist at all — even minimised, even hidden?
+   *
+   * Distinct from {@link hubIsOpen}, which asks whether one is *on screen*.
+   * The difference decides whether an `activate` is worth acting on: a
+   * packaged build is `LSUIElement`, so its Dock icon exists only while a Hub
+   * or Scratchpad window does. No window, no icon; no icon, no Dock click.
+   */
+  hubExists(): boolean {
+    return this.#hub !== null && !this.#hub.isDestroyed()
+  }
+
   /** Focus the Hub, creating it if the user closed it earlier. */
   showHub(): void {
     const window = this.hub()

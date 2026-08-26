@@ -859,6 +859,29 @@ async function bootstrap(): Promise<void> {
      * show me your window".
      */
     if (windows.hubIsOpen()) return
+
+    /*
+     * And never *create* one from an activation on macOS.
+     *
+     * The guard above stopped an activation stealing focus from a Hub that was
+     * already on screen. It could not help when the Hub was closed, which for
+     * a menu-bar app is most of the time — and that case is worse, because
+     * `showHub()` then builds the window, and building it calls
+     * `app.dock.show()`. That transforms the process from accessory to
+     * regular, and a transform *activates the application*: macOS follows the
+     * newly-active app to the Space its window is on, so a user who had just
+     * swiped to another desktop is dragged back to the one Murmur was on, with
+     * Murmur in front. No keystroke involved, nothing the user asked for.
+     *
+     * Refusing costs nothing, and that is the point: packaged builds are
+     * `LSUIElement`, and the Dock icon exists only while a Hub or Scratchpad
+     * window does. With no window there is no icon, so an activation here
+     * cannot be a Dock click — the one gesture this handler exists to serve.
+     * Re-launching the app is handled by `second-instance`, and the tray and
+     * the hotkey are unaffected.
+     */
+    if (process.platform === 'darwin' && !windows.hubExists()) return
+
     windows.showHub()
   })
 
