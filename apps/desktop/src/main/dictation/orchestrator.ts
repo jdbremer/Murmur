@@ -7,6 +7,7 @@ import {
   type DictationRecord,
   type DictionaryEntry,
   type InsightsFixes,
+  type EngineStatus,
   type PolishingLevel,
   type Snippet,
   type StyleProfile,
@@ -169,6 +170,31 @@ export interface OrchestratorEvents {
 
 type Phase = 'idle' | 'listening' | 'transcribing' | 'polishing' | 'inserting'
 
+/**
+ * Whether an utterance can be sent to the polish engine at all.
+ *
+ * `ready` is not the only state that can polish, and assuming it was is what
+ * made polishing look intermittent. The bundled server unloads itself after
+ * ten minutes of silence and reports `idle` while remembering the model it
+ * means to bring back — its own status detail says "will reload on the next
+ * dictation", and `polish()` does exactly that, respawning before it sends.
+ *
+ * Requiring `ready` meant that reload was never asked for. Worse, it never
+ * recovered: nothing on the dictation path moves the engine out of `idle`, so
+ * one quiet ten minutes silently switched polishing off for every utterance
+ * afterwards, until something unrelated — an Ask question, a settings change,
+ * a restart — happened to wake the sidecar. Measured on a real archive, 84% of
+ * eligible utterances were going in unpolished with the model showing "Loaded".
+ *
+ * `idle` with no model is genuinely nothing to wake, and `loading` is a cold
+ * start that will be ready shortly; neither is worth making a speaker wait.
+ */
+export function canPolish(status: EngineStatus | undefined): boolean {
+  if (!status) return false
+  if (status.state === 'ready') return true
+  return status.state === 'idle' && status.modelId !== null
+}
+
 export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
   readonly #deps: OrchestratorDeps
   readonly #log: Logger
@@ -266,7 +292,11 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     const handsFree = options.handsFree ?? false
     const polishReady = (() => {
       const engine = this.#deps.polish()
-      return engine !== null && engine.status().state === 'ready'
+      // `canPolish`, not `state === 'ready'`: an engine that unloaded itself
+      // after ten idle minutes can still take an edit, and treating it as
+      // absent quietly turned "select, then talk over it" back into plain
+      // dictation for the rest of the session.
+      return engine !== null && canPolish(engine.status())
     })()
     const selection = handsFree || !polishReady ? null : (this.#deps.selection?.() ?? null)
 
@@ -534,7 +564,16 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     if (polishEngine && !shouldSkipPolish(rawText, level) && level !== 'off') {
       const status = polishEngine.status()
-      if (status.state === 'ready') {
+      if (!canPolish(status)) {
+        // Silence here is what let a permanent skip pass for a preference:
+        // the model reads "Loaded" in the Hub, the text arrives unpolished,
+        // and nothing anywhere says the two disagree.
+        this.#log.warn(
+          `polish skipped: engine is ${status.state}` +
+            `${status.modelId ? '' : ' with no model'}` +
+            `${status.detail ? ` (${status.detail})` : ''}`,
+        )
+      } else {
         this.#phase = 'polishing'
         this.#deps.machine.startProcessing('polishing')
         polishModelId = context.settings.polishModelId ?? status.modelId
@@ -703,7 +742,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     const polishEngine = this.#deps.polish()
     const status = polishEngine?.status()
-    if (!polishEngine || status?.state !== 'ready') {
+    if (!polishEngine || !canPolish(status)) {
       this.#fail(
         'polish-failed',
         'Editing a selection needs a polishing model — pick one in the Hub.',
@@ -713,7 +752,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     this.#phase = 'polishing'
     this.#deps.machine.startProcessing('polishing', true)
-    const polishModelId = context.settings.polishModelId ?? status.modelId
+    const polishModelId = context.settings.polishModelId ?? status?.modelId ?? null
 
     let edited: string
     let polishMs: number

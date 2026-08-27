@@ -650,6 +650,44 @@ describe('polish skipping (PLAN §3.2.4)', () => {
     expectSettledIdle()
   })
 
+  it('still polishes when the engine unloaded itself but remembers the model', async () => {
+    // The bundled server frees its RAM after ten idle minutes and reports
+    // `idle` while holding on to the model it means to bring back — its own
+    // status detail says it will reload on the next dictation, and `polish()`
+    // respawns before it sends. Skipping here asked for no reload and left
+    // nothing to move the engine out of `idle`, so one quiet ten minutes
+    // silently switched polishing off for every utterance that followed.
+    Object.assign(harness.polish.status_, {
+      state: 'idle',
+      modelId: 'fake-polish',
+      detail: 'Unloaded after idle; will reload on the next dictation.',
+    })
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(harness.persisted).toHaveLength(1))
+
+    expect(harness.polish.requests).toHaveLength(1)
+    expect(harness.insertedText).toEqual(['Hello world, this is a test.'])
+    expectSettledIdle()
+  })
+
+  it('skips polishing when idle with nothing to bring back', async () => {
+    // The other `idle`: never loaded at all. There is no model to wake, so
+    // waiting on a respawn that cannot happen would only delay the insert.
+    Object.assign(harness.polish.status_, { state: 'idle', modelId: null })
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(harness.persisted).toHaveLength(1))
+
+    expect(harness.polish.requests).toHaveLength(0)
+    expect(harness.insertedText).toEqual(['hello world this is a test'])
+    expectSettledIdle()
+  })
+
   it('skips polishing when no polish engine exists at all', async () => {
     harness.deps.polish = () => null
 
@@ -731,6 +769,28 @@ describe('command mode (PLAN §18.1)', () => {
     // Plain dictation with polish unavailable inserts the raw transcript.
     expect(harness.insertedText).toEqual(['hello world this is a test'])
     expect(harness.persisted[0]?.polishedText).toBeNull()
+    expectSettledIdle()
+  })
+
+  it('edits a selection after the engine unloaded itself', async () => {
+    // Command mode gated on `ready` too, so ten quiet minutes turned "edit
+    // this selection" into "pick a polishing model in the Hub" — advice that
+    // is wrong when one is picked and merely asleep.
+    harness.deps.selection = () => 'precious selected words'
+    Object.assign(harness.polish.status_, {
+      state: 'idle',
+      modelId: 'fake-polish',
+      detail: 'Unloaded after idle; will reload on the next dictation.',
+    })
+    harness.polish.result = { text: 'Precious edited words.', durationMs: 8 }
+
+    orchestrator.begin()
+    feed(orchestrator, utterance())
+    orchestrator.end()
+    await vi.waitFor(() => expect(orchestrator.phase).toBe('idle'))
+
+    expect(harness.polish.requests).toHaveLength(1)
+    expect(harness.insertedText).toEqual(['Precious edited words.'])
     expectSettledIdle()
   })
 
