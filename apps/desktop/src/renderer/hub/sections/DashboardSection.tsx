@@ -417,6 +417,9 @@ function ActiveModels({
 const ENGINE_DOT: Record<string, string> = {
   ready: 'bg-positive',
   loading: 'bg-warning',
+  // Asleep is a working state, so it is not greyed out with the ones that
+  // need the user to do something.
+  sleeping: 'bg-positive/50',
   idle: 'bg-ink-faint',
   unavailable: 'bg-danger',
   error: 'bg-danger',
@@ -459,7 +462,12 @@ function ModelSlot({
     .filter((installed) => installed.kind === kind)
     .map((installed) => ({ value: installed.modelId, label: nameOf(installed.modelId) }))
 
-  const state = engine?.state ?? 'idle'
+  // `idle` means two unrelated things, and showing both as "Idle" is what made
+  // a model that had merely gone to sleep look broken: the bundled server
+  // frees its RAM after ten quiet minutes and wakes on the next dictation, so
+  // idle-with-a-model is a resting state, not a missing one.
+  const raw = engine?.state ?? 'idle'
+  const state = raw === 'idle' && engine?.modelId ? 'sleeping' : raw
 
   const swap = async (nextId: string): Promise<void> => {
     setBusy(true)
@@ -514,6 +522,7 @@ function ModelSlot({
 const ENGINE_STATE_LABEL: Record<string, string> = {
   ready: 'Loaded',
   loading: 'Loading',
+  sleeping: 'Sleeping',
   idle: 'Idle',
   unavailable: 'Unavailable',
   error: 'Error',
