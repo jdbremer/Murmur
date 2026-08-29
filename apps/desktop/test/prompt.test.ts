@@ -60,6 +60,7 @@ describe('buildPolishPrompt — golden files', () => {
   it('clean level, work tone, with a dictionary', () => {
     const built = buildPolishPrompt({
       level: 'clean',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({ category: 'work' }),
       dictionary,
       language: 'en',
@@ -75,6 +76,7 @@ describe('buildPolishPrompt — golden files', () => {
   it('rewrite level, formal email tone, no dictionary, auto language', () => {
     const built = buildPolishPrompt({
       level: 'rewrite',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({
         category: 'email',
         formality: 'formal',
@@ -90,6 +92,7 @@ describe('buildPolishPrompt — golden files', () => {
   it('clean level, casual personal tone with custom instructions', () => {
     const built = buildPolishPrompt({
       level: 'clean',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({
         category: 'personal',
         formality: 'casual',
@@ -108,6 +111,7 @@ describe('buildPolishPrompt — structure', () => {
   it('always states the hard rules first (PLAN §7.4)', () => {
     const built = buildPolishPrompt({
       level: 'clean',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({ category: 'other' }),
       dictionary: [],
       language: 'en',
@@ -122,12 +126,14 @@ describe('buildPolishPrompt — structure', () => {
   it('ships few-shot examples per level, as real chat turns', () => {
     const clean = buildPolishPrompt({
       level: 'clean',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({ category: 'other' }),
       dictionary: [],
       language: 'en',
     })
     const rewrite = buildPolishPrompt({
       level: 'rewrite',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({ category: 'other' }),
       dictionary: [],
       language: 'en',
@@ -147,6 +153,7 @@ describe('buildPolishPrompt — structure', () => {
   it('omits the dictionary section entirely when there are no enabled terms', () => {
     const built = buildPolishPrompt({
       level: 'clean',
+      transcript: 'a spoken sentence',
       profile: StyleProfileSchema.parse({ category: 'other' }),
       dictionary: [{ id: '1', term: 'x', replacement: null, enabled: false }],
       language: 'en',
@@ -278,7 +285,52 @@ describe('checkPolishOutput — the hallucination guard (PLAN §7.4)', () => {
   })
 })
 
+describe('transcript tagging', () => {
+  const build = (transcript: string) =>
+    buildPolishPrompt({
+      level: 'rewrite',
+      transcript,
+      profile: StyleProfileSchema.parse({ category: 'work' }),
+      dictionary: [],
+      language: 'en',
+    })
+
+  it('wraps the live transcript exactly as it wraps the examples', () => {
+    // The whole mechanism. Wrapping one and not the other shows the model two
+    // shapes for the same slot, and in testing it copied the wrong one back —
+    // returning the tag along with the text, ready to be pasted.
+    const built = build('so i am ranting a little bit')
+    expect(built.userText).toBe('<transcript>\nso i am ranting a little bit\n</transcript>')
+    for (const example of built.examples) {
+      expect(example.user.startsWith('<transcript>\n')).toBe(true)
+      expect(example.user.endsWith('\n</transcript>')).toBe(true)
+    }
+  })
+
+  it('shows no tags on the answer side of an example', () => {
+    // Tags come in, they do not go out — taught by the asymmetry rather than
+    // by the rule alone, because the rule alone did not hold.
+    for (const example of build('x').examples) {
+      expect(example.assistant).not.toMatch(/<\/?transcript>/)
+    }
+  })
+
+  it('tells the model what the tags are', () => {
+    expect(build('x').systemPrompt).toContain('<transcript>')
+  })
+})
+
 describe('unwrapModelOutput', () => {
+  it('removes a transcript tag the model copied back', () => {
+    // Measured over 34 real utterances, Granite 4.2 returned a tag on one of
+    // them in every repetition. The guard cannot catch it — the text is prose
+    // of a plausible length — so it would land in the user's document.
+    expect(unwrapModelOutput('I want you to add some deletes as well.\n</transcript>')).toBe(
+      'I want you to add some deletes as well.',
+    )
+    expect(unwrapModelOutput('<transcript>\nHello there.\n</transcript>')).toBe('Hello there.')
+  })
+
   it('leaves clean output alone', () => {
     expect(unwrapModelOutput('We should ship it on Wednesday.')).toBe(
       'We should ship it on Wednesday.',

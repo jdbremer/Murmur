@@ -581,6 +581,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
         try {
           const prompt = buildPolishPrompt({
             level,
+            transcript: rawText,
             profile: this.#deps.styleFor(context.category),
             dictionary: this.#deps.dictionary(),
             extraSpellings: context.code.terms,
@@ -592,7 +593,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
             polishEngine.polish({
               systemPrompt: prompt.systemPrompt,
               examples: prompt.examples,
-              userText: rawText,
+              userText: prompt.userText,
               maxTokens: maxOutputTokens(rawText),
               signal,
             }),
@@ -899,6 +900,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
 
     const prompt = buildPolishPrompt({
       level,
+      transcript: rawText,
       profile: this.#deps.styleFor(category),
       dictionary: this.#deps.dictionary(),
       extraSpellings: [],
@@ -911,7 +913,7 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
       engine.polish({
         systemPrompt: prompt.systemPrompt,
         examples: prompt.examples,
-        userText: rawText,
+        userText: prompt.userText,
         maxTokens: maxOutputTokens(rawText),
       }),
     )

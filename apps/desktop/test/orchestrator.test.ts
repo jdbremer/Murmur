@@ -184,8 +184,11 @@ describe('happy path', () => {
     await vi.waitFor(() => expect(harness.persisted).toHaveLength(1))
 
     expect(harness.persisted[0]!.rawText).toBe('ship Murmur on wednesday please')
-    // The polish prompt saw the corrected spelling.
-    expect(harness.polish.requests[0]!.userText).toBe('ship Murmur on wednesday please')
+    // The polish prompt saw the corrected spelling. Asserted on content rather
+    // than equality: the transcript reaches the model wrapped in <transcript>
+    // tags, and this test is about the dictionary, not the framing.
+    expect(harness.polish.requests[0]!.userText).toContain('ship Murmur on wednesday please')
+    expect(harness.polish.requests[0]!.userText).not.toContain('murmer')
   })
 
   it('reports what it fixed, so Insights counts measurements rather than guesses', async () => {
