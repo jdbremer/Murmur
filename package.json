@@ -1,6 +1,6 @@
 {
   "name": "murmur",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "private": true,
   "license": "MIT",
   "description": "Local-first dictation for macOS — hold a key, speak, release, polished text appears.",
