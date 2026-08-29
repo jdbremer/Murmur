@@ -704,6 +704,38 @@ describe('polish skipping (PLAN §3.2.4)', () => {
   })
 })
 
+describe('repolish (PLAN §2.2.1)', () => {
+  it('rescues a raw dictation after the engine has gone to sleep', async () => {
+    // Repolish exists to fix a dictation that went in raw, and an engine
+    // asleep after ten idle minutes is one of the ways they go in raw — so
+    // this gate refused precisely when it was needed, reporting the engine as
+    // not running while the Hub showed the model loaded.
+    Object.assign(harness.polish.status_, {
+      state: 'idle',
+      modelId: 'fake-polish',
+      detail: 'Unloaded after idle; will reload on the next dictation.',
+    })
+    harness.polish.result = { text: 'Ship it on Wednesday.', durationMs: 8 }
+
+    await expect(orchestrator.repolish('ship it on wednesday', 'work')).resolves.toBe(
+      'Ship it on Wednesday.',
+    )
+    expect(harness.polish.requests).toHaveLength(1)
+  })
+
+  it('still refuses when there is no model to wake', async () => {
+    Object.assign(harness.polish.status_, {
+      state: 'idle',
+      modelId: null,
+      detail: 'No polishing model is selected.',
+    })
+    await expect(orchestrator.repolish('ship it on wednesday', 'work')).rejects.toThrow(
+      /no polishing model/i,
+    )
+    expect(harness.polish.requests).toHaveLength(0)
+  })
+})
+
 describe('buffering', () => {
   it('caps a runaway utterance and transcribes what it has', async () => {
     orchestrator.begin()

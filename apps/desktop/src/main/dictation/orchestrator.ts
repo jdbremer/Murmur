@@ -890,8 +890,13 @@ export class DictationOrchestrator extends EventEmitter<OrchestratorEvents> {
     const engine = this.#deps.polish()
     if (!engine) throw new Error('No polishing model is selected.')
 
+    // `canPolish`, not `state === 'ready'` — and this gate mattered more than
+    // the others. Repolish exists to rescue a dictation that went in raw, and
+    // an engine asleep after ten idle minutes is one of the ways they go in
+    // raw, so the recovery path refused exactly when it was needed, saying the
+    // engine was not running while the Hub said the model was loaded.
     const status = engine.status()
-    if (status.state !== 'ready') {
+    if (!canPolish(status)) {
       throw new Error(status.detail || 'The polishing engine is not running.')
     }
 
