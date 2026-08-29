@@ -1,0 +1,38 @@
+[
+  { "text": "um so basically we should uh ship it on on tuesday no wednesday" },
+  { "text": "can you give me the command i need to run to point the tool at that endpoint" },
+  { "text": "i want you to add some thick walls of text" },
+  {
+    "text": "in the design review document right after the index header it lists all of the requirements can that all be in a collapsible section"
+  },
+  { "text": "it needs to be marked on" },
+  {
+    "text": "so i am ranting a little bit but it blows my mind that there is not better reviewability of markdown considering we are in the day of ai"
+  },
+  { "text": "how would somebody actually pull down the pr" },
+  { "text": "if i wanted to give these steps to somebody else how would they handle it" },
+  { "text": "something a bit weird i noticed that the" },
+  {
+    "text": "are you absolutely sure that everything is taken care of if we are going to mark them resolved"
+  },
+  {
+    "text": "i have already done it elsewhere in the source control and it works fine so i do not know what is going on"
+  },
+  {
+    "text": "can i do that with this plugin also i noticed with this plugin i can not select a different patch set"
+  },
+  { "text": "do a full analysis tell me what you think we should do here" },
+  { "text": "create a random file make it like 500 lines merge it to main then open a pr" },
+  { "text": "even if the diff is small just because the file is large it does not render" },
+  { "text": "this needs to be absolutely perfect so do what you have to do" },
+  {
+    "text": "yeah you are going to have to do that also i have the latest update but i do not see the new models on it"
+  },
+  { "text": "does that kind of jive with what you were thinking" },
+  {
+    "text": "i also think that i do not know how we are going to separate this out but we have different teams with different registries"
+  },
+  {
+    "text": "so i think that script would be nice yeah because then when you run it it will put all that stuff where it needs to go"
+  }
+]

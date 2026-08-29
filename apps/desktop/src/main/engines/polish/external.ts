@@ -10,7 +10,7 @@ import {
   type PolishResult,
 } from '../types'
 import { ChatClient, classifyEndpoint, endpointWarnings } from './client'
-import { unwrapModelOutput } from './prompt'
+import { unwrapModelOutput, unwrapTranscript } from './prompt'
 
 /**
  * Polishing against a user-supplied OpenAI-compatible endpoint (PLAN §7.1).
@@ -89,7 +89,7 @@ export class ExternalPolishEngine implements PolishEngine {
       fetchImpl: (url, init) => globalThis.fetch(url, init),
     })
     const completion = await client.complete(request)
-    const text = unwrapModelOutput(completion.text)
+    const text = unwrapModelOutput(completion.text, unwrapTranscript(request.userText))
     return { text, durationMs: Date.now() - started, truncated: completion.truncated }
   }
 

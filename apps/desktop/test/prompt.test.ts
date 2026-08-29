@@ -320,6 +320,61 @@ describe('transcript tagging', () => {
   })
 })
 
+describe('second thoughts', () => {
+  it('keeps the edit and drops the argument with the prompt', () => {
+    const out = unwrapModelOutput(
+      'It needs to be marked on.\n\nWait, the instruction says: "Treat \'actually\'..." ' +
+        'In this transcript there is no "actually". So we just output the cleaned sentence.',
+    )
+    expect(out).toBe('It needs to be marked on.')
+  })
+
+  it('cuts at a horizontal rule, which an edit has no use for', () => {
+    expect(
+      unwrapModelOutput('Does that match what you meant?\n\n---\n\nI will keep it short.'),
+    ).toBe('Does that match what you meant?')
+  })
+
+  it('cuts at a reply opener, reusing what the guard already condemns', () => {
+    expect(unwrapModelOutput('Can you send the invoice?\n\nCertainly, I can help with that.')).toBe(
+      'Can you send the invoice?',
+    )
+  })
+
+  it('leaves a dictated list alone', () => {
+    // A paragraph break is legitimate for enumeration and for an explicit "new
+    // paragraph", so the cut needs more than a blank line to fire on.
+    const list = 'There are three things we need:\n\n- the migration\n- the docs\n- testing'
+    expect(unwrapModelOutput(list)).toBe(list)
+  })
+})
+
+describe('leading commentary', () => {
+  const raw = 'something a bit weird i noticed that the'
+
+  it('drops narration when doing so makes the output more grounded', () => {
+    const out = unwrapModelOutput(
+      `The transcript ends mid-sentence. I'll preserve the fragment as given.\n\n${raw}`,
+      raw,
+    )
+    expect(out).toBe(raw)
+  })
+
+  it("keeps a real first paragraph, because dropping it loses the speaker's words", () => {
+    // The guard against over-eagerness: a genuine two-part dictation is made of
+    // the transcript's own words throughout, so cutting the first part lowers
+    // the grounding rather than raising it.
+    const spoken = 'the config is fine new paragraph we shipped on wednesday and everything held'
+    const text = 'The config is fine.\n\nWe shipped on Wednesday and everything held.'
+    expect(unwrapModelOutput(text, spoken)).toBe(text)
+  })
+
+  it('does nothing without a transcript to compare against', () => {
+    const text = `Some narration here.\n\n${raw}`
+    expect(unwrapModelOutput(text)).toBe(text)
+  })
+})
+
 describe('unwrapModelOutput', () => {
   it('removes a transcript tag the model copied back', () => {
     // Measured over 34 real utterances, Granite 4.2 returned a tag on one of

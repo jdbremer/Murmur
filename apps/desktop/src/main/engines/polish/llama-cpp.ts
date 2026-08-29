@@ -22,7 +22,7 @@ import {
   type PolishResult,
 } from '../types'
 import { ChatClient, endpointWarnings } from './client'
-import { unwrapModelOutput } from './prompt'
+import { unwrapModelOutput, unwrapTranscript } from './prompt'
 
 /**
  * The bundled `llama.cpp` server, used for local polishing (PLAN §7.1).
@@ -126,7 +126,7 @@ export class LlamaCppPolishEngine implements PolishEngine {
       fetchImpl: (url, init) => loopbackFetch(url, init),
     })
     const completion = await client.complete(request)
-    const text = unwrapModelOutput(completion.text)
+    const text = unwrapModelOutput(completion.text, unwrapTranscript(request.userText))
     this.#armIdleTimer()
     return { text, durationMs: Date.now() - started, truncated: completion.truncated }
   }

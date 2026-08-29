@@ -281,6 +281,11 @@ export function wrapTranscript(text: string): string {
   return `<transcript>\n${text}\n</transcript>`
 }
 
+/** Recover the spoken words from {@link wrapTranscript}. */
+export function unwrapTranscript(wrapped: string): string {
+  return wrapped.replace(/^<transcript>\n?/i, '').replace(/\n?<\/transcript>$/i, '')
+}
+
 export function buildPolishPrompt(inputs: PromptInputs): BuiltPrompt {
   const sections: string[] = []
 
@@ -716,7 +721,103 @@ export function stripThinking(text: string): string {
   return out
 }
 
-export function unwrapModelOutput(text: string): string {
+/**
+ * Cut a reasoning model's second thoughts off the end of its answer.
+ *
+ * A model whose thinking is switched off still thinks; it just loses the
+ * <think> tags it would otherwise think inside, so the deliberation lands in
+ * the answer where `stripThinking` cannot see it. Granite 4.2 does this on
+ * roughly a quarter of utterances, and always in the same shape: a clean edit,
+ * a blank line, then the model arguing with the system prompt.
+ *
+ *     It needs to be marked on.
+ *
+ *     Wait, the instruction says: "Treat 'actually', 'scratch that' and 'no
+ *     wait' as corrections of what came before..." In this transcript, there
+ *     is no "actually"...
+ *
+ * The edit before the break is correct and the guard would have taken it. What
+ * loses it is everything after, which drags the length past the cap or the
+ * overlap with the transcript below the floor.
+ *
+ * Two things make cutting here safe rather than a guess. The tell is that the
+ * model is quoting *our own rules* back — text that has no business in an
+ * edited transcript at any time. And the cut is only ever made at a paragraph
+ * break, which a polish output is told not to contain: the exceptions are
+ * lists and an explicit "new paragraph", neither of which continues into
+ * "Wait, the instruction says". The guard still judges whatever survives, so a
+ * cut in the wrong place fails closed to the raw transcript exactly as before.
+ */
+const SECOND_THOUGHTS =
+  /^(?:(?:but|so|and)\s+)?(?:wait\b|the instructions?\s+say|i\s+need\s+to\s+follow\b|i'?m\s+not\s+sure\s+what\s+you\s+mean\b|i'?ll\s+keep\s+the\s+response\b)/i
+
+/**
+ * Whether a paragraph is the model talking rather than the edit.
+ *
+ * Three tells, none of them invented for the occasion. The model quoting the
+ * prompt back at itself; a horizontal rule, which a single-paragraph edit has
+ * no use for and which 4.2 draws before changing register; and
+ * {@link ANSWER_OPENERS}, the phrases the guard already recognises as the
+ * start of a reply. Reusing that list rather than writing a second one keeps
+ * both halves agreeing on what a reply looks like — a paragraph the guard
+ * would condemn the whole output for is exactly the paragraph to cut.
+ */
+function isSecondThought(paragraph: string): boolean {
+  const trimmed = paragraph.trim()
+  if (/^-{3,}$/.test(trimmed)) return true
+  if (SECOND_THOUGHTS.test(trimmed)) return true
+  return ANSWER_OPENERS.some((pattern) => pattern.test(trimmed))
+}
+
+export function stripSecondThoughts(text: string): string {
+  const parts = text.split(/\n\s*\n/)
+  if (parts.length < 2) return text
+  for (let index = 1; index < parts.length; index += 1) {
+    if (isSecondThought(parts[index] ?? '')) {
+      return parts.slice(0, index).join('\n\n').trim()
+    }
+  }
+  return text
+}
+
+/**
+ * Drop a paragraph of throat-clearing before the answer.
+ *
+ * The mirror image of {@link stripSecondThoughts}: the same model that argues
+ * with the prompt after answering sometimes narrates before it, and the answer
+ * is the paragraph underneath.
+ *
+ *     The transcript ends mid-sentence. I'll preserve the fragment as given,
+ *     without adding or completing it.
+ *
+ *     something a bit weird i noticed that the
+ *
+ * Which paragraph is the answer is decided by measurement, not by recognising
+ * the phrasing. Commentary is *about* the transcript and so is made of other
+ * words; the edit is made of the transcript's own. If dropping the first
+ * paragraph raises the share of output words that were actually spoken, it was
+ * commentary; if it lowers it, real content was about to be thrown away and
+ * the text is left alone. That is the same signal {@link detectAnswer} judges
+ * by, so this cannot hand the guard something the guard would not accept on
+ * its own terms.
+ */
+export function stripLeadingCommentary(text: string, transcript: string): string {
+  const split = /\n\s*\n/.exec(text)
+  if (!split) return text
+  const rest = text.slice(split.index + split[0].length).trim()
+  if (!rest) return text
+
+  const source = new Set(contentWords(transcript))
+  if (source.size === 0) return text
+  const grounded = (candidate: string): number => {
+    const words = contentWords(candidate)
+    if (words.length === 0) return 0
+    return words.filter((word) => source.has(word)).length / words.length
+  }
+  return grounded(rest) > grounded(text) ? rest : text
+}
+
+export function unwrapModelOutput(text: string, transcript?: string): string {
   let out = stripThinking(text.trim())
 
   // The transcript tags, if the model copied them back. Telling it not to gets
@@ -727,6 +828,9 @@ export function unwrapModelOutput(text: string): string {
   // the rule in the prompt is asked to make leaks rare, and this is what makes
   // them harmless.
   out = out.replace(/<\/?transcript>/gi, '').trim()
+
+  out = stripSecondThoughts(out)
+  if (transcript !== undefined) out = stripLeadingCommentary(out, transcript)
 
   const fence = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(out)
   if (fence?.[1] !== undefined) out = fence[1].trim()
