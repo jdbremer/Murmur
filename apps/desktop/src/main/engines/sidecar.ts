@@ -185,6 +185,74 @@ const sleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms)
   })
 
+/**
+ * Sidecars from a previous run that outlived the app.
+ *
+ * A sidecar is spawned `detached` on POSIX so that SIGKILL can be aimed at the
+ * whole process group and reach the workers llama-server forks — see
+ * {@link SidecarProcess.signal}. The cost of that is a process which no longer
+ * dies with its parent, and `before-quit` is not reached on a crash, a Force
+ * Quit, or a logout that SIGKILLs the app. Those runs leave a whisper-server
+ * or llama-server holding a port, a model file, and its memory, reparented to
+ * init and answering to nobody. They never exit on their own: one real machine
+ * had orphans nine days old, from an app bundle that had been replaced twice
+ * since.
+ *
+ * Two conditions, and both are needed. The command must be this exact binary,
+ * so a different Murmur install — a dev build beside the shipped one — is not
+ * touched. And the parent must be init, which is what distinguishes an orphan
+ * from the healthy sidecar of a second running instance: that one's parent is
+ * its own app, so it is never a candidate.
+ */
+export function findOrphanedSidecars(binaryPath: string, psOutput: string): number[] {
+  const orphans: number[] = []
+  for (const line of psOutput.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line)
+    if (!match) continue
+    const [, pid, parent, command] = match
+    if (parent !== '1' || pid === undefined || command === undefined) continue
+    // Prefix, not equality: the command line carries the sidecar's arguments.
+    if (command !== binaryPath && !command.startsWith(`${binaryPath} `)) continue
+    orphans.push(Number(pid))
+  }
+  return orphans
+}
+
+/** Binaries already swept this run — one `ps` per binary, not per spawn. */
+const reaped = new Set<string>()
+
+function reapOrphans(binaryPath: string, log: Logger): void {
+  // Windows keeps sidecars attached and kills the tree with `taskkill /T`, so
+  // it has no equivalent of this orphan; `ps` is not there to ask, either.
+  if (process.platform === 'win32') return
+  if (reaped.has(binaryPath)) return
+  reaped.add(binaryPath)
+
+  let listing: string
+  try {
+    listing = execFileSync('ps', ['-axo', 'pid=,ppid=,command='], {
+      encoding: 'utf8',
+      maxBuffer: 8 * 1024 * 1024,
+    })
+  } catch (error) {
+    log.debug(`could not list processes to look for orphans: ${String(error)}`)
+    return
+  }
+
+  for (const pid of findOrphanedSidecars(binaryPath, listing)) {
+    log.warn(`killing an orphaned sidecar left by an earlier run (pid ${pid})`)
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        /* already gone */
+      }
+    }
+  }
+}
+
 export class SidecarProcess {
   readonly spec: SidecarSpec
   readonly #log: Logger
@@ -278,6 +346,8 @@ export class SidecarProcess {
     // Run from the binary's directory so Windows loads co-located DLLs
     // (whisper.dll / ggml*.dll) without requiring PATH surgery.
     const cwd = this.spec.cwd ?? dirname(this.spec.binaryPath)
+
+    reapOrphans(this.spec.binaryPath, this.#log)
 
     const child = spawn(this.spec.binaryPath, args, {
       cwd,
